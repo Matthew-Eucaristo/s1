@@ -37,7 +37,10 @@ public enum RunReader {
         m.screenshots = screens
         var first: Date?, last: Date?
         for r in recs {
-            if r.decidedBy.hasPrefix("s2") { m.s2Decisions += 1 } else { m.s1Decisions += 1 }
+            // System records (kill switch, stuck-loop guard) are neither S1
+            // nor S2 decisions — counting them as S1 skews the split.
+            if r.decidedBy.hasPrefix("s1") { m.s1Decisions += 1 }
+            else if r.decidedBy.hasPrefix("s2") { m.s2Decisions += 1 }
             if let e = r.escalation { m.escalations.append((e.to, e.reason)) }
             if let o = r.outcome {
                 if o.hasPrefix("error:") { m.errors += 1 }

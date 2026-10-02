@@ -1,65 +1,63 @@
 import AppKit
-import Combine
 import Foundation
 import S1Core
 import ServiceManagement
 import UniformTypeIdentifiers
 
 /// Observable bridge between the SwiftUI shell and the S1Core agent loop.
+/// `@Observable` (not ObservableObject+Combine) — the current Apple-recommended
+/// state model for macOS 15+ apps.
 @available(macOS 26, *)
 @MainActor
-final class AppModel: ObservableObject {
+@Observable
+final class AppModel {
     enum Brain: String, CaseIterable, Identifiable {
         case ax, vlm
         var id: String { rawValue }
         var title: String { self == .ax ? "AX (instant, no model)" : "VLM (model)" }
     }
 
-    @Published var goal = ""
-    @Published var transcript = ""
-    @Published var brain: Brain = .ax
-    @Published var locale = "id-ID"
-    @Published var useS2 = false
-    @Published var speakReply = true
-    @Published var vlmBase = "http://localhost:11434/v1"
-    @Published var vlmModel = "gemma3:4b"
+    var goal = ""
+    var transcript = ""
+    var brain: Brain = .ax { didSet { rearmServe() } }
+    var locale = "id-ID" { didSet { rearmServe() } }
+    var useS2 = false { didSet { rearmServe() } }
+    var speakReply = true { didSet { rearmServe() } }
+    /// Text fields debounce — rearming the hotkey per keystroke would tear
+    /// the tap down and back up while the user is still typing.
+    var vlmBase = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
+    var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
 
-    @Published private(set) var steps: [StepRecord] = []
-    @Published private(set) var status = "idle"
-    @Published private(set) var running = false
-    @Published private(set) var listening = false
-    @Published private(set) var runDir: String?
-    @Published private(set) var permissions = PermissionReport(accessibility: false,
-                                                               screenRecording: false,
-                                                               microphone: false, notes: [])
+    private(set) var steps: [StepRecord] = []
+    private(set) var status = "idle"
+    private(set) var running = false
+    private(set) var listening = false
+    private(set) var runDir: String?
+    private(set) var permissions = PermissionReport()
 
     // ---- always-on companion (hotkey -> continuous listening -> run -> listen) ----
-    @Published private(set) var serveState: Serve.State = .idle
-    @Published private(set) var serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
-    @Published var launchAtLogin = false
+    private(set) var serveState: Serve.State = .idle
+    private(set) var serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
+    var launchAtLogin = false
 
     private let speaker = Speaker()
     private let killPath = NSTemporaryDirectory() + "s1-app-stop"
     private var stt: SpeechToText { SpeechToText(locale: Locale(identifier: locale)) }
     private var serve: Serve?
-    private var cancellables: Set<AnyCancellable> = []
+    private var rearmTask: Task<Void, Never>?
 
     init() {
+        // ~/.s1/config.json seeds the app too — model choices made in the app
+        // persist, and the CLI picks them up (and vice versa).
+        let cfg = S1Config.load()
+        if let l = cfg.locale { locale = l }
+        if let b = cfg.vlm?.base { vlmBase = b }
+        if let m = cfg.vlm?.model { vlmModel = m }
+        if let s = cfg.speak { speakReply = s }
+
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         startServe()
-        // Changing brain/locale/S2/speak rebuilds the companion config
-        // (disarm → arm) so the hotkey always runs current settings.
-        for pub in [
-            $brain.map { _ in () }.eraseToAnyPublisher(),
-            $locale.map { _ in () }.eraseToAnyPublisher(),
-            $useS2.map { _ in () }.eraseToAnyPublisher(),
-            $speakReply.map { _ in () }.eraseToAnyPublisher(),
-            $vlmModel.map { _ in () }.eraseToAnyPublisher(),
-        ] {
-            pub.dropFirst().sink { [weak self] in self?.rearmServe() }
-                .store(in: &cancellables)
-        }
     }
 
     /// Arm the companion: installs the global hotkey (double-tap Shift and
@@ -79,7 +77,7 @@ final class AppModel: ObservableObject {
                     }
                     return AXPolicy()
                 },
-                s2: s2On ? LLMReasoner(endpoint: .s2Default()) : nil,
+                s2: s2On ? LLMReasoner(endpoint: Endpoints.s2()) : nil,
                 speak: speakOn,
                 transcribe: { [weak self] in
                     guard let self else { return "" }
@@ -95,6 +93,7 @@ final class AppModel: ObservableObject {
                 case .listening: self.serveState = .listening; self.serveStatus = "listening…"
                 case .heard: self.serveStatus = "heard: \(ev.text)"; self.transcript = ev.text
                 case .runStart: self.serveState = .running; self.serveStatus = "running: \(ev.text)"
+                case .step: self.serveStatus = "running · \(ev.text)"
                 case .runDone: self.serveStatus = ev.text
                 case .sleeping: self.serveState = .idle; self.serveStatus = "idle (sleeping)"
                 case .stopped: self.serveState = .idle; self.serveStatus = "stopped"
@@ -107,10 +106,25 @@ final class AppModel: ObservableObject {
         serve = s
     }
 
-    /// Rebuild the serve config when brain/locale/s2/speak settings change.
+    /// Rebuild the serve config when brain/locale/s2/speak settings change —
+    /// and persist them so `s1` CLI commands see the same brains.
     func rearmServe() {
         serve?.disarm()
         startServe()
+        var cfg = S1Config.load()
+        cfg.locale = locale
+        cfg.speak = speakReply
+        cfg.vlm = .init(base: vlmBase, model: vlmModel)
+        try? cfg.save()
+    }
+
+    private func scheduleRearm() {
+        rearmTask?.cancel()
+        rearmTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            self?.rearmServe()
+        }
     }
 
     /// Hotkey-equivalent toggle for menu/UI buttons.
@@ -120,14 +134,21 @@ final class AppModel: ObservableObject {
         do {
             if launchAtLogin {
                 try SMAppService.mainApp.unregister()
-                launchAtLogin = false
             } else {
                 try SMAppService.mainApp.register()
-                launchAtLogin = true
             }
+            // Read back the truth rather than trusting the flag flip.
+            launchAtLogin = SMAppService.mainApp.status == .enabled
         } catch {
             status = "login item: \(error.localizedDescription)"
         }
+    }
+
+    /// Clean shutdown: disarm the hotkey, stop speech, then terminate.
+    func shutdown() {
+        serve?.disarm()
+        speaker.stop()
+        NSApp.terminate(nil)
     }
 
     func refreshPermissions() {
@@ -164,6 +185,11 @@ final class AppModel: ObservableObject {
     /// Mic → transcript → run. The voice-first path.
     func listenAndRun() async {
         guard !running, !listening else { return }
+        // One mic at a time: the companion can't share the input device.
+        guard serveState != .listening else {
+            status = "companion is listening — press ⇧⇧ / ⌃⌥Space to pause it first"
+            return
+        }
         listening = true
         status = "listening…"
         do {
@@ -195,9 +221,9 @@ final class AppModel: ObservableObject {
         status = "running"
 
         let pol: any Policy = brain == .vlm
-            ? VLMPolicy(endpoint: Endpoint(baseURL: vlmBase, model: vlmModel))
+            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
             : AXPolicy()
-        let reasoner: (any Reasoner)? = useS2 ? LLMReasoner(endpoint: .s2Default()) : nil
+        let reasoner: (any Reasoner)? = useS2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
 
         do {
             let (report, _) = try await S1Runner.run(
@@ -222,6 +248,7 @@ final class AppModel: ObservableObject {
 
     func stop() {
         try? "stop".write(toFile: killPath, atomically: true, encoding: .utf8)
+        speaker.stop()
         status = "stopping…"
     }
 

@@ -164,7 +164,7 @@ private func jsonlDecoder() -> JSONDecoder {
 
 @Test func axPolicyConsumesIntentsByHistory() async throws {
     let pol = AXPolicy()
-    let obs = Observation(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
+    let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
                           windows: [], axTree: nil, screenshotPath: nil)
     let d1 = try await pol.decide(observation: obs, goal: "open Safari, done", history: [])
     if case .openApp(let name)? = d1.action { #expect(name == "Safari") } else { Issue.record("expected openApp") }
@@ -181,7 +181,7 @@ private func jsonlDecoder() -> JSONDecoder {
                       frame: CGRectCodable(CGRect(x: 10, y: 20, width: 40, height: 20)), children: [])
     let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", value: nil,
                       frame: nil, children: [node])
-    let obs = Observation(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
                           windows: [], axTree: tree, screenshotPath: nil)
     let d = try await pol.decide(observation: obs, goal: "click Save", history: [])
     if case .axPress(let ref)? = d.action { #expect(ref == "e5") } else { Issue.record("expected axPress e5") }
@@ -224,7 +224,7 @@ private func jsonlDecoder() -> JSONDecoder {
 
 private struct StubReasoner: Reasoner {
     let name = "stub"
-    func decide(observation: Observation, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+    func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
         Decision(action: .done(summary: "s2 decided"), confidence: 0.9, rationale: "stub: \(reason)")
     }
 }
@@ -264,7 +264,7 @@ private struct StubReasoner: Reasoner {
     // A policy that keeps deciding the same action must not spin forever.
     struct LoopingPolicy: Policy {
         let name = "looping"
-        func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+        func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
             Decision(action: .wait(seconds: 0), confidence: 0.9, rationale: "repeat")
         }
     }
@@ -307,6 +307,69 @@ private struct StubReasoner: Reasoner {
     var other = ModifierTapTracker(keyCodes: [56, 60], within: 0.35)
     fired = other.feed(keyCode: 55, isDown: true, at: 0.0)   // cmd isn't a target
     #expect(!fired)
+}
+
+@Test func modifierTapResetKillsPendingTap() {
+    // Typing between the two shift taps means it wasn't a hotkey — capital
+    // letters produced on a fast typer must not trigger listening.
+    var t = ModifierTapTracker(keyCodes: [56, 60], within: 0.45)
+    _ = t.feed(keyCode: 56, isDown: true, at: 0.0)
+    _ = t.feed(keyCode: 56, isDown: false, at: 0.05)         // first tap done
+    t.reset()                                              // a letter keyDown arrived
+    let fired = t.feed(keyCode: 56, isDown: true, at: 0.2)   // next shift tap
+    #expect(!fired)                                        // treated as a NEW first tap
+}
+
+@Test func intentsStripPolitenessAndWakeWords() {
+    // Voice transcripts love "tolong"/"s1"/"please" up front — those words
+    // must not become the verb, or every spoken command escalates.
+    let i1 = AXPolicy.intents(of: "tolong buka TextEdit lalu ketik halo")
+    #expect(i1.first?.verb == "buka")
+    let i2 = AXPolicy.intents(of: "s1 buka TextEdit")
+    #expect(i2.first?.verb == "buka")
+    let i3 = AXPolicy.intents(of: "please open TextEdit then type hi")
+    #expect(i3.first?.verb == "open")
+    #expect(i3.count == 2)
+    let i4 = AXPolicy.intents(of: "bisa buka Safari")
+    #expect(i4.first?.verb == "buka")
+}
+
+@Test func unknownWireTypeAbstainsInsteadOfDone() throws {
+    // A model that invents action names ("typewrite") must NOT silently end
+    // the run as done — it abstains and escalates.
+    let d = LLMDecisionCodec.parse("""
+        {"action": {"type": "typewrite", "text": "x"}, "confidence": 0.9}
+        """)
+    #expect(d?.action == nil)
+    let d2 = LLMDecisionCodec.parse("""
+        {"action": {"type": "done", "expect": "finished"}, "confidence": 0.9}
+        """)
+    if case .done = d2?.action {} else { Issue.record("done should parse") }
+}
+
+@Test func metricsSplitS1S2AndIgnoreSystemRecords() throws {
+    // Records like "killSwitch" / "stuckLoop" are system events — counting
+    // them as S1 decisions made the s1:s2 split meaningless.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1-metrics-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let enc = JSONEncoder()
+    enc.dateEncodingStrategy = .iso8601
+    var lines: [String] = []
+    for (i, by) in ["s1:ax", "s2:llm:gemma3:4b", "system", "s1:vlm"].enumerated() {
+        let r = StepRecord(index: i, time: Date(), observation: "obs",
+                           decidedBy: by, confidence: 0.9, rationale: nil,
+                           modelReply: nil, action: nil, gate: "allowed",
+                           outcome: nil, verified: nil, escalation: nil)
+        let data = try enc.encode(r)
+        lines.append(String(decoding: data, as: UTF8.self))
+    }
+    try lines.joined(separator: "\n").write(
+        to: dir.appendingPathComponent("steps.jsonl"), atomically: true, encoding: .utf8)
+    let m = try RunReader.metrics(in: dir)
+    #expect(m.s1Decisions == 2)
+    #expect(m.s2Decisions == 1)
 }
 
 // MARK: - serve

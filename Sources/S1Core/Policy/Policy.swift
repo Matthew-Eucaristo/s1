@@ -24,7 +24,7 @@ public protocol Policy: Sendable {
     /// True → the loop attaches a screenshot to every observation for this
     /// policy (VLM brains). AX-first policies keep this false and stay cheap.
     var wantsScreenshot: Bool { get }
-    func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision
+    func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision
 }
 
 public extension Policy {
@@ -35,7 +35,7 @@ public extension Policy {
 /// providers; the protocol is fixed now so escalation logging already works.
 public protocol Reasoner: Sendable {
     var name: String { get }
-    func decide(observation: Observation, goal: String, history: [StepRecord], reason: String) async throws -> Decision
+    func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision
 }
 
 /// Placeholder policy that always abstains — drives escalation paths in tests.
@@ -43,7 +43,7 @@ public struct DummyPolicy: Policy {
     public let name = "dummy"
     public var confidence: Double
     public init(confidence: Double = 0.0) { self.confidence = confidence }
-    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+    public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         Decision(action: nil, confidence: confidence, rationale: "dummy policy abstains")
     }
 }
@@ -68,7 +68,7 @@ public struct ScriptedPolicy: Policy {
         steps = try JSONDecoder().decode([Step].self, from: planJSON)
     }
 
-    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+    public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let idx = history.count
         guard idx < steps.count else {
             return Decision(action: .done(summary: "plan exhausted"), confidence: 1.0, rationale: "end of script")

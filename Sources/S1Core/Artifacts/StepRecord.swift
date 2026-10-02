@@ -6,7 +6,7 @@ import ImageIO
 public struct StepRecord: Codable, Sendable {
     public var index: Int
     public var time: Date
-    public var observation: String            // Observation.summary
+    public var observation: String            // Snapshot.summary
     public var decidedBy: String              // "s1:<policy>" | "s2:<reasoner>"
     public var confidence: Double?
     public var rationale: String?

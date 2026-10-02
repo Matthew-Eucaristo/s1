@@ -93,7 +93,7 @@ public struct AppState: Codable, Sendable {
     public var windowTitles: [String]  // non-empty, capped
 }
 
-public struct Observation: Codable, Sendable {
+public struct Snapshot: Codable, Sendable {
     public var timestamp: Date
     public var frontmostApp: String?
     public var frontmostPID: Int32?

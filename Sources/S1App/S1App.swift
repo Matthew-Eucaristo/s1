@@ -5,7 +5,7 @@ import S1Core
 @available(macOS 26, *)
 @main
 struct S1App: App {
-    @StateObject private var model = AppModel()
+    @State private var model = AppModel()
 
     var body: some Scene {
         WindowGroup("s1", id: "s1") {
@@ -25,7 +25,7 @@ struct S1App: App {
 
 @available(macOS 26, *)
 private struct MenuBarView: View {
-    @ObservedObject var model: AppModel
+    let model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -59,9 +59,9 @@ private struct MenuBarView: View {
             Divider()
             Button("Open s1") {
                 openWindow(id: "s1")
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()   // macOS 14+ API — ignores-other-apps is deprecated
             }
-            Button("Quit s1") { NSApp.terminate(nil) }
+            Button("Quit s1") { model.shutdown() }
         }
         .padding(12)
         .frame(width: 250)

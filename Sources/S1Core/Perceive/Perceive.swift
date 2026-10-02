@@ -4,18 +4,18 @@ import ScreenCaptureKit
 import ApplicationServices
 
 public protocol Perceiver: Sendable {
-    func observe(wantScreenshot: Bool) async throws -> Observation
+    func observe(wantScreenshot: Bool) async throws -> Snapshot
 }
 
 /// Canned perception for tests — never touches the OS.
 public struct NullPerceiver: Perceiver {
-    public var observation: Observation
-    public init(observation: Observation? = nil) {
-        self.observation = observation ?? Observation(
+    public var observation: Snapshot
+    public init(observation: Snapshot? = nil) {
+        self.observation = observation ?? Snapshot(
             timestamp: Date(), frontmostApp: "TestApp", frontmostPID: 1,
             windows: [], axTree: nil, screenshotPath: nil)
     }
-    public func observe(wantScreenshot: Bool) async throws -> Observation { observation }
+    public func observe(wantScreenshot: Bool) async throws -> Snapshot { observation }
 }
 
 /// Real macOS perception: window list (CGWindowList), AX tree of the frontmost
@@ -29,8 +29,8 @@ public struct SystemPerceiver: Perceiver {
         self.screenshotSink = screenshotSink
     }
 
-    public func observe(wantScreenshot: Bool) async throws -> Observation {
-        var obs = Observation(
+    public func observe(wantScreenshot: Bool) async throws -> Snapshot {
+        var obs = Snapshot(
             timestamp: Date(),
             frontmostApp: nil, frontmostPID: nil,
             windows: Self.windowList(),
@@ -39,7 +39,10 @@ public struct SystemPerceiver: Perceiver {
         if let app = NSWorkspace.shared.frontmostApplication {
             obs.frontmostApp = app.localizedName
             obs.frontmostPID = app.processIdentifier
-            obs.axTree = AXReader.snapshotTree(pid: app.processIdentifier)
+            if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
+                obs.axTree = tree
+                AXReader.noteTree(tree, pid: app.processIdentifier)
+            }
         }
 
         obs.appStates = Self.appStates(windows: obs.windows, frontmostPID: obs.frontmostPID)
@@ -108,8 +111,12 @@ public struct SystemPerceiver: Perceiver {
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
-        config.width = Int(display.frame.width)
-        config.height = Int(display.frame.height)
+        // Filter rect is in points; the config wants pixels — multiply by the
+        // display's pixel scale (Apple's own sample pattern) or Retina shots
+        // come out half-res.
+        let scale = CGFloat(filter.pointPixelScale)
+        config.width = Int(filter.contentRect.width * scale)
+        config.height = Int(filter.contentRect.height * scale)
         config.showsCursor = true
         return try await SCScreenshotManager.captureImage(
             contentFilter: filter, configuration: config)
@@ -163,15 +170,24 @@ public enum AXReader {
     }
 
     static func frame(of el: AXUIElement) -> CGRectCodable? {
+        guard let r = liveFrame(of: el) else { return nil }
+        return CGRectCodable(r)
+    }
+
+    /// AX position+size of a live element — nil whenever either attribute is
+    /// missing or not an AXValue (some apps vend odd types; never force-cast).
+    static func liveFrame(of el: AXUIElement) -> CGRect? {
         var posV: CFTypeRef?
         var sizeV: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success,
-              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success,
+              let pv = posV, let sv = sizeV,
+              CFGetTypeID(pv) == AXValueGetTypeID(), CFGetTypeID(sv) == AXValueGetTypeID()
         else { return nil }
         var p = CGPoint.zero, s = CGSize.zero
-        AXValueGetValue(posV as! AXValue, .cgPoint, &p)
-        AXValueGetValue(sizeV as! AXValue, .cgSize, &s)
-        return CGRectCodable(CGRect(origin: p, size: s))
+        AXValueGetValue((pv as! AXValue), .cgPoint, &p)
+        AXValueGetValue((sv as! AXValue), .cgSize, &s)
+        return CGRect(origin: p, size: s)
     }
 
     /// Re-resolve a ref inside a fresh snapshot of the same app, then perform
@@ -196,35 +212,66 @@ public enum AXReader {
     /// Screen frame of the live element behind a ref (for click fallbacks).
     public static func frameOf(pid: pid_t, ref: String) -> CGRect? {
         guard let el = element(pid: pid, ref: ref) else { return nil }
-        var posV: CFTypeRef?
-        var sizeV: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success,
-              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success
-        else { return nil }
-        var p = CGPoint.zero, s = CGSize.zero
-        AXValueGetValue(posV as! AXValue, .cgPoint, &p)
-        AXValueGetValue(sizeV as! AXValue, .cgSize, &s)
-        return CGRect(origin: p, size: s)
+        return liveFrame(of: el)
     }
 
-    /// Live element lookup: walk the app's tree to the same walk-order index
-    /// the ref encodes (refs are `e<n>` assigned in walk order).
+    /// The most recently observed data-tree per app — used by `element` to
+    /// detect index drift when the UI changed between decide and act.
+    private static let treeStore = TreeStore()
+    private final class TreeStore: @unchecked Sendable {
+        private let lock = NSLock()
+        private var map: [pid_t: AXNode] = [:]
+        func set(_ t: AXNode, pid: pid_t) { lock.lock(); map[pid] = t; lock.unlock() }
+        func get(_ pid: pid_t) -> AXNode? { lock.lock(); defer { lock.unlock() }; return map[pid] }
+    }
+    static func noteTree(_ tree: AXNode, pid: pid_t) { treeStore.set(tree, pid: pid) }
+
+    /// Live element lookup behind a ref (`e<n>` = walk-order index in the
+    /// snapshot the policy saw). UI mutations between observe and act shift
+    /// indices, so when the fresh node at that index doesn't match the
+    /// recorded identity we search for the node that does.
     static func element(pid: pid_t, ref: String) -> AXUIElement? {
         guard ref.hasPrefix("e"), let target = Int(ref.dropFirst()) else { return nil }
         let app = AXUIElementCreateApplication(pid)
+        // One walk that keeps (element, role, title, frame) per node.
+        var entries: [(el: AXUIElement, role: String, title: String?, frame: CGRect?)] = []
         var counter = 0
-        var found: AXUIElement?
-        findByIndex(app, target: target, counter: &counter, found: &found, depth: 0)
-        return found
+        collect(app, counter: &counter, depth: 0, into: &entries)
+        guard target < entries.count else { return nil }
+
+        let candidate = entries[target]
+        let orig = treeStore.get(pid)?.flattened
+        guard let origNode = orig, target < origNode.count else { return candidate.el }
+        let o = origNode[target]
+        // Same role and same title → the ref still points at the same widget.
+        if o.role == candidate.role, (o.title ?? "") == (candidate.title ?? "") {
+            return candidate.el
+        }
+        // Index drifted — find the recorded node by identity instead.
+        var best: (AXUIElement, Double)?
+        for e in entries {
+            guard e.role == o.role else { continue }
+            if let ot = o.title, !ot.isEmpty {
+                if e.title == ot { return e.el }
+                continue
+            }
+            if let of = o.frame, let ef = e.frame {
+                let d = hypot(ef.midX - (of.x + of.w / 2), ef.midY - (of.y + of.h / 2))
+                if d < 24, d < (best?.1 ?? .infinity) { best = (e.el, d) }
+            }
+        }
+        return best?.0 ?? candidate.el   // worst case: trust the index
     }
 
-    static func findByIndex(_ el: AXUIElement, target: Int, counter: inout Int, found: inout AXUIElement?, depth: Int) {
-        guard found == nil, depth < maxDepth, counter < maxNodes else { return }
-        if counter == target { found = el; return }
+    static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
+                        into entries: inout [(el: AXUIElement, role: String, title: String?, frame: CGRect?)]) {
+        guard depth < maxDepth, counter < maxNodes else { return }
         counter += 1
+        entries.append((el, attr(el, kAXRoleAttribute) ?? "unknown",
+                        attr(el, kAXTitleAttribute), liveFrame(of: el)))
         var kids: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
               let arr = kids as? [AXUIElement] else { return }
-        for k in arr { findByIndex(k, target: target, counter: &counter, found: &found, depth: depth + 1) }
+        for k in arr { collect(k, counter: &counter, depth: depth + 1, into: &entries) }
     }
 }

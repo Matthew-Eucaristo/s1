@@ -22,7 +22,25 @@ public struct AXPolicy: Policy {
     /// Also splits on conjunctions — voice transcriptions rarely use commas:
     /// "buka TextEdit lalu ketik halo" → [buka TextEdit, ketik halo].
     static func intents(of goal: String) -> [Intent] {
-        goal
+        // Drop leading politeness/wake filler that dictation loves to prepend —
+        // "tolong buka …", "please open …", "s1 buka …", "hey s1, open …".
+        // Without this the first word becomes an unknown verb and escalates.
+        var g = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "tolong", "please",
+                       "coba", "bisa", "boleh", "mohon", "can you", "could you",
+                       "ayo", "c'mon", "yuk"]
+        var stripped = true
+        while stripped {
+            stripped = false
+            let low = g.lowercased()
+            for f in fillers where low == f || low.hasPrefix(f + " ") || low.hasPrefix(f + ",") {
+                g = String(g.dropFirst(f.count)).trimmingCharacters(
+                    in: .whitespacesAndNewlines.union(.punctuationCharacters))
+                stripped = true
+                break
+            }
+        }
+        return g
             .replacingOccurrences(of: " lalu ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " then ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " dan ", with: ",", options: .caseInsensitive)
@@ -58,7 +76,7 @@ public struct AXPolicy: Policy {
         "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow",
     ]
 
-    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+    public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let intents = AXPolicy.intents(of: goal)
         guard history.count < intents.count else {
             return Decision(action: .done(summary: "goal completed"), confidence: 0.95,

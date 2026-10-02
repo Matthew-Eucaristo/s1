@@ -210,7 +210,8 @@ enum AppResolver {
 
     /// `mdfind` over the Spotlight index for installed applications.
     /// Returns paths; caller scores them. Fails soft (nil) when mdfind is
-    /// unavailable — resolution simply falls back to the directory scan.
+    /// unavailable or exceeds `timeout` — resolution simply falls back to
+    /// the directory scan.
     static func spotlightApps(timeout: TimeInterval = 3) -> [URL] {
         let p = Process()
         let out = Pipe()
@@ -220,9 +221,14 @@ enum AppResolver {
         p.standardError = FileHandle.nullDevice
         do {
             try p.run()
+            // A wedged Spotlight index can stall mdfind far beyond a step's
+            // patience — enforce the advertised bound.
+            let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
             let data = out.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
-            guard p.terminationStatus == 0 else { return [] }
+            killer.cancel()
+            guard p.terminationStatus == 0, p.terminationReason == .exit else { return [] }
             return String(decoding: data, as: UTF8.self)
                 .split(separator: "\n")
                 .filter { $0.hasSuffix(".app") }

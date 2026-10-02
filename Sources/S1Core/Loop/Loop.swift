@@ -84,7 +84,7 @@ public struct AgentLoop {
         return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)
     }
 
-    private func step(_ i: Int, goal: String, policy: any Policy, obs input: Observation,
+    private func step(_ i: Int, goal: String, policy: any Policy, obs input: Snapshot,
                       history: [StepRecord], logger: RunLogger) async throws -> StepRecord {
         var obs = input
         // A throwing policy counts as abstention — logged like any other
@@ -153,7 +153,7 @@ public struct AgentLoop {
         }
 
         if case .verify(let expectation) = action {
-            verified = await verify(expectation, frontmostPID: obs.frontmostPID)
+            verified = await verify(expectation)
             outcome += verified! ? " | verified" : " | NOT verified"
         }
 
@@ -170,7 +170,7 @@ public struct AgentLoop {
     /// publish their new AX state asynchronously — a verify that runs in the
     /// same tick as the write can race it, so one short settle + re-observe
     /// keeps the check honest without hiding real failures.
-    private func verify(_ expectation: String, frontmostPID: pid_t?) async -> Bool {
+    private func verify(_ expectation: String) async -> Bool {
         // Cold apps (freshly opened document) can take >1s to publish their
         // new AX state — poll briefly before declaring the write invisible.
         for attempt in 0..<5 {
@@ -210,7 +210,7 @@ public struct AgentLoop {
         return false
     }
 
-    private func record(_ i: Int, obs: Observation?, by: String, conf: Double?,
+    private func record(_ i: Int, obs: Snapshot?, by: String, conf: Double?,
                         rat: String?, action: Action?, gate: String, out: String?,
                         ver: Bool?, esc: StepRecord.Escalation?,
                         reply: String? = nil) -> StepRecord {

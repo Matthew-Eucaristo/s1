@@ -50,6 +50,10 @@ public struct ModifierTapTracker: Sendable {
         lastRelease = (keyCode, t)
         return false
     }
+
+    /// Forget a pending release — any other input between the two taps means
+    /// the user was typing, not gesturing (fast capital letters must NOT fire).
+    public mutating func reset() { lastRelease = nil }
 }
 
 /// Global hotkey listener — a passive CGEvent tap (listen-only, so it never
@@ -108,8 +112,13 @@ public final class Hotkey: @unchecked Sendable {
             _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
             return
         }
-        source = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        guard let s = CFMachPortCreateRunLoopSource(nil, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            self.tap = nil
+            return
+        }
+        source = s
+        CFRunLoopAddSource(CFRunLoopGetMain(), s, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
@@ -137,6 +146,9 @@ public final class Hotkey: @unchecked Sendable {
         let t = Double(event.timestamp) / 1e9   // mach absolute nanos → seconds
         switch type {
         case .keyDown:
+            // Any real key between two modifier taps breaks the gesture —
+            // otherwise typing a fast capital letter would fire it.
+            for i in trackers.indices { trackers[i].reset() }
             let flags = NSEvent.ModifierFlags(rawValue: UInt(clamping: event.flags.rawValue))
             for p in patterns where ChordMatcher.matches(
                 keyCode: keyCode, flags: flags, pattern: p) {
@@ -145,13 +157,19 @@ public final class Hotkey: @unchecked Sendable {
             }
         case .flagsChanged:
             let shiftHeld = event.flags.contains(.maskShift)
-            for i in trackers.indices where trackers[i].feed(
-                keyCode: keyCode, isDown: shiftHeld, at: t) {
-                onTrigger()
-                trackers[i] = ModifierTapTracker(
-                    keyCodes: Array(trackers[i].keyCodes), within: trackers[i].within)
-                return
+            var tracked = false
+            for i in trackers.indices where trackers[i].keyCodes.contains(keyCode) {
+                tracked = true
+                if trackers[i].feed(keyCode: keyCode, isDown: shiftHeld, at: t) {
+                    onTrigger()
+                    trackers[i] = ModifierTapTracker(
+                        keyCodes: Array(trackers[i].keyCodes), within: trackers[i].within)
+                    return
+                }
             }
+            // A different modifier moving also breaks the gesture
+            // (Shift-tap → Ctrl-tap → Shift-tap is not double-shift).
+            if !tracked { for i in trackers.indices { trackers[i].reset() } }
         default: break
         }
     }

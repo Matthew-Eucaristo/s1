@@ -19,13 +19,10 @@ public struct Endpoint: Sendable {
         self.numCtx = numCtx
     }
 
-    /// Built-in presets; env vars override (`S1_S2_BASE`, `S1_S2_MODEL`, `S1_S2_KEY`, `S1_NUM_CTX`).
+    /// Built-in S2 preset — env vars override `~/.s1/config.json`, which
+    /// overrides the baked-in default. Resolution lives in `Endpoints.s2`.
     public static func s2Default(env: [String: String] = ProcessInfo.processInfo.environment) -> Endpoint {
-        Endpoint(
-            baseURL: env["S1_S2_BASE"] ?? "http://localhost:11434/v1",
-            model: env["S1_S2_MODEL"] ?? "gemma3:4b",
-            apiKey: env["S1_S2_KEY"],
-            numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? 8192)
+        Endpoints.s2(env: env)
     }
 }
 

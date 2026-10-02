@@ -9,7 +9,7 @@ enum LLMDecisionCodec {
     /// Keep prompts small: role/title/value of the first ~120 AX nodes, window
     /// titles, and the app name. Token cost stays low and the model still
     /// grounds actions in real element refs (`e12`).
-    static func observationText(_ obs: Observation) -> String {
+    static func observationText(_ obs: Snapshot) -> String {
         var lines = ["App: \(obs.frontmostApp ?? "?")"]
         // Every running app + its window titles — the model sees the whole
         // screen context (Spotlight-like), not just the frontmost window.
@@ -145,7 +145,7 @@ enum LLMDecisionCodec {
         guard let w = try? JSONDecoder().decode(Wire.self, from: Data(json.utf8)) else {
             return salvage(text)
         }
-        return Decision(action: w.action.map(LLMDecisionCodec.action),
+        return Decision(action: w.action.flatMap(LLMDecisionCodec.action),
                         confidence: w.confidence ?? w.action?.confidence ?? 0,
                         rationale: w.rationale ?? w.action?.rationale ?? "")
     }
@@ -186,7 +186,10 @@ enum LLMDecisionCodec {
                         rationale: "salvaged from truncated reply: \(type)")
     }
 
-    static func action(_ a: Wire.A) -> Action {
+    /// Wire type → Action. Unknown types return nil: a model inventing an
+    /// action name ("typewrite", "tap") must NOT silently become `done` —
+    /// nil counts as abstention and escalates instead.
+    static func action(_ a: Wire.A) -> Action? {
         if let ref = a.ref, !ref.isEmpty, a.type == "click" { return .axPress(ref: ref) }
         switch a.type {
         case "moveMouse": return .moveMouse(x: a.x ?? 0, y: a.y ?? 0)
@@ -200,7 +203,8 @@ enum LLMDecisionCodec {
         case "wait":      return .wait(seconds: (a.ms ?? 500) / 1000)
         case "captureScreenshot": return .captureScreenshot(reason: a.expect ?? "requested by model")
         case "verify":    return .verify(expectation: a.expect ?? "")
-        default:          return .done(summary: a.expect ?? a.text ?? "done")
+        case "done":      return .done(summary: a.expect ?? a.text ?? "done")
+        default:          return nil
         }
     }
 }
@@ -221,7 +225,7 @@ public struct VLMPolicy: Policy {
         self.useScreenshot = useScreenshot
     }
 
-    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+    public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         // Deterministic decomposition (shared with AXPolicy): the model grounds
         // ONE intent per step — small local models can't track a whole plan.
         let intents = AXPolicy.intents(of: goal)
@@ -313,7 +317,7 @@ public struct LLMReasoner: Reasoner {
         self.client = ChatClient(endpoint: endpoint)
     }
 
-    public func decide(observation: Observation, goal: String, history: [StepRecord],
+    public func decide(observation: Snapshot, goal: String, history: [StepRecord],
                        reason: String) async throws -> Decision {
         let prompt = """
             You are System 2, the slow reasoner a fast System 1 escalates to.
@@ -325,7 +329,9 @@ public struct LLMReasoner: Reasoner {
             \(LLMDecisionCodec.decisionFormat)
             """
         let reply = try await client.chat([ChatMessage(role: "user", content: prompt)])
-        return LLMDecisionCodec.parse(reply)
+        var d = LLMDecisionCodec.parse(reply)
             ?? Decision(action: nil, confidence: 0, rationale: "unparseable S2 reply")
+        d.rawReply = String(reply.prefix(800))
+        return d
     }
 }

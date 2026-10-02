@@ -3,7 +3,7 @@ import Foundation
 /// Lifecycle events the serve daemon reports — UI and CLI both render these.
 public struct ServeEvent: Sendable {
     public enum Kind: String, Sendable {
-        case armed, idle, listening, heard, runStart, runDone, error, sleeping, stopped
+        case armed, idle, listening, heard, runStart, step, runDone, error, sleeping, stopped
     }
     public var kind: Kind
     public var text: String
@@ -58,7 +58,16 @@ public final class Serve: @unchecked Sendable {
         }
     }
 
-    public private(set) var state: State = .idle
+    /// Written by the hotkey callback (main run loop) and read by the
+    /// listen task — always under `stateLock`.
+    private var _state: State = .idle
+    private let stateLock = NSLock()
+    public var state: State {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return _state
+    }
+    private func setState(_ s: State) { stateLock.lock(); _state = s; stateLock.unlock() }
+
     private let config: Config
     private let speaker = Speaker()
     private let onEvent: @Sendable (ServeEvent) -> Void
@@ -119,7 +128,7 @@ public final class Serve: @unchecked Sendable {
     public func wake() {
         guard state == .idle else { return }
         try? FileManager.default.removeItem(atPath: config.killSwitch)
-        state = .listening
+        setState(.listening)
         emit(.listening)
         listenTask = Task { [weak self] in await self?.listenLoop() }
     }
@@ -130,8 +139,10 @@ public final class Serve: @unchecked Sendable {
         // Land the kill switch too — an in-flight run aborts at its next step
         // instead of finishing a task the user already cancelled.
         try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
+        // And cut any speech in flight — "sleep" should mean silent.
+        speaker.stop()
         if state != .idle {
-            state = .idle
+            setState(.idle)
             emit(.sleeping)
         }
     }
@@ -181,7 +192,7 @@ public final class Serve: @unchecked Sendable {
 
     /// Run one goal through the full agent loop and speak the outcome.
     private func run(goal: String) async {
-        state = .running
+        setState(.running)
         emit(.runStart, goal)
         do {
             let (report, _) = try await S1Runner.run(
@@ -190,7 +201,7 @@ public final class Serve: @unchecked Sendable {
                 allowIrreversible: false, killSwitch: config.killSwitch,
                 s2: config.s2,
                 onStep: { [onEvent] rec in
-                    onEvent(ServeEvent(.runStart, "step \(rec.index): \(rec.decidedBy)"))
+                    onEvent(ServeEvent(.step, "step \(rec.index): \(rec.decidedBy)"))
                 })
             emit(.runDone, report.status.rawValue)
             if config.speak {
@@ -200,7 +211,7 @@ public final class Serve: @unchecked Sendable {
         } catch {
             emit(.error, error.localizedDescription)
         }
-        if state == .running { state = .listening }
+        if state == .running { setState(.listening) }
     }
 
     /// True when the utterance is a "go to sleep" phrase (case/locale-insensitive,

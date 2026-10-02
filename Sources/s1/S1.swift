@@ -12,7 +12,7 @@ struct S1: AsyncParsableCommand {
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
-                      ServeCmd.self, MetricsCmd.self, ReplayCmd.self])
+                      ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -67,12 +67,8 @@ struct RunCmd: AsyncParsableCommand {
         case "dummy": pol = DummyPolicy()
         case "ax":    pol = AXPolicy()
         case "vlm":
-            pol = VLMPolicy(endpoint: Endpoint(
-                baseURL: vlmBase ?? ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
-                model: vlmModel ?? ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
-                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
-                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192),
-                useScreenshot: vlmScreenshot)
+            pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                            useScreenshot: vlmScreenshot)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
             pol = try ScriptedPolicy(planJSON: Data(contentsOf: URL(fileURLWithPath: plan)))
@@ -90,11 +86,26 @@ struct RunCmd: AsyncParsableCommand {
         guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ValidationError("empty goal — pass --goal or --task")
         }
-        let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
+        let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
+    }
+}
+
+struct ConfigCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "config",
+        abstract: "Show the resolved model config (file, env overrides) and where to edit it.")
+    func run() async throws {
+        let exists = FileManager.default.fileExists(atPath: S1Config.path)
+        let vlm = Endpoints.vlm()
+        let s2 = Endpoints.s2()
+        print("config file: \(S1Config.path)\(exists ? "" : " (not found — defaults in use)")")
+        print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
+        print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
+        print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")
+        print("edit the JSON file to swap brains permanently — no rebuild needed")
     }
 }
 
@@ -158,6 +169,10 @@ struct ListenCmd: AsyncParsableCommand {
     var dryRun = false
     @Flag(help: "Enable System 2 escalation (LLM endpoint).")
     var s2 = false
+    @Option(help: "VLM endpoint base URL (--policy vlm).")
+    var vlmBase: String?
+    @Option(help: "VLM model name (--policy vlm).")
+    var vlmModel: String?
 
     func run() async throws {
         guard #available(macOS 26, *) else {
@@ -178,20 +193,17 @@ struct ListenCmd: AsyncParsableCommand {
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
         let pol: any Policy = policy == "vlm"
-            ? VLMPolicy(endpoint: Endpoint(
-                baseURL: ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
-                model: ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
-                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
-                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192))
+            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
             : AXPolicy()
-        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
+        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
         let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: NSTemporaryDirectory() + "s1-stop", s2: reasoner)
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
-            await Speaker().say("Selesai. \(goal)", language: locale)
+            let done = locale.hasPrefix("id") ? "Selesai" : "Done"
+            await Speaker().say("\(done). \(goal)", language: locale)
         }
     }
 }
@@ -275,6 +287,10 @@ struct ServeCmd: AsyncParsableCommand {
     var idleTurns: Int = 3
     @Option(help: "Seconds per listening turn.")
     var listenSeconds: Double = 12
+    @Option(help: "VLM endpoint base URL (--policy vlm).")
+    var vlmBase: String?
+    @Option(help: "VLM model name (--policy vlm).")
+    var vlmModel: String?
     @Option(help: "Transcribe this audio file once, run it, exit (testing — no mic needed).")
     var file: String?
     @Flag(help: "Start in listening state immediately (no hotkey press needed).")
@@ -290,11 +306,7 @@ struct ServeCmd: AsyncParsableCommand {
 
         let makePol: @Sendable () -> any Policy = {
             guard policy == "vlm" else { return AXPolicy() }
-            return VLMPolicy(endpoint: Endpoint(
-                baseURL: ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
-                model: ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
-                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
-                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192))
+            return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
         }
 
         // --file: one utterance through the same pipeline, then exit.
@@ -317,7 +329,7 @@ struct ServeCmd: AsyncParsableCommand {
         let serve = Serve(
             config: .init(makePolicy: makePol, s2: reasoner, speak: speak,
                           listenSeconds: listenSeconds, maxSilentTurns: idleTurns,
-                          transcribe: { try await stt.transcribeMic(maxSeconds: 12) }),
+                          transcribe: { try await stt.transcribeMic(maxSeconds: listenSeconds) }),
             locale: Locale(identifier: locale),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { ev in

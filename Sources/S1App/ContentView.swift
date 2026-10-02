@@ -5,7 +5,7 @@ import S1Core
 /// brain/voice/permission controls in the sidebar.
 @available(macOS 26, *)
 struct ContentView: View {
-    @ObservedObject var model: AppModel
+    @Bindable var model: AppModel
 
     var body: some View {
         NavigationSplitView {
@@ -69,6 +69,7 @@ struct ContentView: View {
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .lineLimit(1...3)
+                    .onSubmit { Task { await model.run() } }
                 if !model.transcript.isEmpty {
                     Text("heard: \(model.transcript)")
                         .font(.caption)

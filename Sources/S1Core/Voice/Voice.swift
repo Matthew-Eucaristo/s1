@@ -21,7 +21,7 @@ public struct SpeechToText: Sendable {
     /// Prefers SpeechAnalyzer (macOS 26); falls back to SFSpeechRecognizer
     /// when the new speech assets aren't installed on the machine.
     public func transcribe(file url: URL) async throws -> String {
-        if #available(macOS 26, *), SpeechTranscriber.isAvailable {
+        if SpeechTranscriber.isAvailable {
             return try await transcribeAnalyzer(file: url)
         }
         return try await transcribeLegacy(file: url)
@@ -97,7 +97,7 @@ public struct SpeechToText: Sendable {
         guard AVCaptureDevice.default(for: .audio) != nil else {
             throw S1Error.aborted("no microphone input available")
         }
-        if #available(macOS 26, *), SpeechTranscriber.isAvailable {
+        if SpeechTranscriber.isAvailable {
             return try await transcribeMicAnalyzer(maxSeconds: maxSeconds)
         }
         return try await transcribeMicLegacy(maxSeconds: maxSeconds)
@@ -116,28 +116,39 @@ public struct SpeechToText: Sendable {
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = false
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-        let collected = TextCollector()
+        let collected = Locked<String>("")
+        let failure = Locked<Error?>(nil)
         let finished = FinishedFlag()
         let task = rec.recognitionTask(with: req) { result, error in
             if let r = result, r.isFinal {
-                let text = r.bestTranscription.formattedString
-                Task { await collected.append(text) }
+                collected.value = r.bestTranscription.formattedString
+                finished.set()
+            } else if let error {
+                failure.value = error
                 finished.set()
             }
+        }
+        var tapInstalled = false
+        // Cancellation (serve sleep / kill switch) must still drop the tap and
+        // stop the engine — without defer the mic would stay live after the
+        // task is gone.
+        defer {
+            if tapInstalled { input.removeTap(onBus: 0) }
+            engine.stop()
+            req.endAudio()
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             req.append(buffer)
         }
+        tapInstalled = true
         engine.prepare()
         try engine.start()
         try await Task.sleep(nanoseconds: UInt64(maxSeconds * 1e9))
-        input.removeTap(onBus: 0)
-        engine.stop()
-        req.endAudio()
         // Give the final result a moment to arrive, then settle.
         for _ in 0 ..< 20 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
         task.finish()
-        return await collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let error = failure.value { throw error }
+        return collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func transcribeMicAnalyzer(maxSeconds: Double) async throws -> String {
@@ -156,9 +167,18 @@ public struct SpeechToText: Sendable {
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        var tapInstalled = false
+        // Same cancellation rule as the legacy path: the tap and engine must
+        // come down even when the task is cancelled mid-listen.
+        defer {
+            if tapInstalled { input.removeTap(onBus: 0) }
+            engine.stop()
+            continuation.finish()
+        }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             continuation.yield(AnalyzerInput(buffer: buffer))
         }
+        tapInstalled = true
         engine.prepare()
         try engine.start()
 
@@ -173,12 +193,25 @@ public struct SpeechToText: Sendable {
         let inputTask = Task { try await analyzer.start(inputSequence: stream) }
         try await Task.sleep(nanoseconds: UInt64(maxSeconds * 1e9))
         continuation.finish()
-        input.removeTap(onBus: 0)
-        engine.stop()
         try await inputTask.value
         try await analyzer.finalizeAndFinishThroughEndOfInput()
+        // The results stream terminates once the analyzer finishes — awaiting
+        // it is what lands the final transcript chunk.
         try await resultsTask.value
         return await collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Lock-protected cell for values written from non-isolated callbacks and
+/// read on the calling task — replaces fire-and-forget `Task { await … }`
+/// appends that could lose the final transcript.
+private final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    init(_ v: Value) { stored = v }
+    var value: Value {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }
 
@@ -199,6 +232,7 @@ private final class FinishedFlag: @unchecked Sendable {
 /// On-device text-to-speech — AVSpeechSynthesizer, works fully offline.
 public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDelegate {
     let synth = AVSpeechSynthesizer()
+    private let lock = NSLock()
     var finished: CheckedContinuation<Void, Never>?
 
     public override init() {
@@ -211,18 +245,42 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(prefix) }
     }
 
-    /// Speak and return after the utterance finishes.
-    public func say(_ text: String, language: String = "id-ID") async {
-        let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: language)
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            finished = c
-            synth.speak(u)
+    /// Speak and return after the utterance finishes — bounded by `timeout`
+    /// so a wedged synthesizer can't pin the caller (UI status, serve loop).
+    public func say(_ text: String, language: String = "id-ID", timeout: Double = 30) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [self] in
+                let u = AVSpeechUtterance(string: text)
+                u.voice = AVSpeechSynthesisVoice(language: language)
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    self.lock.lock()
+                    self.finished = c
+                    self.lock.unlock()
+                    self.synth.speak(u)
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9))
+            }
+            _ = await group.next()
+            group.cancelAll()
+            self.stop()
         }
     }
 
-    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish _: AVSpeechUtterance) {
+    /// Cut speech immediately; also unblocks a pending `say` continuation.
+    public func stop() {
+        synth.stopSpeaking(at: .immediate)
+        lock.lock()
         finished?.resume()
         finished = nil
+        lock.unlock()
+    }
+
+    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish _: AVSpeechUtterance) {
+        lock.lock()
+        finished?.resume()
+        finished = nil
+        lock.unlock()
     }
 }
