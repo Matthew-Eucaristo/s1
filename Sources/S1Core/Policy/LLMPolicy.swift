@@ -1,4 +1,7 @@
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Shared prompt plumbing for model-backed policies and the S2 reasoner:
 /// serialize the observation compactly, ask for a JSON decision, parse it.
@@ -78,8 +81,32 @@ enum LLMDecisionCodec {
     struct Wire: Decodable {
         struct A: Decodable {
             let type: String; let x: Double?; let y: Double?; let ref: String?
-            let text: String?; let value: String?; let app: String?; let keys: String?
+            let text: String?; let value: String?; let app: String?
             let dx: Double?; let dy: Double?; let ms: Double?; let expect: String?
+            /// Models send either "cmd+s" or ["cmd","s"] — take both.
+            let keys: [String]
+            enum CodingKeys: String, CodingKey {
+                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect
+            }
+            init(from d: Decoder) throws {
+                let c = try d.container(keyedBy: CodingKeys.self)
+                type = try c.decode(String.self, forKey: .type)
+                x = try c.decodeIfPresent(Double.self, forKey: .x)
+                y = try c.decodeIfPresent(Double.self, forKey: .y)
+                ref = try c.decodeIfPresent(String.self, forKey: .ref)
+                text = try c.decodeIfPresent(String.self, forKey: .text)
+                value = try c.decodeIfPresent(String.self, forKey: .value)
+                app = try c.decodeIfPresent(String.self, forKey: .app)
+                dx = try c.decodeIfPresent(Double.self, forKey: .dx)
+                dy = try c.decodeIfPresent(Double.self, forKey: .dy)
+                ms = try c.decodeIfPresent(Double.self, forKey: .ms)
+                expect = try c.decodeIfPresent(String.self, forKey: .expect)
+                if let arr = try? c.decode([String].self, forKey: .keys) {
+                    keys = arr
+                } else if let s = try? c.decode(String.self, forKey: .keys) {
+                    keys = s.split(separator: "+").map { $0.lowercased() }
+                } else { keys = [] }
+            }
         }
         let action: A?; let confidence: Double?; let rationale: String?
     }
@@ -103,7 +130,7 @@ enum LLMDecisionCodec {
         case "axPress":   return .axPress(ref: a.ref ?? "")
         case "axSetValue": return .axSetValue(ref: a.ref ?? "", value: a.value ?? a.text ?? "")
         case "typeText":  return .typeText(a.text ?? "")
-        case "keyCombo":  return .keyCombo(keys: (a.keys ?? "").split(separator: "+").map { $0.lowercased() })
+        case "keyCombo":  return .keyCombo(keys: a.keys.map { $0.lowercased() })
         case "scroll":    return .scroll(dx: a.dx ?? 0, dy: a.dy ?? 0)
         case "openApp":   return .openApp(name: a.app ?? a.text ?? "")
         case "wait":      return .wait(seconds: (a.ms ?? 500) / 1000)
@@ -119,8 +146,10 @@ enum LLMDecisionCodec {
 /// The protocol is the contract; swap endpoints, not code.
 public struct VLMPolicy: Policy {
     public let name: String
+    public let useScreenshot: Bool
     let client: ChatClient
-    let useScreenshot: Bool
+
+    public var wantsScreenshot: Bool { useScreenshot }
 
     public init(endpoint: Endpoint, useScreenshot: Bool = true) {
         self.name = "vlm:\(endpoint.model)"
@@ -141,12 +170,32 @@ public struct VLMPolicy: Policy {
             """
         var image: String? = nil
         if useScreenshot, let path = observation.screenshotPath,
-           let data = FileManager.default.contents(atPath: path) {
-            image = data.base64EncodedString()
+           let data = Self.downscaledPNG(path: path) {
+            image = data
         }
         let reply = try await client.chat([ChatMessage(role: "user", content: prompt, imageBase64: image)])
         return LLMDecisionCodec.parse(reply)
-            ?? Decision(action: nil, confidence: 0, rationale: "unparseable VLM reply: \(reply.prefix(200))")
+            ?? Decision(action: nil, confidence: 0, rationale: "unparseable VLM reply: \(reply.prefix(400))")
+    }
+
+    /// VLMs don't need retina pixels — a ~1024px-wide PNG keeps the prompt
+    /// (and context window) small enough for local endpoints.
+    static func downscaledPNG(path: String, maxWidth: Int = 1024) -> String? {
+        let url = URL(fileURLWithPath: path)
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let scale = min(1.0, Double(maxWidth) / Double(img.width))
+        let w = Int(Double(img.width) * scale), h = Int(Double(img.height) * scale)
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let out = ctx.makeImage(),
+              let destData = CFDataCreateMutable(nil, 0),
+              let dest = CGImageDestinationCreateWithData(destData, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, out, nil)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return (destData as Data).base64EncodedString()
     }
 }
 

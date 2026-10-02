@@ -18,7 +18,14 @@ public struct Decision: Codable, Sendable {
 /// dummy, scripted, deterministic AX, local VLM — without touching the loop.
 public protocol Policy: Sendable {
     var name: String { get }
+    /// True → the loop attaches a screenshot to every observation for this
+    /// policy (VLM brains). AX-first policies keep this false and stay cheap.
+    var wantsScreenshot: Bool { get }
     func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision
+}
+
+public extension Policy {
+    var wantsScreenshot: Bool { false }
 }
 
 /// System 2: the escalation brain (LLM, local or cloud). P2 wires real

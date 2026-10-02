@@ -53,7 +53,7 @@ public struct AgentLoop {
                 break
             }
 
-            let obs = try await perceiver.observe(wantScreenshot: false)
+            let obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
             let rec = try await step(i, goal: goal, policy: policy, obs: obs,
                                      history: history, logger: logger)
             history.append(rec)

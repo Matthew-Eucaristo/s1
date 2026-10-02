@@ -43,7 +43,7 @@ public struct ChatClient: Sendable {
 
     /// Send chat messages; returns the assistant text. When `imageBase64` is
     /// set on a message it is sent as an OpenAI vision `image_url` part.
-    public func chat(_ messages: [ChatMessage], maxTokens: Int = 512,
+    public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
                      temperature: Double = 0.0) async throws -> String {
         let url = URL(string: "\(endpoint.baseURL)/chat/completions")!
         var req = URLRequest(url: url)
@@ -69,6 +69,7 @@ public struct ChatClient: Sendable {
             "temperature": temperature,
             "stream": false,
             "think": false,   // Ollama: skip reasoning traces for fast S1/S2 decisions; ignored elsewhere
+            "options": ["num_ctx": 16384, "num_predict": maxTokens],  // Ollama: full PNG + prompt must fit context
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
