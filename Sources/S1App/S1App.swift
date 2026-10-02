@@ -15,9 +15,17 @@ struct S1App: App {
         .defaultSize(width: 880, height: 620)
 
         // The always-on companion lives here: menu bar presence, global
-        // hotkey armed, listening/running state at a glance.
-        MenuBarExtra("s1", systemImage: "waveform") {
+        // hotkey armed, listening/running state at a glance. Label uses the
+        // s1 mark as a template glyph (system tints it for light/dark);
+        // falls back to an SF Symbol when built without the bundled PNGs.
+        MenuBarExtra {
             MenuBarView(model: model)
+        } label: {
+            if let glyph = NSImage(named: "s1-menubar") {
+                Image(nsImage: { glyph.isTemplate = true; return glyph }())
+            } else {
+                Image(systemName: "waveform")
+            }
         }
         .menuBarExtraStyle(.window)
     }

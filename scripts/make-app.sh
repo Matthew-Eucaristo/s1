@@ -16,6 +16,10 @@ cp Sources/S1App/Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
     || echo "note: assets/AppIcon.icns missing — run scripts/make-icon.sh"
+# Menu-bar template glyph (s1 mark); the app falls back to an SF Symbol
+# if absent.
+cp assets/menubar-18.png "$APP/Contents/Resources/s1-menubar.png" 2>/dev/null || true
+cp assets/menubar-36.png "$APP/Contents/Resources/s1-menubar@2x.png" 2>/dev/null || true
 
 # Ad-hoc sign so TCC sees one stable identity ("S1").
 codesign --force --deep --sign - "$APP" >/dev/null
