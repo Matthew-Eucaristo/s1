@@ -42,6 +42,10 @@ final class AppModel {
 
     private let speaker = Speaker()
     private let killPath = NSTemporaryDirectory() + "s1-app-stop"
+    /// GUI apps launched from Finder/Spotlight have cwd "/" — a relative
+    /// "artifacts" path lands on the read-only root. Anchor run output under
+    /// the same home as the config file instead.
+    private let artifactsRoot = NSHomeDirectory() + "/.s1/artifacts"
     private var stt: SpeechToText { SpeechToText(locale: Locale(identifier: locale)) }
     private var serve: Serve?
     private var rearmTask: Task<Void, Never>?
@@ -79,6 +83,7 @@ final class AppModel {
                 },
                 s2: s2On ? LLMReasoner(endpoint: Endpoints.s2()) : nil,
                 speak: speakOn,
+                artifacts: artifactsRoot,
                 transcribe: { [weak self] in
                     guard let self else { return "" }
                     return try await self.stt.transcribeMic(maxSeconds: 12)
@@ -227,7 +232,7 @@ final class AppModel {
 
         do {
             let (report, _) = try await S1Runner.run(
-                goal: goalText, policy: pol, artifacts: "artifacts",
+                goal: goalText, policy: pol, artifacts: artifactsRoot,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: killPath, s2: reasoner,
                 onStep: { [weak self] rec in
