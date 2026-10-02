@@ -20,6 +20,11 @@ Model weights (downloaded by the user, never vendored):
 | [bytedance/UI-TARS](https://github.com/bytedance/UI-TARS) | Apache-2.0 | S1 VLM candidate |
 | OpenCUA (XLANG) | Apache-2.0 | S1 VLM candidate |
 
+Runtime endpoints s1 talks to (installed by the user, OpenAI-compatible — no code vendored):
+
+- [ollama/ollama](https://github.com/ollama/ollama) — MIT; default local endpoint (`http://localhost:11434/v1`).
+- LM Studio, `mlx_lm.server`/`mlx_vlm.server` (MLX), vLLM, OpenRouter/OpenAI — same wire format, swappable via `S1_*_BASE`/`S1_*_MODEL`.
+
 Design references only (not copied — no license file / studied):
 
 - [settylokesh/ORB](https://github.com/settylokesh/ORB) — on-device voice agent for macOS.

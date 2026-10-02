@@ -16,6 +16,7 @@ enum LLMDecisionCodec {
             var s = "\(n.ref) \(n.role)"
             if pressableRoles.contains(n.role) { s += " [pressable]" }
             if editableRoles.contains(n.role) { s += " [editable]" }
+            if scrollableRoles.contains(n.role) { s += " [scrollable]" }
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
             if let v = n.value, !v.isEmpty, v != n.title { s += " value=\"\(v.prefix(60))\"" }
             lines.append(s)
@@ -28,6 +29,12 @@ enum LLMDecisionCodec {
     static let pressableRoles: Set<String> = [
         "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXLink",
         "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow", "AXCell",
+        "AXMenuBarItem",
+    ]
+
+    /// Scroll containers — hints the model where `scroll` makes sense.
+    static let scrollableRoles: Set<String> = [
+        "AXScrollArea", "AXTable", "AXOutline", "AXList", "AXWebArea",
     ]
 
     /// Roles that take text via axSetValue (or focus + typeText) — NOT axPress.

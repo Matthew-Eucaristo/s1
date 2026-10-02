@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- single stroke: "s" as a rounded path + "1" as a voice bar -->
+  <path d="M336 176 c0 -53 -43 -96 -96 -96 h-24 c-53 0 -96 43 -96 96 c0 40 24 74 58 89 c48 21 66 30 66 71 c0 53 -43 96 -96 96 h-24 c-53 0 -96 -43 -96 -96"
+        fill="none" stroke="#0B0D12" stroke-width="36" stroke-linecap="round"/>
+  <rect x="368" y="140" width="40" height="232" rx="20" fill="#0B0D12"/>
+</svg>

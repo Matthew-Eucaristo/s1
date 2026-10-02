@@ -7,21 +7,25 @@ public struct Endpoint: Sendable {
     public var model: String
     public var apiKey: String?          // nil for local servers
     public var extraHeaders: [String: String]
+    /// Ollama KV context — decision prompts are small; 16k+ wastes memory/latency.
+    public var numCtx: Int
 
     public init(baseURL: String, model: String, apiKey: String? = nil,
-                extraHeaders: [String: String] = [:]) {
+                extraHeaders: [String: String] = [:], numCtx: Int = 8192) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.model = model
         self.apiKey = apiKey
         self.extraHeaders = extraHeaders
+        self.numCtx = numCtx
     }
 
-    /// Built-in presets; env vars override (`S1_S2_BASE`, `S1_S2_MODEL`, `S1_S2_KEY`).
+    /// Built-in presets; env vars override (`S1_S2_BASE`, `S1_S2_MODEL`, `S1_S2_KEY`, `S1_NUM_CTX`).
     public static func s2Default(env: [String: String] = ProcessInfo.processInfo.environment) -> Endpoint {
         Endpoint(
             baseURL: env["S1_S2_BASE"] ?? "http://localhost:11434/v1",
             model: env["S1_S2_MODEL"] ?? "gemma3:4b",
-            apiKey: env["S1_S2_KEY"])
+            apiKey: env["S1_S2_KEY"],
+            numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? 8192)
     }
 }
 
@@ -69,14 +73,11 @@ public struct ChatClient: Sendable {
             "temperature": temperature,
             "stream": false,
             "think": false,   // Ollama: skip reasoning traces for fast S1/S2 decisions; ignored elsewhere
-            "options": ["num_ctx": 16384, "num_predict": maxTokens],  // Ollama: full PNG + prompt must fit context
+            "options": ["num_ctx": endpoint.numCtx, "num_predict": maxTokens],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 600
-        let (data, resp) = try await URLSession(configuration: config).data(for: req)
+        let (data, resp) = try await Self.session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw S1Error.aborted("no http response") }
         guard http.statusCode == 200 else {
             throw S1Error.aborted("LLM \(http.statusCode): \(String(decoding: data.prefix(300), as: UTF8.self))")
@@ -85,4 +86,14 @@ public struct ChatClient: Sendable {
         let r = try JSONDecoder().decode(R.self, from: data)
         return r.choices.first?.message.content ?? ""
     }
+
+    /// One session for the process — keeps TCP/TLS connections warm across
+    /// per-step calls instead of paying connect+handshake every decision.
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 300    // local models on CPU can be slow
+        config.timeoutIntervalForResource = 600
+        config.httpMaximumConnectionsPerHost = 2
+        return URLSession(configuration: config)
+    }()
 }

@@ -70,7 +70,8 @@ struct RunCmd: AsyncParsableCommand {
             pol = VLMPolicy(endpoint: Endpoint(
                 baseURL: vlmBase ?? ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
                 model: vlmModel ?? ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
-                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"]),
+                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
+                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192),
                 useScreenshot: vlmScreenshot)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
@@ -167,7 +168,11 @@ struct ListenCmd: AsyncParsableCommand {
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
         let pol: any Policy = policy == "vlm"
-            ? VLMPolicy(endpoint: Endpoint(baseURL: "http://localhost:11434/v1", model: "gemma3:4b"))
+            ? VLMPolicy(endpoint: Endpoint(
+                baseURL: ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
+                model: ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
+                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
+                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192))
             : AXPolicy()
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
         try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,

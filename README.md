@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/s1.svg" width="128" alt="s1 logo"></p>
+
 # s1
 
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
@@ -7,6 +9,19 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 - Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
 - MIT licensed. OSS components used are credited in `ATTRIBUTIONS.md`.
+
+## Install
+
+```bash
+# Homebrew (once the tap is published):
+brew tap Matthew-Eucaristo/tap && brew install s1
+
+# From source — release build, installs to ~/.local/bin:
+git clone https://github.com/Matthew-Eucaristo/s1.git && cd s1
+./scripts/install-local.sh            # or: swift build -c release && cp .build/release/s1 /usr/local/bin/
+
+s1 preflight                          # shows which macOS permissions are missing
+```
 
 ## Try it (3 steps)
 
@@ -107,6 +122,10 @@ Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say
 ### Permissions caveat
 
 macOS attributes TCC grants to the *responsible* process: run `s1` from Terminal and **Terminal** needs the Accessibility / Screen Recording / Speech Recognition grants — not just the `s1` binary. `s1 preflight` reports what the current host is missing.
+
+## Contributing
+
+See `CONTRIBUTING.md` — setup, how to test (unit + real TCC runs), conventions, PR flow.
 
 ## Roadmap
 
