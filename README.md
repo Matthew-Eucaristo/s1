@@ -52,6 +52,14 @@ S2 endpoint via env: `S1_S2_BASE` (default `http://localhost:11434/v1`),
 `S1_S2_MODEL` (`gemma3:4b`), `S1_S2_KEY`. Every escalation lands in
 `steps.jsonl` as `escalation:{to, reason}`.
 
+## Task library & run tooling
+
+```bash
+swift run s1 run --task open-app --policy ax        # goals live in tasks/*.txt
+swift run s1 metrics artifacts/<run-dir>            # decisions/escalations/errors/verify stats
+swift run s1 replay artifacts/<run-dir> --dry-run   # re-execute a recorded run
+```
+
 ## Permissions (macOS TCC)
 
 `s1 preflight` reports what's missing and prints exact instructions.
@@ -90,6 +98,6 @@ Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say
 
 ## Roadmap
 
-P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM + S2 escalation ✅ · P3 vision on-demand ✅ · P4 voice ✅ · P5 task library · P6 replay + metrics.
+P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM + S2 escalation ✅ · P3 vision on-demand ✅ · P4 voice ✅ · P5 task library ✅ · P6 replay + metrics ✅.
 
 See `PLAN.md` for the research and model choices (Fara1.5-4B, GUI-Owl-1.5-2B, Holo 4, FluidAudio, WhisperKit — all verified actively maintained as of Oct 2026).

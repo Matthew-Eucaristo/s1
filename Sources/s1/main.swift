@@ -11,7 +11,8 @@ struct S1: AsyncParsableCommand {
         commandName: "s1",
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
-                      AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self])
+                      AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
+                      MetricsCmd.self, ReplayCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -239,5 +240,51 @@ struct AXCmd: AsyncParsableCommand {
         for n in tree.flattened {
             print("  \(n.ref) [\(n.role)] \(n.title ?? n.value ?? "")")
         }
+    }
+}
+
+struct MetricsCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "metrics",
+        abstract: "Summarize a run's steps.jsonl: decisions, escalations, errors, verifies.")
+    @Argument(help: "Run directory (contains steps.jsonl).")
+    var runDir: String
+
+    func run() async throws {
+        let m = try RunReader.metrics(in: URL(fileURLWithPath: runDir))
+        print("steps        \(m.steps)")
+        print("decidedBy    s1: \(m.s1Decisions) · s2: \(m.s2Decisions)")
+        print("escalations  \(m.escalations.count)")
+        for e in m.escalations { print("  -> \(e.to): \(e.reason)") }
+        print("errors       \(m.errors)")
+        print("blocked      \(m.blocked)")
+        print("verified     ok: \(m.verifiedOK) · fail: \(m.verifiedFail)")
+        print("screenshots  \(m.screenshots)")
+        print(String(format: "duration     %.1fs", m.durationSeconds))
+    }
+}
+
+struct ReplayCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "replay",
+        abstract: "Re-execute a run's recorded actions against the live screen.")
+    @Argument(help: "Run directory to replay (contains steps.jsonl).")
+    var runDir: String
+    @Option(help: "Artifacts root for the replay run.")
+    var artifacts: String = "artifacts"
+    @Flag(help: "Log everything, execute nothing.")
+    var dryRun = false
+    @Flag(help: "Queue irreversible actions for human confirmation.")
+    var allowIrreversible = false
+
+    func run() async throws {
+        let src = URL(fileURLWithPath: runDir)
+        let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
+                                   root: URL(fileURLWithPath: artifacts),
+                                   config: ["mode": dryRun ? "dry-run" : "live", "source": runDir])
+        let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
+        let gate = SafetyGate(allowIrreversible: allowIrreversible)
+        let n = try await RunReader.replay(runDir: src, into: logger,
+                                           actuator: actuator, gate: gate)
+        print("replay run dir: \(logger.runDir.path)")
+        print("replayed \(n) steps")
     }
 }
