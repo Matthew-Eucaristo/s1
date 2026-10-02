@@ -1,0 +1,69 @@
+import Foundation
+
+/// What a brain hands back. `action == nil` means "I don't know" — the loop
+/// treats that the same as confidence below threshold: escalate.
+public struct Decision: Codable, Sendable {
+    public var action: Action?
+    public var confidence: Double
+    public var rationale: String
+
+    public init(action: Action?, confidence: Double, rationale: String) {
+        self.action = action
+        self.confidence = confidence
+        self.rationale = rationale
+    }
+}
+
+/// System 1 is a protocol, not a model. Swap implementations freely —
+/// dummy, scripted, deterministic AX, local VLM — without touching the loop.
+public protocol Policy: Sendable {
+    var name: String { get }
+    func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision
+}
+
+/// System 2: the escalation brain (LLM, local or cloud). P2 wires real
+/// providers; the protocol is fixed now so escalation logging already works.
+public protocol Reasoner: Sendable {
+    var name: String { get }
+    func decide(observation: Observation, goal: String, history: [StepRecord], reason: String) async throws -> Decision
+}
+
+/// Placeholder policy that always abstains — drives escalation paths in tests.
+public struct DummyPolicy: Policy {
+    public let name = "dummy"
+    public var confidence: Double
+    public init(confidence: Double = 0.0) { self.confidence = confidence }
+    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+        Decision(action: nil, confidence: confidence, rationale: "dummy policy abstains")
+    }
+}
+
+/// Replays a fixed plan — the honest way to exercise the real harness before
+/// any model exists (P1). Plan entries are consumed in step order.
+public struct ScriptedPolicy: Policy {
+    public let name = "scripted"
+    public struct Step: Codable, Sendable {
+        public var action: Action
+        public var confidence: Double
+        public var rationale: String
+        public init(action: Action, confidence: Double = 1.0, rationale: String = "scripted") {
+            self.action = action; self.confidence = confidence; self.rationale = rationale
+        }
+    }
+    public var steps: [Step]
+
+    public init(steps: [Step]) { self.steps = steps }
+
+    public init(planJSON: Data) throws {
+        steps = try JSONDecoder().decode([Step].self, from: planJSON)
+    }
+
+    public func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+        let idx = history.count
+        guard idx < steps.count else {
+            return Decision(action: .done(summary: "plan exhausted"), confidence: 1.0, rationale: "end of script")
+        }
+        let s = steps[idx]
+        return Decision(action: s.action, confidence: s.confidence, rationale: s.rationale)
+    }
+}
