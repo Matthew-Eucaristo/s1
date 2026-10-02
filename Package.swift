@@ -18,7 +18,14 @@ let package = Package(
             dependencies: [
                 "S1Core",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-            ]
+            ],
+            // Embed TCC usage descriptions into the binary — without an
+            // Info.plist, Speech/Mic APIs silently never get serviced.
+            linkerSettings: [.unsafeFlags([
+                "-Xlinker", "-sectcreate",
+                "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
+                "-Xlinker", "Sources/s1/Info.plist",
+            ])]
         ),
         .testTarget(name: "S1CoreTests", dependencies: ["S1Core"]),
     ]

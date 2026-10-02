@@ -151,3 +151,94 @@ private func jsonlDecoder() -> JSONDecoder {
     #expect(lines.contains("needsHuman"))
     #expect(!lines.contains("typed"))   // outcome is "blocked", never "typed"
 }
+
+// MARK: - AXPolicy (deterministic S1)
+
+@Test func axPolicyParsesIntentList() {
+    let intents = AXPolicy.intents(of: "open TextEdit, type halo, done")
+    #expect(intents.count == 3)
+    #expect(intents[0].verb == "open" && intents[0].arg == "TextEdit")
+    #expect(intents[1].verb == "type" && intents[1].arg == "halo")
+    #expect(intents[2].verb == "done")
+}
+
+@Test func axPolicyConsumesIntentsByHistory() async throws {
+    let pol = AXPolicy()
+    let obs = Observation(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
+                          windows: [], axTree: nil, screenshotPath: nil)
+    let d1 = try await pol.decide(observation: obs, goal: "open Safari, done", history: [])
+    if case .openApp(let name)? = d1.action { #expect(name == "Safari") } else { Issue.record("expected openApp") }
+    let fake = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax",
+                          confidence: 1, rationale: "", action: .openApp(name: "Safari"),
+                          gate: "allow", outcome: "", verified: nil, escalation: nil)
+    let d2 = try await pol.decide(observation: obs, goal: "open Safari, done", history: [fake])
+    if case .done? = d2.action {} else { Issue.record("expected done") }
+}
+
+@Test func axPolicyMatchesAXElementAndClickUnknownVerbAbstains() async throws {
+    let pol = AXPolicy()
+    let node = AXNode(ref: "e5", role: "AXButton", title: "Save", value: nil,
+                      frame: CGRectCodable(CGRect(x: 10, y: 20, width: 40, height: 20)), children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", value: nil,
+                      frame: nil, children: [node])
+    let obs = Observation(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                          windows: [], axTree: tree, screenshotPath: nil)
+    let d = try await pol.decide(observation: obs, goal: "click Save", history: [])
+    if case .axPress(let ref)? = d.action { #expect(ref == "e5") } else { Issue.record("expected axPress e5") }
+    #expect(d.confidence > 0.6)
+
+    // Unknown verb → abstains at low confidence → loop escalates to S2.
+    let d2 = try await pol.decide(observation: obs, goal: "teleport home", history: [])
+    #expect(d2.action == nil && d2.confidence < 0.6)
+}
+
+// MARK: - LLM decision codec
+
+@Test func llmCodecParsesJSONInsideProse() throws {
+    let reply = """
+        Sure! Here's my decision:
+        {"action":{"type":"axPress","ref":"e7"},"confidence":0.8,"rationale":"press save"}
+        hope that helps
+        """
+    let d = LLMDecisionCodec.parse(reply)
+    #expect(d?.confidence == 0.8)
+    if case .axPress(let ref)?? = d?.action { #expect(ref == "e7") } else { Issue.record("expected axPress") }
+}
+
+@Test func llmCodecConvertsClickWithRefToAxPress() {
+    let d = LLMDecisionCodec.parse("""
+        {"action":{"type":"click","ref":"e3"},"confidence":0.9,"rationale":"x"}
+        """)
+    if case .axPress(let ref)?? = d?.action { #expect(ref == "e3") } else { Issue.record("click+ref should become axPress") }
+    let d2 = LLMDecisionCodec.parse("""
+        {"action":{"type":"click","x":50,"y":60},"confidence":0.9,"rationale":"x"}
+        """)
+    if case .click(let x, let y)?? = d2?.action { #expect(x == 50 && y == 60) } else { Issue.record("expected click") }
+}
+
+@Test func llmCodecGarbageAbstains() {
+    #expect(LLMDecisionCodec.parse("no json at all") == nil)
+}
+
+// MARK: - S2 escalation end-to-end
+
+private struct StubReasoner: Reasoner {
+    let name = "stub"
+    func decide(observation: Observation, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+        Decision(action: .done(summary: "s2 decided"), confidence: 0.9, rationale: "stub: \(reason)")
+    }
+}
+
+@Test func lowConfidenceHandsOffToS2AndLogsReason() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    var cfg = LoopConfig(); cfg.confidenceThreshold = 0.6
+    let loop = AgentLoop(config: cfg, perceiver: NullPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate(), s2: StubReasoner())
+    let report = try await loop.run(goal: "g", policy: DummyPolicy(confidence: 0.1), logger: logger)
+    #expect(report.status == .done)
+    #expect(report.escalations == 1)
+    let text = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+    #expect(text.contains("s2:stub"))          // escalation logged with target
+    #expect(text.contains("decidedBy\":\"s2:stub"))
+}

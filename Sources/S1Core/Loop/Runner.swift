@@ -4,7 +4,8 @@ import Foundation
 public enum S1Runner {
     public static func run(goal: String, policy: any Policy, artifacts: String,
                            maxSteps: Int, threshold: Double, dryRun: Bool,
-                           allowIrreversible: Bool, killSwitch: String?) async throws {
+                           allowIrreversible: Bool, killSwitch: String?,
+                           s2: (any Reasoner)? = nil) async throws {
         var config = LoopConfig()
         config.maxSteps = maxSteps
         config.confidenceThreshold = threshold
@@ -24,13 +25,15 @@ public enum S1Runner {
                 "threshold": String(threshold),
                 "maxSteps": String(maxSteps),
                 "allowIrreversible": String(allowIrreversible),
+                "s2": s2?.name ?? "none",
             ])
         let perceiver = SystemPerceiver(screenshotSink: { img in
             try await logger.saveScreenshot(img)
         })
 
         let gate = SafetyGate(allowReversible: true, allowIrreversible: allowIrreversible)
-        let loop = AgentLoop(config: config, perceiver: perceiver, actuator: actuator, gate: gate)
+        let loop = AgentLoop(config: config, perceiver: perceiver, actuator: actuator,
+                             gate: gate, s2: s2)
 
         print("run dir: \(logger.runDir.path)")
         let report = try await loop.run(goal: goal, policy: policy, logger: logger)

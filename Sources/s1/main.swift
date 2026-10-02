@@ -10,7 +10,8 @@ struct S1: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "s1",
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
-        subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self, AXCmd.self])
+        subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
+                      AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -32,7 +33,7 @@ struct RunCmd: AsyncParsableCommand {
 
     @Option(help: "Goal text (logged; policies see it).")
     var goal: String = "demo"
-    @Option(help: "Policy: scripted | dummy")
+    @Option(help: "Policy: scripted | dummy | ax | vlm")
     var policy: String = "scripted"
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
@@ -48,19 +49,122 @@ struct RunCmd: AsyncParsableCommand {
     var allowIrreversible = false
     @Option(help: "Kill-switch file path (abort if it appears).")
     var killSwitch: String? = nil
+    @Option(help: "VLM endpoint base URL for --policy vlm (OpenAI-compatible).")
+    var vlmBase: String?
+    @Option(help: "VLM model name for --policy vlm.")
+    var vlmModel: String?
+    @Flag(help: "Attach a screenshot to each VLM decision.")
+    var vlmScreenshot = false
+    @Flag(help: "Enable System 2 via S1_S2_* env or defaults (Ollama gemma3:4b).")
+    var s2 = false
 
     func run() async throws {
         let pol: any Policy
         switch policy {
         case "dummy": pol = DummyPolicy()
+        case "ax":    pol = AXPolicy()
+        case "vlm":
+            pol = VLMPolicy(endpoint: Endpoint(
+                baseURL: vlmBase ?? ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
+                model: vlmModel ?? ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
+                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"]),
+                useScreenshot: vlmScreenshot)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
             pol = try ScriptedPolicy(planJSON: Data(contentsOf: URL(fileURLWithPath: plan)))
         default: throw ValidationError("unknown policy \(policy)")
         }
+        let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
         try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
-                               allowIrreversible: allowIrreversible, killSwitch: killSwitch)
+                               allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)
+    }
+}
+
+struct TranscribeCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "transcribe",
+        abstract: "On-device STT: transcribe an audio file (or the mic).")
+    @Option(help: "Audio file to transcribe (.aiff/.wav).")
+    var file: String?
+    @Option(help: "Locale, e.g. id-ID, en-US.")
+    var locale: String = "id-ID"
+    @Option(help: "Max seconds of mic recording when --file is omitted.")
+    var maxSeconds: Double = 15
+
+    func run() async throws {
+        guard #available(macOS 26, *) else {
+            throw ValidationError("SpeechAnalyzer needs macOS 26+")
+        }
+        let stt = SpeechToText(locale: Locale(identifier: locale))
+        let text: String
+        if let file {
+            text = try await stt.transcribe(file: URL(fileURLWithPath: file))
+        } else {
+            text = try await stt.transcribeMic(maxSeconds: maxSeconds)
+        }
+        print(text)
+    }
+}
+
+struct SayCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "say",
+        abstract: "On-device TTS (AVSpeechSynthesizer).")
+    @Argument(help: "Text to speak.")
+    var text: String
+    @Option(help: "Voice language, e.g. id-ID, en-US.")
+    var language: String = "id-ID"
+
+    func run() async throws {
+        await Speaker().say(text, language: language)
+    }
+}
+
+struct ListenCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "listen",
+        abstract: "Voice-first: hear a command, run it, speak the result.")
+    @Option(help: "Transcribe this audio file instead of the mic (testing).")
+    var file: String?
+    @Option(help: "STT/TTS locale.")
+    var locale: String = "id-ID"
+    @Option(help: "Policy for the run (default ax — fast, local).")
+    var policy: String = "ax"
+    @Option(help: "Artifacts root directory.")
+    var artifacts: String = "artifacts"
+    @Flag(help: "Speak the result with TTS.")
+    var speak = false
+    @Option(help: "Max loop steps.")
+    var maxSteps: Int = 25
+    @Flag(help: "Log everything, execute nothing.")
+    var dryRun = false
+    @Flag(help: "Enable System 2 escalation (LLM endpoint).")
+    var s2 = false
+
+    func run() async throws {
+        guard #available(macOS 26, *) else {
+            throw ValidationError("SpeechAnalyzer needs macOS 26+")
+        }
+        let stt = SpeechToText(locale: Locale(identifier: locale))
+        let goal: String
+        if let file {
+            goal = try await stt.transcribe(file: URL(fileURLWithPath: file))
+        } else {
+            print("listening... (speak a command)")
+            goal = try await stt.transcribeMic(maxSeconds: 20)
+        }
+        print("heard: \(goal)")
+        guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
+
+        let pol: any Policy = policy == "vlm"
+            ? VLMPolicy(endpoint: Endpoint(baseURL: "http://localhost:11434/v1", model: "gemma3:4b"))
+            : AXPolicy()
+        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
+        try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
+                               maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
+                               allowIrreversible: false,
+                               killSwitch: NSTemporaryDirectory() + "s1-stop", s2: reasoner)
+        if speak {
+            await Speaker().say("Selesai. \(goal)", language: locale)
+        }
     }
 }
 

@@ -155,6 +155,26 @@ public enum AXReader {
         return AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, value as CFTypeRef) == .success
     }
 
+    /// Generic attribute write on a live element (e.g. AXFocused).
+    public static func setAttribute(pid: pid_t, ref: String, attr: String, value: CFTypeRef) -> Bool {
+        guard let el = element(pid: pid, ref: ref) else { return false }
+        return AXUIElementSetAttributeValue(el, attr as CFString, value) == .success
+    }
+
+    /// Screen frame of the live element behind a ref (for click fallbacks).
+    public static func frameOf(pid: pid_t, ref: String) -> CGRect? {
+        guard let el = element(pid: pid, ref: ref) else { return nil }
+        var posV: CFTypeRef?
+        var sizeV: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success,
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success
+        else { return nil }
+        var p = CGPoint.zero, s = CGSize.zero
+        AXValueGetValue(posV as! AXValue, .cgPoint, &p)
+        AXValueGetValue(sizeV as! AXValue, .cgSize, &s)
+        return CGRect(origin: p, size: s)
+    }
+
     /// Live element lookup: walk the app's tree to the same walk-order index
     /// the ref encodes (refs are `e<n>` assigned in walk order).
     static func element(pid: pid_t, ref: String) -> AXUIElement? {

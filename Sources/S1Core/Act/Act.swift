@@ -57,10 +57,24 @@ public struct CGEventActuator: Actuator {
 
         case .axPress(let ref):
             guard let pid = frontmostPID else { throw S1Error.axFailed("no frontmost pid") }
-            guard AXReader.performAXAction(pid: pid, ref: ref, action: "AXPress") else {
+            if AXReader.performAXAction(pid: pid, ref: ref, action: "AXPress") {
+                return "AXPress \(ref)"
+            }
+            // Text areas and some controls reject AXPress but accept focus +
+            // a real click — try that before declaring the action failed.
+            _ = AXReader.setAttribute(pid: pid, ref: ref,
+                                      attr: kAXFocusedAttribute, value: kCFBooleanTrue!)
+            guard let f = AXReader.frameOf(pid: pid, ref: ref) else {
                 throw S1Error.axFailed("AXPress failed on \(ref)")
             }
-            return "AXPress \(ref)"
+            let p = CGPoint(x: f.midX, y: f.midY)
+            let src = CGEventSource(stateID: .hidSystemState)
+            CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            usleep(60_000)
+            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            return "focused+clicked \(ref) @(\(Int(p.x)),\(Int(p.y)))"
 
         case .axSetValue(let ref, let value):
             guard let pid = frontmostPID else { throw S1Error.axFailed("no frontmost pid") }

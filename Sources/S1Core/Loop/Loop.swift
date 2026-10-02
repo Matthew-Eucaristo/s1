@@ -67,6 +67,9 @@ public struct AgentLoop {
             if case .needsHuman = gateVerdict(rec.gate) { status = .needsHuman; break }
             if case .deny = gateVerdict(rec.gate) { status = .aborted; break }
             if rec.escalation != nil, s2 == nil { status = .escalatedToS2; break }
+            // S2 was consulted and still couldn't decide — stop instead of
+            // burning steps on an unrecoverable abstention.
+            if rec.action == nil, rec.escalation != nil { status = .escalatedToS2; break }
         }
         return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)
     }
@@ -74,7 +77,15 @@ public struct AgentLoop {
     private func step(_ i: Int, goal: String, policy: any Policy, obs input: Observation,
                       history: [StepRecord], logger: RunLogger) async throws -> StepRecord {
         var obs = input
-        var decision = try await policy.decide(observation: obs, goal: goal, history: history)
+        // A throwing policy counts as abstention — logged like any other
+        // low-confidence step instead of crashing the run.
+        var decision: Decision
+        do {
+            decision = try await policy.decide(observation: obs, goal: goal, history: history)
+        } catch {
+            decision = Decision(action: nil, confidence: 0,
+                                rationale: "policy error: \(error.localizedDescription)")
+        }
         var decidedBy = "s1:\(policy.name)"
         var esc: StepRecord.Escalation?
 
@@ -86,8 +97,13 @@ public struct AgentLoop {
                     ? "s1 abstained (conf \(decision.confidence))"
                     : "s1 conf \(decision.confidence) < \(config.confidenceThreshold)"
                 esc = StepRecord.Escalation(to: "s2:\(s2.name)", reason: reason)
-                decision = try await s2.decide(observation: obs, goal: goal,
-                                               history: history, reason: reason)
+                do {
+                    decision = try await s2.decide(observation: obs, goal: goal,
+                                                   history: history, reason: reason)
+                } catch {
+                    decision = Decision(action: nil, confidence: 0,
+                                        rationale: "s2 error: \(error.localizedDescription)")
+                }
                 decidedBy = "s2:\(s2.name)"
             } else {
                 esc = StepRecord.Escalation(to: "s2:none", reason: "no S2 configured; conf \(decision.confidence)")
@@ -113,7 +129,13 @@ public struct AgentLoop {
 
         switch verdict {
         case .allow:
-            outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
+            do {
+                outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
+            } catch {
+                // A failed action is evidence too — log it and keep looping
+                // (the model sees "error:" and picks a different move).
+                outcome = "error: \(error.localizedDescription)"
+            }
         case .deny(let r), .needsHuman(let r):
             outcome = "blocked: \(r)"
             esc = esc ?? StepRecord.Escalation(to: "human", reason: r)
