@@ -92,7 +92,7 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "need AX tree to find '\(intent.arg)'")
             }
-            let candidates = tree.flattened
+            let candidates: [(AXNode, Double)] = tree.flattened
                 .map { ($0, AXPolicy.matchScore(intent.arg, $0)) }
                 .filter { $0.1 > 0 }
                 .sorted { $0.1 > $1.1 }
@@ -108,8 +108,9 @@ public struct AXPolicy: Policy {
                 action = .axPress(ref: node.ref)
             } else {
                 let f = node.frame
-                action = .click(x: (f?.x ?? 0) + (f?.w ?? 0) / 2,
-                                y: (f?.y ?? 0) + (f?.h ?? 0) / 2)
+                let cx: Double = (f?.x ?? 0) + (f?.w ?? 0) / 2
+                let cy: Double = (f?.y ?? 0) + (f?.h ?? 0) / 2
+                action = .click(x: cx, y: cy)
             }
             // Ambiguity penalty: second-place close behind → less sure.
             let runnerUp = candidates.dropFirst().first?.1 ?? 0
