@@ -94,7 +94,19 @@ Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say
 - Action classes: `read` always allowed · `reversible` logged · `irreversible` needs human.
 - Hard deny-list: credentials/OTP/card data, purchases, destructive shell — never executed, escalated to a human.
 - Kill-switch file checked every step (default path set per run).
-- Every run writes `artifacts/<ts>-<goal>/` with `steps.jsonl` — decide-by (`s1:`/`s2:`), confidence, gate verdict, verification result, escalation reason.
+- Stuck-loop guard: the same action three times in a row aborts the run (`stuckLoop`).
+- Every run writes `artifacts/<ts>-<goal>/` with `steps.jsonl` — decided-by (`s1:`/`s2:`), confidence, gate verdict, verification result, escalation reason, and `modelReply` (the raw model output).
+
+## How S1 thinks
+
+- **AX policy** (`--policy ax`, default): zero model, parses `open X, type Y, done` intents and executes deterministically — the baseline every smarter S1 must beat.
+- **VLM policy** (`--policy vlm`): goal → deterministic intent cursor (shared grammar with AX policy) → the model grounds ONE intent per step. Small local models decide actions; they don't track whole plans. Truncated/malformed JSON is salvaged field-by-field before a strict-JSON retry.
+- **S2** (`--s2`): any OpenAI-compatible endpoint; called only below the confidence threshold, with the reason logged.
+- Defaults on this project: `gemma3:4b` via Ollama for VLM and S2 (benchmarked on an arm64 VM: correct JSON ≈1min/step on CPU; much faster on a real Mac). Set `S1_VLM_MODEL` / `S1_S2_MODEL` to swap.
+
+### Permissions caveat
+
+macOS attributes TCC grants to the *responsible* process: run `s1` from Terminal and **Terminal** needs the Accessibility / Screen Recording / Speech Recognition grants — not just the `s1` binary. `s1 preflight` reports what the current host is missing.
 
 ## Roadmap
 

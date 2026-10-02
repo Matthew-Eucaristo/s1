@@ -259,3 +259,20 @@ private struct StubReasoner: Reasoner {
     let t = LLMDecisionCodec.parse(#"{"action":{"type":"typeText","text":"hello world","confidence":0.8}}"#)
     if case .typeText(let s)? = t?.action { #expect(s == "hello world") } else { Issue.record() }
 }
+
+@Test func identicalActionThreeTimesAbortsWithStuckLoop() async throws {
+    // A policy that keeps deciding the same action must not spin forever.
+    struct LoopingPolicy: Policy {
+        let name = "looping"
+        func decide(observation: Observation, goal: String, history: [StepRecord]) async throws -> Decision {
+            Decision(action: .wait(seconds: 0), confidence: 0.9, rationale: "repeat")
+        }
+    }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "stuck", root: dir, config: [:])
+    var cfg = LoopConfig(); cfg.maxSteps = 10
+    let loop = AgentLoop(config: cfg, perceiver: NullPerceiver(), actuator: DryRunActuator(), gate: SafetyGate())
+    let rep = try await loop.run(goal: "stuck", policy: LoopingPolicy(), logger: logger)
+    #expect(rep.status == .stuckLoop)
+    #expect(rep.steps == 3)
+}
