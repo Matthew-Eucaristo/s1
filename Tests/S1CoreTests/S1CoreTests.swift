@@ -242,3 +242,10 @@ private struct StubReasoner: Reasoner {
     #expect(text.contains("s2:stub"))          // escalation logged with target
     #expect(text.contains("decidedBy\":\"s2:stub"))
 }
+
+@Test func appResolverSimilarityHandlesDictationMangles() {
+    // "teks edit" is what Dictation returns for TextEdit
+    #expect(AppResolver.similarity("teks edit", "TextEdit") >= 0.5)
+    #expect(AppResolver.similarity("teks edit", "Photo Booth") < 0.5)
+    #expect(AppResolver.similarity("sistem seting", "System Settings") >= 0.5)
+}

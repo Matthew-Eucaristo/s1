@@ -154,13 +154,49 @@ public struct CGEventActuator: Actuator {
 
     func openApp(named name: String) async throws {
         let ws = NSWorkspace.shared
-        if let url = ws.urlForApplication(withBundleIdentifier: name) ??
-            URL(fileURLWithPath: "/System/Applications/\(name).app").exists ??
-            URL(fileURLWithPath: "/Applications/\(name).app").exists {
+        if let url = AppResolver.resolve(name) {
             try await ws.openApplication(at: url, configuration: .init())
         } else {
             throw S1Error.aborted("app not found: \(name)")
         }
+    }
+}
+
+/// Resolves spoken/typed app names to installed app URLs — exact, then
+/// fuzzy (bigram similarity) so dictation mangles like "teks edit" still
+/// find TextEdit.
+enum AppResolver {
+    static func resolve(_ name: String) -> URL? {
+        let ws = NSWorkspace.shared
+        if let url = ws.urlForApplication(withBundleIdentifier: name) ??
+            URL(fileURLWithPath: "/System/Applications/\(name).app").exists ??
+            URL(fileURLWithPath: "/Applications/\(name).app").exists {
+            return url
+        }
+        var best: (URL, Double)? = nil
+        for dir in ["/System/Applications", "/Applications", "/Applications/Utilities"] {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
+            for n in names where n.hasSuffix(".app") {
+                let stem = String(n.dropLast(4))
+                let score = similarity(name, stem)
+                if score > (best?.1 ?? 0.49) {
+                    best = (URL(fileURLWithPath: "\(dir)/\(n)"), score)
+                }
+            }
+        }
+        return best?.0
+    }
+
+    /// Dice coefficient over character bigrams of normalized strings.
+    static func similarity(_ a: String, _ b: String) -> Double {
+        func grams(_ s: String) -> Set<String> {
+            let c = Array(s.lowercased().components(separatedBy: .alphanumerics.inverted).joined())
+            guard c.count > 1 else { return Set(c.map(String.init)) }
+            return Set((0..<c.count - 1).map { String(c[$0...$0 + 1]) })
+        }
+        let (ga, gb) = (grams(a), grams(b))
+        guard !ga.isEmpty, !gb.isEmpty else { return 0 }
+        return 2.0 * Double(ga.intersection(gb).count) / Double(ga.count + gb.count)
     }
 }
 
