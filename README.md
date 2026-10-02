@@ -2,6 +2,11 @@
 
 # s1
 
+[![CI](https://github.com/Matthew-Eucaristo/s1/actions/workflows/swift.yml/badge.svg)](https://github.com/Matthew-Eucaristo/s1/actions/workflows/swift.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black)
+![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
+
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
 
 **Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)**, **always-on companion (global hotkey → continuous listening)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
@@ -93,6 +98,25 @@ swift run s1 run --policy ax --s2 --goal "open TextEdit, click the document, don
 S2 endpoint via env: `S1_S2_BASE` (default `http://localhost:11434/v1`),
 `S1_S2_MODEL` (`gemma3:4b`), `S1_S2_KEY`. Every escalation lands in
 `steps.jsonl` as `escalation:{to, reason}`.
+
+### Swapping brains — the easy way
+
+Everything lives in `~/.s1/config.json` — no rebuild, no code:
+
+```json
+{
+  "vlm": { "base": "http://localhost:11434/v1", "model": "gemma3:4b" },
+  "s2":  { "base": "https://api.openai.com/v1", "model": "gpt-5", "key": "sk-…" },
+  "locale": "id-ID", "speak": true
+}
+```
+
+Precedence: **CLI flag > env var > config file > built-in default**. Any
+OpenAI-compatible `/chat/completions` endpoint works for both brains —
+Ollama, LM Studio, vLLM, MLX, Groq, OpenAI. `s1 config` prints what's
+resolved and where to edit; the app writes the same file, so GUI settings
+apply to the CLI too. To write a custom brain (a `Policy` or `Reasoner`
+conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 
 ## Task library & run tooling
 

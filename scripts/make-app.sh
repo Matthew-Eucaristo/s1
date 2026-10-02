@@ -13,6 +13,9 @@ mkdir -p "$APP/Contents/MacOS"
 cp ".build/apple/Products/Release/s1-app" "$APP/Contents/MacOS/S1" 2>/dev/null \
     || cp ".build/$CONFIG/s1-app" "$APP/Contents/MacOS/S1"
 cp Sources/S1App/Info.plist "$APP/Contents/Info.plist"
+mkdir -p "$APP/Contents/Resources"
+cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
+    || echo "note: assets/AppIcon.icns missing — run scripts/make-icon.sh"
 
 # Ad-hoc sign so TCC sees one stable identity ("S1").
 codesign --force --deep --sign - "$APP" >/dev/null

@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal CLI
+        run: swift build -c release --product s1 --arch arm64 --arch x86_64
+      - name: Package CLI tarball
+        run: |
+          mkdir -p dist-pkg/bin
+          cp ".build/apple/Products/Release/s1" dist-pkg/bin/s1
+          tar -czf "s1-${GITHUB_REF_NAME}-macos-universal.tar.gz" -C dist-pkg bin
+          shasum -a 256 "s1-${GITHUB_REF_NAME}-macos-universal.tar.gz" > "s1-${GITHUB_REF_NAME}-macos-universal.tar.gz.sha256"
+      - name: Build app bundle
+        run: |
+          [ -f assets/AppIcon.icns ] || ./scripts/make-icon.sh
+          ./scripts/make-app.sh release
+          tar -czf "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz" -C dist S1.app
+          shasum -a 256 "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz" > "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz.sha256"
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            s1-*-macos-universal.tar.gz
+            s1-*-macos-universal.tar.gz.sha256
+            S1.app-*-macos-universal.tar.gz
+            S1.app-*-macos-universal.tar.gz.sha256
