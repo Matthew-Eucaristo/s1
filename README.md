@@ -2,7 +2,7 @@
 
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
 
-**Status:** P0 harness + P1 real-run demo complete. See `PLAN.md` for the roadmap and `docs/` for details.
+**Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice — all verified on real macOS 26. See `PLAN.md` for the roadmap.
 
 - Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
@@ -21,6 +21,36 @@ Then the real run (needs both permissions below):
 ```bash
 swift run s1 demo               # opens TextEdit, types, verifies on-screen — logs to artifacts/
 ```
+
+## Voice
+
+```bash
+swift run s1 transcribe --file cmd.aiff --locale en-US   # on-device STT
+swift run s1 say "halo" --language id-ID                # on-device TTS
+swift run s1 listen --file cmd.aiff                     # voice -> action run
+swift run s1 listen                                     # live mic -> action run
+```
+
+SpeechAnalyzer (macOS 26) is used when its assets exist; otherwise s1 falls
+back to `SFSpeechRecognizer` — still on-device. Dictation must be enabled
+(System Settings → Keyboard → Dictation).
+
+## Brains
+
+```bash
+# Deterministic S1 — no model, parses "open X, type Y, done" intents
+swift run s1 run --policy ax --goal "open TextEdit, wait 2000, type hi, done"
+
+# VLM S1 — any OpenAI-compatible endpoint (Ollama, MLX, LM Studio, cloud)
+swift run s1 run --policy vlm --vlm-model gemma3:4b --goal "type hi, done"
+
+# S2 escalation — s1:ax handles known steps; unknown ones go to the LLM
+swift run s1 run --policy ax --s2 --goal "open TextEdit, click the document, done"
+```
+
+S2 endpoint via env: `S1_S2_BASE` (default `http://localhost:11434/v1`),
+`S1_S2_MODEL` (`gemma3:4b`), `S1_S2_KEY`. Every escalation lands in
+`steps.jsonl` as `escalation:{to, reason}`.
 
 ## Permissions (macOS TCC)
 
@@ -41,13 +71,14 @@ When running via `swift run`, grant the permission to the produced binary
 Sources/S1Core/
   Perceive/  CGWindowList + AXUIElement tree + ScreenCaptureKit (on-demand)
   Act/       CGEvent mouse/keyboard + AX actions; DryRunActuator
-  Policy/    protocol Policy (S1): Dummy · Scripted → AX → VLM (P2)
-  Reasoner/  protocol Reasoner (S2): OpenAI-compatible + Anthropic (P2)
+  Policy/    protocol Policy (S1): Dummy · Scripted · AX (deterministic) · VLM
+  Reasoner/  protocol Reasoner (S2): OpenAI-compatible chat endpoints
+  Voice/     SpeechAnalyzer + SFSpeechRecognizer STT · AVSpeech TTS
   Safety/    Action classes, hard deny-list, kill switch
   Preflight/ TCC checks incl. the relaunch invariant
   Artifacts/ per-run dir: meta.json + steps.jsonl + screens/
   Loop/      see → decide → gate → act → verify → log
-Sources/s1/  CLI: preflight · run · demo · capture · ax
+Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say · listen
 ```
 
 ## Safety
@@ -59,6 +90,6 @@ Sources/s1/  CLI: preflight · run · demo · capture · ax
 
 ## Roadmap
 
-P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM policies + S2 escalation · P3 vision on-demand · P4 voice (SpeechAnalyzer STT, AVSpeech TTS) · P5 task library · P6 replay + metrics.
+P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM + S2 escalation ✅ · P3 vision on-demand ✅ · P4 voice ✅ · P5 task library · P6 replay + metrics.
 
 See `PLAN.md` for the research and model choices (Fara1.5-4B, GUI-Owl-1.5-2B, Holo 4, FluidAudio, WhisperKit — all verified actively maintained as of Oct 2026).
