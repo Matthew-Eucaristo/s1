@@ -82,6 +82,9 @@ public struct AXPolicy: Policy {
         case "screenshot", "capture":
             return Decision(action: .captureScreenshot(reason: "requested in goal"), confidence: 0.95,
                             rationale: "screenshot requested")
+        case "verify", "cek", "check", "pastikan":
+            return Decision(action: .verify(expectation: intent.arg), confidence: 0.9,
+                            rationale: "verify '\(intent.arg)' on screen")
         case "done", "selesai", "finish":
             return Decision(action: .done(summary: "done"), confidence: 0.95, rationale: "done intent")
         case "click", "press", "klik", "tekan", "set", "isi":

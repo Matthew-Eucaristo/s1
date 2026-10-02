@@ -1,0 +1,1 @@
+open TextEdit, wait 1200, verify s1 wrote this, done

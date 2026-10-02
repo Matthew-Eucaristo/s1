@@ -33,6 +33,8 @@ struct RunCmd: AsyncParsableCommand {
 
     @Option(help: "Goal text (logged; policies see it).")
     var goal: String = "demo"
+    @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
+    var task: String?
     @Option(help: "Policy: scripted | dummy | ax | vlm")
     var policy: String = "scripted"
     @Option(help: "JSON plan file for the scripted policy.")
@@ -74,8 +76,17 @@ struct RunCmd: AsyncParsableCommand {
             pol = try ScriptedPolicy(planJSON: Data(contentsOf: URL(fileURLWithPath: plan)))
         default: throw ValidationError("unknown policy \(policy)")
         }
+        let goalText: String
+        if let task {
+            let p = "tasks/\(task).txt"
+            guard let g = try? String(contentsOfFile: p, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty else {
+                throw ValidationError("task file not found or empty: \(p)")
+            }
+            goalText = g
+        } else { goalText = goal }
         let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
-        try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
+        try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)
     }
