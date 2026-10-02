@@ -188,7 +188,8 @@ enum AppResolver {
             return url
         }
         var best: (URL, Double)? = nil
-        for dir in ["/System/Applications", "/Applications", "/Applications/Utilities"] {
+        for dir in ["/System/Applications", "/Applications", "/Applications/Utilities",
+                    NSHomeDirectory() + "/Applications"] {
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
             for n in names where n.hasSuffix(".app") {
                 let stem = String(n.dropLast(4))
@@ -198,7 +199,35 @@ enum AppResolver {
                 }
             }
         }
+        // Spotlight index finds apps living outside the standard dirs
+        // (e.g. ~/bin, per-user installs) — same fuzzy gate applies.
+        for url in spotlightApps() {
+            let score = similarity(name, url.deletingPathExtension().lastPathComponent)
+            if score > (best?.1 ?? 0.49) { best = (url, score) }
+        }
         return best?.0
+    }
+
+    /// `mdfind` over the Spotlight index for installed applications.
+    /// Returns paths; caller scores them. Fails soft (nil) when mdfind is
+    /// unavailable — resolution simply falls back to the directory scan.
+    static func spotlightApps(timeout: TimeInterval = 3) -> [URL] {
+        let p = Process()
+        let out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+        p.arguments = ["kMDItemKind == 'Application'"]
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        do {
+            try p.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else { return [] }
+            return String(decoding: data, as: UTF8.self)
+                .split(separator: "\n")
+                .filter { $0.hasSuffix(".app") }
+                .map { URL(fileURLWithPath: String($0)) }
+        } catch { return [] }
     }
 
     /// Dice coefficient over character bigrams of normalized strings.

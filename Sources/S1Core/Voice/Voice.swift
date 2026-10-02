@@ -91,6 +91,12 @@ public struct SpeechToText: Sendable {
     /// engine the system supports (legacy recognizer if Analyzer assets are
     /// absent — the honest fallback, same on-device privacy).
     public func transcribeMic(maxSeconds: Double = 30) async throws -> String {
+        // No input device at all → clean error. Without this, installTap throws
+        // an NSException (uncatchable from Swift) and kills the whole process —
+        // which would take down the always-on daemon with it.
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            throw S1Error.aborted("no microphone input available")
+        }
         if #available(macOS 26, *), SpeechTranscriber.isAvailable {
             return try await transcribeMicAnalyzer(maxSeconds: maxSeconds)
         }

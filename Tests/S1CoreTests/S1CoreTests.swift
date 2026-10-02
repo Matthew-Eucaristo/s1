@@ -276,3 +276,157 @@ private struct StubReasoner: Reasoner {
     #expect(rep.status == .stuckLoop)
     #expect(rep.steps == 3)
 }
+
+// MARK: - hotkey
+
+@Test func chordMatcherRequiresExactFlags() {
+    let chord = Hotkey.defaultChord
+    // ⌃⌥Space
+    #expect(ChordMatcher.matches(keyCode: 49, flags: [.control, .option], pattern: chord))
+    // Spotlight (⌘Space) must NOT trigger
+    #expect(!ChordMatcher.matches(keyCode: 49, flags: [.command], pattern: chord))
+    // extra modifier must NOT trigger
+    #expect(!ChordMatcher.matches(keyCode: 49, flags: [.control, .option, .shift], pattern: chord))
+    // wrong key must NOT trigger
+    #expect(!ChordMatcher.matches(keyCode: 48, flags: [.control, .option], pattern: chord))
+}
+
+@Test func modifierTapTrackerDetectsDoubleTap() {
+    var t = ModifierTapTracker(keyCodes: [56, 60], within: 0.35)
+    var fired = t.feed(keyCode: 56, isDown: true, at: 0.0)   // first press
+    #expect(!fired)
+    fired = t.feed(keyCode: 56, isDown: false, at: 0.1)      // release
+    #expect(!fired)
+    fired = t.feed(keyCode: 56, isDown: true, at: 0.3)       // second press in window
+    #expect(fired)
+    var slow = ModifierTapTracker(keyCodes: [56, 60], within: 0.35)
+    fired = slow.feed(keyCode: 56, isDown: true, at: 0.0)
+    fired = slow.feed(keyCode: 56, isDown: false, at: 0.1)
+    fired = slow.feed(keyCode: 56, isDown: true, at: 0.9)    // too slow
+    #expect(!fired)
+    var other = ModifierTapTracker(keyCodes: [56, 60], within: 0.35)
+    fired = other.feed(keyCode: 55, isDown: true, at: 0.0)   // cmd isn't a target
+    #expect(!fired)
+}
+
+// MARK: - serve
+
+/// Lock-protected box so tests can capture values inside @Sendable closures.
+private final class Locked<T>: @unchecked Sendable {
+    private var v: T
+    private let lock = NSLock()
+    init(_ v: T) { self.v = v }
+    func get() -> T { lock.lock(); defer { lock.unlock() }; return v }
+    func mutate(_ f: (inout T) -> Void) { lock.lock(); defer { lock.unlock() }; f(&v) }
+}
+
+@Test func serveStopPhraseDetection() {
+    let phrases = ["stop", "berhenti", "matikan"]
+    #expect(Serve.isStop("stop", phrases: phrases))
+    #expect(Serve.isStop("Berhenti.", phrases: phrases))
+    #expect(Serve.isStop("stop dong", phrases: phrases))
+    #expect(Serve.isStop("matikan sekarang", phrases: phrases))
+    #expect(!Serve.isStop("buka stopwatch", phrases: phrases))
+    #expect(!Serve.isStop("stopwatch launch", phrases: phrases))
+    #expect(!Serve.isStop("", phrases: phrases))
+}
+
+@Test func serveRunUsesConfiguredPolicy() async throws {
+    // Prove an utterance becomes a goal and reaches the agent loop:
+    // feed one command, then a stop phrase — both via injected transcribe.
+    let feed = Locked<[String]>(["buka test, done", "stop"])
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let events = Locked<[ServeEvent.Kind]>([])
+    let serve = Serve(
+        config: .init(
+            makePolicy: { AXPolicy() },
+            speak: false,
+            artifacts: dir.path,
+            killSwitch: dir.appendingPathComponent("ks").path,
+            transcribe: {
+                var out = "stop"
+                feed.mutate { f in out = f.isEmpty ? "stop" : f.removeFirst() }
+                return out
+            }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { ev in events.mutate { $0.append(ev.kind) } }
+    serve.wake()
+    for _ in 0 ..< 200 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    #expect(serve.state == .idle)
+    let kinds = events.get()
+    #expect(kinds.contains(.heard))
+    #expect(kinds.contains(.runStart))
+    #expect(kinds.contains(.stopped))
+    // A run dir proves the agent loop really ran for the utterance.
+    let runs = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    #expect(runs.contains { $0.contains("buka-test-done") })
+}
+
+@Test func serveAutoSleepsAfterSilentTurns() async throws {
+    let events = Locked<[ServeEvent.Kind]>([])
+    let serve = Serve(
+        config: .init(
+            speak: false,
+            maxSilentTurns: 2,
+            artifacts: FileManager.default.temporaryDirectory.path,
+            killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks2").path,
+            transcribe: { "" }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { ev in events.mutate { $0.append(ev.kind) } }
+    serve.wake()
+    for _ in 0 ..< 100 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 30_000_000)
+    }
+    #expect(serve.state == .idle)
+    #expect(events.get().contains(.sleeping))
+}
+
+@Test func serveSttErrorsAutoSleep() async throws {
+    struct Boom: Error {}
+    let calls = Locked(0)
+    let serve = Serve(
+        config: .init(
+            speak: false,
+            maxListenErrors: 2,
+            artifacts: FileManager.default.temporaryDirectory.path,
+            killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks3").path,
+            transcribe: { calls.mutate { $0 += 1 }; throw Boom() }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { _ in }
+    serve.wake()
+    for _ in 0 ..< 100 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 30_000_000)
+    }
+    #expect(serve.state == .idle)
+    #expect(calls.get() >= 2)
+}
+
+// MARK: - all-app perception
+
+@Test func appStatesJoinsWorkspaceAndWindowTitles() {
+    let apps: [(name: String, pid: Int32)] = [("TextEdit", 10), ("Safari", 20), ("Finder", 30)]
+    let wins = [
+        WindowInfo(pid: 20, owner: "Safari", title: "Apple", bounds: CGRectCodable(.zero)),
+        WindowInfo(pid: 20, owner: "Safari", title: "GitHub", bounds: CGRectCodable(.zero)),
+        WindowInfo(pid: 30, owner: "Finder", title: nil, bounds: CGRectCodable(.zero)),
+        WindowInfo(pid: 10, owner: "TextEdit", title: "notes.txt", bounds: CGRectCodable(.zero)),
+    ]
+    let states = SystemPerceiver.joinAppStates(apps: apps, windows: wins,
+                                             frontmostPID: 10, maxApps: 20, maxTitlesPerApp: 4)
+    #expect(states.count == 3)
+    #expect(states[0].name == "TextEdit" && states[0].isActive)
+    #expect(states[0].windowTitles == ["notes.txt"])
+    let safari = states.first { $0.name == "Safari" }
+    #expect(safari?.windowTitles == ["Apple", "GitHub"])
+    // untitled windows don't pollute titles
+    #expect(states.first { $0.name == "Finder" }?.windowTitles.isEmpty == true)
+    // maxApps caps
+    let capped = SystemPerceiver.joinAppStates(apps: apps, windows: wins,
+                                              frontmostPID: nil, maxApps: 2, maxTitlesPerApp: 4)
+    #expect(capped.count == 2)
+}

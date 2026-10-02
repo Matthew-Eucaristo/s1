@@ -1,6 +1,8 @@
 import AppKit
+import Combine
 import Foundation
 import S1Core
+import ServiceManagement
 import UniformTypeIdentifiers
 
 /// Observable bridge between the SwiftUI shell and the S1Core agent loop.
@@ -31,11 +33,102 @@ final class AppModel: ObservableObject {
                                                                screenRecording: false,
                                                                microphone: false, notes: [])
 
+    // ---- always-on companion (hotkey -> continuous listening -> run -> listen) ----
+    @Published private(set) var serveState: Serve.State = .idle
+    @Published private(set) var serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
+    @Published var launchAtLogin = false
+
     private let speaker = Speaker()
     private let killPath = NSTemporaryDirectory() + "s1-app-stop"
     private var stt: SpeechToText { SpeechToText(locale: Locale(identifier: locale)) }
+    private var serve: Serve?
+    private var cancellables: Set<AnyCancellable> = []
 
-    init() { refreshPermissions() }
+    init() {
+        refreshPermissions()
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        startServe()
+        // Changing brain/locale/S2/speak rebuilds the companion config
+        // (disarm → arm) so the hotkey always runs current settings.
+        for pub in [
+            $brain.map { _ in () }.eraseToAnyPublisher(),
+            $locale.map { _ in () }.eraseToAnyPublisher(),
+            $useS2.map { _ in () }.eraseToAnyPublisher(),
+            $speakReply.map { _ in () }.eraseToAnyPublisher(),
+            $vlmModel.map { _ in () }.eraseToAnyPublisher(),
+        ] {
+            pub.dropFirst().sink { [weak self] in self?.rearmServe() }
+                .store(in: &cancellables)
+        }
+    }
+
+    /// Arm the companion: installs the global hotkey (double-tap Shift and
+    /// ⌃⌥Space both work). Idle = zero mic, zero model — battery stays flat.
+    private func startServe() {
+        let loc = locale
+        let brainKind = brain
+        let s2On = useS2
+        let speakOn = speakReply
+        let base = vlmBase
+        let model = vlmModel
+        let s = Serve(
+            config: .init(
+                makePolicy: {
+                    if brainKind == .vlm {
+                        return VLMPolicy(endpoint: Endpoint(baseURL: base, model: model))
+                    }
+                    return AXPolicy()
+                },
+                s2: s2On ? LLMReasoner(endpoint: .s2Default()) : nil,
+                speak: speakOn,
+                transcribe: { [weak self] in
+                    guard let self else { return "" }
+                    return try await self.stt.transcribeMic(maxSeconds: 12)
+                }),
+            locale: Locale(identifier: loc),
+            hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
+        ) { [weak self] ev in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch ev.kind {
+                case .armed: self.serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
+                case .listening: self.serveState = .listening; self.serveStatus = "listening…"
+                case .heard: self.serveStatus = "heard: \(ev.text)"; self.transcript = ev.text
+                case .runStart: self.serveState = .running; self.serveStatus = "running: \(ev.text)"
+                case .runDone: self.serveStatus = ev.text
+                case .sleeping: self.serveState = .idle; self.serveStatus = "idle (sleeping)"
+                case .stopped: self.serveState = .idle; self.serveStatus = "stopped"
+                case .error: self.serveStatus = "error: \(ev.text)"
+                case .idle: self.serveState = .idle
+                }
+            }
+        }
+        s.armHotkey()
+        serve = s
+    }
+
+    /// Rebuild the serve config when brain/locale/s2/speak settings change.
+    func rearmServe() {
+        serve?.disarm()
+        startServe()
+    }
+
+    /// Hotkey-equivalent toggle for menu/UI buttons.
+    func toggleServe() { serve?.toggle() }
+
+    func toggleLoginItem() {
+        do {
+            if launchAtLogin {
+                try SMAppService.mainApp.unregister()
+                launchAtLogin = false
+            } else {
+                try SMAppService.mainApp.register()
+                launchAtLogin = true
+            }
+        } catch {
+            status = "login item: \(error.localizedDescription)"
+        }
+    }
 
     func refreshPermissions() {
         permissions = Preflight.check(request: false)

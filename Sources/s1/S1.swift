@@ -12,7 +12,7 @@ struct S1: AsyncParsableCommand {
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
-                      MetricsCmd.self, ReplayCmd.self])
+                      ServeCmd.self, MetricsCmd.self, ReplayCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -37,7 +37,7 @@ struct RunCmd: AsyncParsableCommand {
     @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
     var task: String?
     @Option(help: "Policy: scripted | dummy | ax | vlm")
-    var policy: String = "scripted"
+    var policy: String = "ax"
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
     @Option(help: "Artifacts root directory.")
@@ -87,6 +87,9 @@ struct RunCmd: AsyncParsableCommand {
             }
             goalText = g
         } else { goalText = goal }
+        guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ValidationError("empty goal — pass --goal or --task")
+        }
         let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
@@ -112,6 +115,9 @@ struct TranscribeCmd: AsyncParsableCommand {
         let stt = SpeechToText(locale: Locale(identifier: locale))
         let text: String
         if let file {
+            guard FileManager.default.fileExists(atPath: file) else {
+                throw ValidationError("audio file not found: \(file)")
+            }
             text = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
             text = try await stt.transcribeMic(maxSeconds: maxSeconds)
@@ -160,6 +166,9 @@ struct ListenCmd: AsyncParsableCommand {
         let stt = SpeechToText(locale: Locale(identifier: locale))
         let goal: String
         if let file {
+            guard FileManager.default.fileExists(atPath: file) else {
+                throw ValidationError("audio file not found: \(file)")
+            }
             goal = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
             print("listening... (speak a command)")
@@ -248,6 +257,85 @@ struct AXCmd: AsyncParsableCommand {
         for n in tree.flattened {
             print("  \(n.ref) [\(n.role)] \(n.title ?? n.value ?? "")")
         }
+    }
+}
+
+struct ServeCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "serve",
+        abstract: "Always-on companion: hotkey toggles continuous listening (double-tap Shift or ⌃⌥Space).")
+    @Option(help: "STT/TTS locale.")
+    var locale: String = "id-ID"
+    @Option(help: "Policy for runs (default ax — fast, local).")
+    var policy: String = "ax"
+    @Flag(help: "Enable System 2 escalation (LLM endpoint).")
+    var s2 = false
+    @Flag(help: "Speak results with TTS.")
+    var speak = false
+    @Option(help: "Silent turns before auto-sleep.")
+    var idleTurns: Int = 3
+    @Option(help: "Seconds per listening turn.")
+    var listenSeconds: Double = 12
+    @Option(help: "Transcribe this audio file once, run it, exit (testing — no mic needed).")
+    var file: String?
+    @Flag(help: "Start in listening state immediately (no hotkey press needed).")
+    var wake = false
+
+    func run() async throws {
+        guard #available(macOS 26, *) else {
+            throw ValidationError("SpeechAnalyzer needs macOS 26+")
+        }
+        setbuf(stdout, nil)   // daemon: stream events unbuffered
+        let stt = SpeechToText(locale: Locale(identifier: locale))
+        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
+
+        let makePol: @Sendable () -> any Policy = {
+            guard policy == "vlm" else { return AXPolicy() }
+            return VLMPolicy(endpoint: Endpoint(
+                baseURL: ProcessInfo.processInfo.environment["S1_VLM_BASE"] ?? "http://localhost:11434/v1",
+                model: ProcessInfo.processInfo.environment["S1_VLM_MODEL"] ?? "gemma3:4b",
+                apiKey: ProcessInfo.processInfo.environment["S1_VLM_KEY"],
+                numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192))
+        }
+
+        // --file: one utterance through the same pipeline, then exit.
+        if let file {
+            guard FileManager.default.fileExists(atPath: file) else {
+                throw ValidationError("audio file not found: \(file)")
+            }
+            let text = try await stt.transcribe(file: URL(fileURLWithPath: file))
+            print("heard: \(text)")
+            guard !text.isEmpty else { throw ValidationError("nothing transcribed") }
+            let (report, _) = try await S1Runner.run(goal: text, policy: makePol(),
+                artifacts: "artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
+                allowIrreversible: false, killSwitch: NSTemporaryDirectory() + "s1-serve-stop",
+                s2: reasoner)
+            if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
+            if speak { await Speaker().say("Selesai", language: locale) }
+            return
+        }
+
+        let serve = Serve(
+            config: .init(makePolicy: makePol, s2: reasoner, speak: speak,
+                          listenSeconds: listenSeconds, maxSilentTurns: idleTurns,
+                          transcribe: { try await stt.transcribeMic(maxSeconds: 12) }),
+            locale: Locale(identifier: locale),
+            hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
+        ) { ev in
+            print("[\(ev.kind.rawValue)] \(ev.text)")
+        }
+        serve.armHotkey()
+        print("serve armed — double-tap Shift or ⌃⌥Space toggles listening; Ctrl-C quits")
+        if wake { serve.wake() }
+        // The global hotkey monitor's handler is delivered through the
+        // MAIN run loop, so main must actually spin — queue CFRunLoop there
+        // (NSApplication touch first: NSEvent monitors in a CLI need the app
+        // object; accessory policy = no dock icon), then park this task.
+        DispatchQueue.main.async {
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            CFRunLoopRun()
+        }
+        while true { try await Task.sleep(for: .seconds(3600)) }
     }
 }
 

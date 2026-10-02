@@ -37,6 +37,7 @@ struct ContentView: View {
                     permRow("Accessibility", ok: model.permissions.accessibility)
                     permRow("Screen recording", ok: model.permissions.screenRecording)
                     permRow("Microphone", ok: model.permissions.microphone)
+                    permRow("Input monitoring", ok: model.permissions.inputMonitoring)
                     Button("Request / re-check") { model.requestPermissions() }
                     Text("Screen-recording grants apply on next app launch.")
                         .font(.caption)
@@ -49,6 +50,7 @@ struct ContentView: View {
             VStack(spacing: 14) {
                 commandCard
                 controlRow
+                companionRow
                 stepsFeed
                 statusBar
             }
@@ -123,6 +125,35 @@ struct ContentView: View {
                 }
                 Spacer()
             }
+        }
+    }
+
+    /// Always-on companion strip — same surface as the menu bar item.
+    private var companionRow: some View {
+        GlassEffectContainer {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(model.serveState == .idle ? Color.secondary
+                          : model.serveState == .listening ? .green : .orange)
+                    .frame(width: 8, height: 8)
+                Text(model.serveStatus)
+                    .font(.callout)
+                    .lineLimit(1)
+                Spacer()
+                Button(model.serveState == .idle ? "Listen" : "Sleep") {
+                    model.toggleServe()
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                Toggle("Launch at login", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { _ in model.toggleLoginItem() }))
+                .toggleStyle(.checkbox)
+                .font(.callout)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
     }
 

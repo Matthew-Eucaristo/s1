@@ -42,6 +42,8 @@ public struct SystemPerceiver: Perceiver {
             obs.axTree = AXReader.snapshotTree(pid: app.processIdentifier)
         }
 
+        obs.appStates = Self.appStates(windows: obs.windows, frontmostPID: obs.frontmostPID)
+
         if wantScreenshot {
             let image = try await Self.captureScreen()
             obs.screenshotPath = try await screenshotSink?(image)
@@ -64,6 +66,36 @@ public struct SystemPerceiver: Perceiver {
                 title: w[kCGWindowName as String] as? String,
                 bounds: CGRectCodable(rect))
         }
+    }
+
+    /// Surface state of every running GUI app — the agent's "what's on this
+    /// Mac" view, joined from NSWorkspace + the window list. Cheap: no AX
+    /// trees here (the frontmost app's tree is already captured separately).
+    public static func appStates(windows: [WindowInfo], frontmostPID: pid_t?,
+                                 maxApps: Int = 20, maxTitlesPerApp: Int = 4) -> [AppState] {
+        let apps: [(name: String, pid: Int32)] = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && !$0.isTerminated }
+            .map { ($0.localizedName ?? "?", $0.processIdentifier) }
+        return joinAppStates(apps: apps, windows: windows, frontmostPID: frontmostPID,
+                             maxApps: maxApps, maxTitlesPerApp: maxTitlesPerApp)
+    }
+
+    /// The join, decoupled from NSWorkspace so tests can feed fixtures.
+    static func joinAppStates(apps: [(name: String, pid: Int32)], windows: [WindowInfo],
+                              frontmostPID: pid_t?, maxApps: Int, maxTitlesPerApp: Int) -> [AppState] {
+        var titles: [Int32: [String]] = [:]
+        for w in windows {
+            if let t = w.title, !t.isEmpty, titles[w.pid, default: []].count < maxTitlesPerApp {
+                titles[w.pid, default: []].append(t)
+            }
+        }
+        var states = apps.map { a in
+            AppState(name: a.name, pid: a.pid,
+                     isActive: a.pid == frontmostPID,
+                     windowTitles: titles[a.pid] ?? [])
+        }
+        states.sort { $0.isActive && !$1.isActive || ($0.isActive == $1.isActive && $0.name < $1.name) }
+        return Array(states.prefix(maxApps))
     }
 
     /// One-shot capture via SCScreenshotManager (macOS 14+) — cheaper than

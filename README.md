@@ -4,7 +4,7 @@
 
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
 
-**Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
+**Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)**, **always-on companion (global hotkey → continuous listening)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
 
 - Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
@@ -54,6 +54,29 @@ SpeechAnalyzer (macOS 26) is used when its assets exist; otherwise s1 falls
 back to `SFSpeechRecognizer` — still on-device. Dictation must be enabled
 (System Settings → Keyboard → Dictation).
 
+## Always-on companion
+
+```bash
+swift run s1 serve              # daemon: arms the global hotkey, then idles (zero mic/CPU)
+swift run s1 serve --wake       # start listening immediately (for SSH/headless use)
+```
+
+Press **⇧⇧** (double-tap either Shift) or **⌃⌥Space** anywhere on the Mac:
+s1 toggles between `idle` and `listening`. While listening it loops
+**hear → run the goal → speak → hear** until you say a stop phrase
+(`stop`, `berhenti`, `matikan`) or press the hotkey again; it auto-sleeps
+after `--idle-turns` silent turns or repeated STT errors. Idle uses no mic
+and no model — flat battery.
+
+The S1 app is the same daemon with a menu-bar face (`MenuBarExtra`): the
+waveform icon shows idle/listening/running, toggles listening, and offers
+**Launch at login** (`SMAppService.mainApp`). The window stays available
+for one-shot commands.
+
+Perception includes a whole-Mac view: every observation lists running apps
++ window titles (`AppState`), and `open X` resolves apps outside the
+standard dirs via Spotlight (`mdfind kMDItemKind == 'Application'`).
+
 ## Brains
 
 ```bash
@@ -88,6 +111,7 @@ swift run s1 replay artifacts/<run-dir> --dry-run   # re-execute a recorded run
 | Accessibility | CGEvent input + reading the AX tree (the main perception path) |
 | Screen & System Audio Recording | on-demand screenshots (ScreenCaptureKit) — **relaunch s1 after first grant** |
 | Microphone | voice input only (P4) |
+| Input Monitoring | the global hotkey (serve/app) — separate bucket from Accessibility; s1 requests it automatically the first time the tap can't be installed |
 
 When running via `swift run`, grant the permission to the produced binary
 (`.build/debug/s1`) or to your terminal, then relaunch.
@@ -105,9 +129,13 @@ Sources/S1Core/
   Preflight/ TCC checks incl. the relaunch invariant
   Artifacts/ per-run dir: meta.json + steps.jsonl + screens/
   Loop/      see → decide → gate → act → verify → log
-Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say · listen
-Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): mic + file STT,
-             live step feed, brain/locale/model pickers, permission status
+Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say · listen · serve
+Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
+             (MenuBarExtra + hotkey + login item), mic + file STT, live step
+             feed, brain/locale/model pickers, permission status
+Sources/S1Core/
+  Hotkey/    passive CGEvent tap (listen-only): ⇧⇧ double-tap + ⌃⌥Space chord
+  Loop/      Serve — always-on listen→run→speak daemon, auto-sleep, kill switch
 ```
 
 ## Safety

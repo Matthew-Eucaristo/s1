@@ -11,6 +11,13 @@ enum LLMDecisionCodec {
     /// grounds actions in real element refs (`e12`).
     static func observationText(_ obs: Observation) -> String {
         var lines = ["App: \(obs.frontmostApp ?? "?")"]
+        // Every running app + its window titles — the model sees the whole
+        // screen context (Spotlight-like), not just the frontmost window.
+        for a in obs.appStates.prefix(12) {
+            var s = a.isActive ? "* \(a.name)" : "  \(a.name)"
+            if !a.windowTitles.isEmpty { s += ": " + a.windowTitles.prefix(3).joined(separator: " | ") }
+            lines.append(s)
+        }
         lines += obs.windows.prefix(8).map { "win \($0.pid): \($0.title ?? "")" }
         for n in obs.axTree?.flattened.prefix(60) ?? [] {
             var s = "\(n.ref) \(n.role)"

@@ -84,12 +84,22 @@ public struct AXNode: Codable, Sendable {
     }
 }
 
+/// One running app's surface state — what Spotlight-like awareness looks
+/// like: every visible app plus its window titles, not just the frontmost.
+public struct AppState: Codable, Sendable {
+    public var name: String
+    public var pid: Int32
+    public var isActive: Bool          // frontmost
+    public var windowTitles: [String]  // non-empty, capped
+}
+
 public struct Observation: Codable, Sendable {
     public var timestamp: Date
     public var frontmostApp: String?
     public var frontmostPID: Int32?
     public var windows: [WindowInfo]
     public var axTree: AXNode?
+    public var appStates: [AppState] = []
     public var screenshotPath: String?
 
     /// One-line digest for the step log.

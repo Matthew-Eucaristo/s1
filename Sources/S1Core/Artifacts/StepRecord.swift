@@ -91,7 +91,7 @@ public actor RunLogger {
     }
 }
 
-public enum S1Error: Error, CustomStringConvertible {
+public enum S1Error: Error, CustomStringConvertible, LocalizedError {
     case permissionMissing(String)
     case screenshotFailed(String)
     case axFailed(String)
@@ -105,4 +105,6 @@ public enum S1Error: Error, CustomStringConvertible {
         case .aborted(let m): return "aborted: \(m)"
         }
     }
+
+    public var errorDescription: String? { description }
 }
