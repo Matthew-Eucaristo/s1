@@ -4,7 +4,7 @@
 
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
 
-**Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice — all verified on real macOS 26. See `PLAN.md` for the roadmap.
+**Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
 
 - Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
@@ -21,6 +21,10 @@ git clone https://github.com/Matthew-Eucaristo/s1.git && cd s1
 ./scripts/install-local.sh            # or: swift build -c release && cp .build/release/s1 /usr/local/bin/
 
 s1 preflight                          # shows which macOS permissions are missing
+
+# The app:
+./scripts/make-app.sh                 # builds dist/S1.app (universal, ad-hoc signed)
+open dist/S1.app                      # or copy it to /Applications
 ```
 
 ## Try it (3 steps)
@@ -102,6 +106,8 @@ Sources/S1Core/
   Artifacts/ per-run dir: meta.json + steps.jsonl + screens/
   Loop/      see → decide → gate → act → verify → log
 Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say · listen
+Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): mic + file STT,
+             live step feed, brain/locale/model pickers, permission status
 ```
 
 ## Safety

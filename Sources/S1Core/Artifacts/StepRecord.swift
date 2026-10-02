@@ -35,13 +35,17 @@ public struct StepRecord: Codable, Sendable {
 public actor RunLogger {
     public nonisolated let runDir: URL
     public nonisolated let goal: String
+    /// Optional live observer for each logged step (e.g. a UI feed).
+    private let onStep: (@Sendable (StepRecord) -> Void)?
     private var stepCount = 0
     private let enc: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; e.outputFormatting = [.prettyPrinted, .sortedKeys]; return e
     }()
 
     /// `config` lands in meta.json — version/config fingerprint of the run.
-    public init(goal: String, root: URL, config: [String: String]) throws {
+    public init(goal: String, root: URL, config: [String: String],
+                onStep: (@Sendable (StepRecord) -> Void)? = nil) throws {
+        self.onStep = onStep
         self.goal = goal
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
@@ -66,6 +70,7 @@ public actor RunLogger {
             try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
         }
         stepCount += 1
+        onStep?(record)
     }
 
     private var shotCount = 0

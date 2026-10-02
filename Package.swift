@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "S1Core", targets: ["S1Core"]),
         .executable(name: "s1", targets: ["s1"]),
+        .executable(name: "s1-app", targets: ["s1-app"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
@@ -26,6 +27,18 @@ let package = Package(
                 "-Xlinker", "-sectcreate",
                 "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
                 "-Xlinker", "Sources/s1/Info.plist",
+            ])]
+        ),
+        .executableTarget(
+            name: "s1-app",
+            dependencies: ["S1Core"],
+            path: "Sources/S1App",
+            exclude: ["Info.plist"],
+            // Same TCC embedding as the CLI — the app needs mic/speech usage strings.
+            linkerSettings: [.unsafeFlags([
+                "-Xlinker", "-sectcreate",
+                "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
+                "-Xlinker", "Sources/S1App/Info.plist",
             ])]
         ),
         .testTarget(name: "S1CoreTests", dependencies: ["S1Core"]),

@@ -88,9 +88,10 @@ struct RunCmd: AsyncParsableCommand {
             goalText = g
         } else { goalText = goal }
         let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
-        try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)
+        if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
 }
 
@@ -175,10 +176,11 @@ struct ListenCmd: AsyncParsableCommand {
                 numCtx: ProcessInfo.processInfo.environment["S1_NUM_CTX"].flatMap(Int.init) ?? 8192))
             : AXPolicy()
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
-        try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: NSTemporaryDirectory() + "s1-stop", s2: reasoner)
+        if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
             await Speaker().say("Selesai. \(goal)", language: locale)
         }
@@ -207,10 +209,11 @@ struct DemoCmd: AsyncParsableCommand {
             .init(action: .captureScreenshot(reason: "final state"), rationale: "evidence"),
             .init(action: .done(summary: "demo complete"), rationale: "finish"),
         ]
-        try await S1Runner.run(goal: "p1-demo-textedit", policy: ScriptedPolicy(steps: steps),
+        let (report, _) = try await S1Runner.run(goal: "p1-demo-textedit", policy: ScriptedPolicy(steps: steps),
                                artifacts: artifacts, maxSteps: 25, threshold: 0.6,
                                dryRun: dryRun, allowIrreversible: false,
                                killSwitch: NSTemporaryDirectory() + "s1-stop")
+        if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
 }
 

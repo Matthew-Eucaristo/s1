@@ -8,6 +8,14 @@ public struct PermissionReport: Sendable {
     public var microphone: Bool
     public var notes: [String]
 
+    public init(accessibility: Bool = false, screenRecording: Bool = false,
+                microphone: Bool = false, notes: [String] = []) {
+        self.accessibility = accessibility
+        self.screenRecording = screenRecording
+        self.microphone = microphone
+        self.notes = notes
+    }
+
     public var ready: Bool { accessibility && screenRecording }
 }
 

@@ -2,10 +2,12 @@ import Foundation
 
 /// Shared run setup for CLI commands: logger + perceiver + actuator + gate + loop.
 public enum S1Runner {
+    @discardableResult
     public static func run(goal: String, policy: any Policy, artifacts: String,
                            maxSteps: Int, threshold: Double, dryRun: Bool,
                            allowIrreversible: Bool, killSwitch: String?,
-                           s2: (any Reasoner)? = nil) async throws {
+                           s2: (any Reasoner)? = nil,
+                           onStep: (@Sendable (StepRecord) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
         var config = LoopConfig()
         config.maxSteps = maxSteps
         config.confidenceThreshold = threshold
@@ -26,7 +28,7 @@ public enum S1Runner {
                 "maxSteps": String(maxSteps),
                 "allowIrreversible": String(allowIrreversible),
                 "s2": s2?.name ?? "none",
-            ])
+            ], onStep: onStep)
         let perceiver = SystemPerceiver(screenshotSink: { img in
             try await logger.saveScreenshot(img)
         })
@@ -38,7 +40,6 @@ public enum S1Runner {
         print("run dir: \(logger.runDir.path)")
         let report = try await loop.run(goal: goal, policy: policy, logger: logger)
         print("status: \(report.status.rawValue) | steps: \(report.steps) | escalations: \(report.escalations)")
-
-        if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
+        return (report, logger)
     }
 }
