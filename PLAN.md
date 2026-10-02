@@ -84,6 +84,7 @@ Confidence hibrida (model tidak kalibrated): skor match AX + confidence verbal m
 - **STT default: `SpeechAnalyzer`/`SpeechTranscriber`** — built-in, on-device, 63 locale terverifikasi termasuk `id-ID`. Gratis, tanpa download model, paling native.
 - Opsional: **FluidAudio Parakeet** (Apache; p50 ~182 ms, tapi v3 hanya bahasa Eropa → untuk English-first low latency) dan **WhisperKit** (MIT; large-v3 multilingual termasuk Indonesia).
 - **VAD**: FluidAudio Silero VAD (sudah satu paket) atau endpointing bawaan SpeechTranscriber; mode **push-to-talk** via hotkey global (Carbon `RegisterEventHotKey`, tidak butuh AX).
+- **TERBANGUN — always-on companion (di luar fase P, permintaan owner)**: `Serve` daemon `idle ⇄ listening` (hear → run → speak → hear, stop-phrase, auto-sleep; idle = 0 mic/CPU) + global hotkey **⇧⇧ / ⌃⌥Space** via `CGEvent.tapCreate` listen-only (NSEvent monitor tidak pernah deliver di host CLI — fakta platform) + app `MenuBarExtra` (badge state, Listen, Launch at login `SMAppService`). Perception membawa `AppState[]` semua app + window titles; `open X` resolve via Spotlight `mdfind`. Catatan: hotkey pakai CGEvent tap (butuh Accessibility + Input Monitoring), bukan Carbon — Carbon hanya menangkap keyDown target dan tidak bisa double-tap modifier.
 - **TTS**: `AVSpeechSynthesizer` on-device (ada voice Indonesia) — default, sejalan "TTS belum wajib". Opsional Kokoro via FluidAudio (English).
 
 ### 1.7 Dependensi OSS (diputuskan dari lisensi + integrasi)
