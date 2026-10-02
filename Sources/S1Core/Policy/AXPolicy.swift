@@ -101,12 +101,16 @@ public struct AXPolicy: Policy {
                                 rationale: "no AX element matches '\(intent.arg)'")
             }
             let isPressable = AXPolicy.pressableRoles.contains(node.role)
-            let action: Action = (intent.verb == "set" || intent.verb == "isi")
-                ? .axSetValue(ref: node.ref, value: intent.arg)
-                : (isPressable
-                    ? .axPress(ref: node.ref)
-                    : .click(x: (node.frame?.x ?? 0) + (node.frame?.w ?? 0) / 2,
-                             y: (node.frame?.y ?? 0) + (node.frame?.h ?? 0) / 2))
+            let action: Action
+            if intent.verb == "set" || intent.verb == "isi" {
+                action = .axSetValue(ref: node.ref, value: intent.arg)
+            } else if isPressable {
+                action = .axPress(ref: node.ref)
+            } else {
+                let f = node.frame
+                action = .click(x: (f?.x ?? 0) + (f?.w ?? 0) / 2,
+                                y: (f?.y ?? 0) + (f?.h ?? 0) / 2)
+            }
             // Ambiguity penalty: second-place close behind → less sure.
             let runnerUp = candidates.dropFirst().first?.1 ?? 0
             let confidence = min(0.95, score * (runnerUp > score - 0.15 ? 0.75 : 1.0))
