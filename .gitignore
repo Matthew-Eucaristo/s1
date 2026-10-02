@@ -1,0 +1,10 @@
+# SwiftPM
+.build/
+.swiftpm/
+*.xcodeproj
+
+# Runtime output (screenshots + steps.jsonl) — never commit run data.
+run/
+
+# macOS
+.DS_Store
