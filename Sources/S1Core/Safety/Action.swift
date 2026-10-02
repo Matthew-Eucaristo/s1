@@ -12,7 +12,7 @@ public enum ActionClass: String, Codable, Sendable {
 
 /// A single executable step. Everything the agent can do goes through this enum
 /// so the safety gate can classify it before it touches the machine.
-public enum Action: Codable, Sendable {
+public enum Action: Codable, Sendable, Equatable {
     // read-only
     case captureScreenshot(reason: String)
     case verify(expectation: String)

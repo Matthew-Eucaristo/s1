@@ -78,10 +78,24 @@ public struct CGEventActuator: Actuator {
 
         case .axSetValue(let ref, let value):
             guard let pid = frontmostPID else { throw S1Error.axFailed("no frontmost pid") }
-            guard AXReader.setValue(pid: pid, ref: ref, value: value) else {
-                throw S1Error.axFailed("set value failed on \(ref)")
+            if AXReader.setValue(pid: pid, ref: ref, value: value) {
+                return "AXSetValue \(ref) = \"\(value.prefix(30))\""
             }
-            return "AXSetValue \(ref) = \"\(value.prefix(30))\""
+            // Ref index shifted or the node refuses AX value writes — focus the
+            // element (click its frame if needed) and type the value for real.
+            _ = AXReader.setAttribute(pid: pid, ref: ref,
+                                      attr: kAXFocusedAttribute, value: kCFBooleanTrue!)
+            if let f = AXReader.frameOf(pid: pid, ref: ref) {
+                let p = CGPoint(x: f.midX, y: f.midY)
+                let src = CGEventSource(stateID: .hidSystemState)
+                CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                        mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+                usleep(60_000)
+                CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                        mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            }
+            try postUnicode(value)
+            return "focused+typed \(value.count) chars (AXSetValue refused)"
 
         case .openApp(let name):
             try await openApp(named: name)

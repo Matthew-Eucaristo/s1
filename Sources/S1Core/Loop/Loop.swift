@@ -11,7 +11,7 @@ public struct LoopConfig: Sendable {
 }
 
 public enum RunStatus: String, Sendable {
-    case done, aborted, escalatedToS2, needsHuman, maxStepsReached
+    case done, aborted, escalatedToS2, needsHuman, maxStepsReached, stuckLoop
 }
 
 public struct RunReport: Sendable {
@@ -70,6 +70,16 @@ public struct AgentLoop {
             // S2 was consulted and still couldn't decide — stop instead of
             // burning steps on an unrecoverable abstention.
             if rec.action == nil, rec.escalation != nil { status = .escalatedToS2; break }
+            // Stuck-loop guard: identical action 3× in a row never converges.
+            if history.suffix(3).count == 3,
+               let a0 = history[history.count - 1].action,
+               history.suffix(3).allSatisfy({ $0.action == a0 }) {
+                try await logger.log(record(history.count, obs: nil, by: "system", conf: nil,
+                                            rat: "stuck loop: same action 3x", action: nil,
+                                            gate: "-", out: "aborted", ver: nil, esc: nil))
+                status = .stuckLoop
+                break
+            }
         }
         return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)
     }
@@ -113,7 +123,8 @@ public struct AgentLoop {
         guard let action = decision.action else {
             let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
                            rat: decision.rationale, action: nil,
-                           gate: "-", out: "no action", ver: nil, esc: esc)
+                           gate: "-", out: "no action", ver: nil, esc: esc,
+                           reply: decision.rawReply)
             try await logger.log(r)
             return r
         }
@@ -148,7 +159,8 @@ public struct AgentLoop {
 
         let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
                        rat: decision.rationale, action: action,
-                       gate: verdict.label, out: outcome, ver: verified, esc: esc)
+                       gate: verdict.label, out: outcome, ver: verified, esc: esc,
+                       reply: decision.rawReply)
         try await logger.log(r)
         return r
     }
@@ -169,9 +181,11 @@ public struct AgentLoop {
 
     private func record(_ i: Int, obs: Observation?, by: String, conf: Double?,
                         rat: String?, action: Action?, gate: String, out: String?,
-                        ver: Bool?, esc: StepRecord.Escalation?) -> StepRecord {
+                        ver: Bool?, esc: StepRecord.Escalation?,
+                        reply: String? = nil) -> StepRecord {
         StepRecord(index: i, time: Date(), observation: obs?.summary ?? "none",
                    decidedBy: by, confidence: conf, rationale: rat,
+                   modelReply: reply,
                    action: action, gate: gate, outcome: out,
                    verified: ver, escalation: esc)
     }

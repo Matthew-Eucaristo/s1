@@ -63,7 +63,7 @@ public enum RunReader {
             case .done, .verify, .captureScreenshot:
                 try await logger.log(StepRecord(index: i, time: Date(),
                     observation: "replay (read-only)", decidedBy: "replay",
-                    confidence: nil, rationale: rec.rationale, action: action,
+                    confidence: nil, rationale: rec.rationale, modelReply: nil, action: action,
                     gate: "allow", outcome: "skipped (read-only)",
                     verified: nil, escalation: nil))
             default:
@@ -78,7 +78,7 @@ public enum RunReader {
                 }
                 try await logger.log(StepRecord(index: i, time: Date(),
                     observation: "replay", decidedBy: "replay",
-                    confidence: nil, rationale: rec.rationale, action: action,
+                    confidence: nil, rationale: rec.rationale, modelReply: nil, action: action,
                     gate: verdict.label, outcome: outcome,
                     verified: nil, escalation: nil))
             }

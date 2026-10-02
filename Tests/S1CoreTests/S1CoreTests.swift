@@ -53,7 +53,7 @@ private func jsonlDecoder() -> JSONDecoder {
     let r = StepRecord(index: 3, time: Date(timeIntervalSince1970: 0),
                        observation: "App | windows:2", decidedBy: "s1:scripted",
                        confidence: 0.9, rationale: "test",
-                       action: .typeText("hi"), gate: "allow",
+                       modelReply: nil, action: .typeText("hi"), gate: "allow",
                        outcome: "typed 2 chars", verified: nil, escalation: nil)
     let line = try r.jsonLine()
     #expect(!line.contains("\n"))
@@ -66,7 +66,7 @@ private func jsonlDecoder() -> JSONDecoder {
 
 @Test func escalationRoundTripsInJSONL() throws {
     let r = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:dummy",
-                       confidence: 0.1, rationale: "unsure", action: nil, gate: "-",
+                       confidence: 0.1, rationale: "unsure", modelReply: nil, action: nil, gate: "-",
                        outcome: nil, verified: nil,
                        escalation: .init(to: "s2:none", reason: "conf 0.1 < 0.6"))
     let back = try jsonlDecoder().decode(StepRecord.self, from: Data(try r.jsonLine().utf8))
@@ -169,7 +169,7 @@ private func jsonlDecoder() -> JSONDecoder {
     let d1 = try await pol.decide(observation: obs, goal: "open Safari, done", history: [])
     if case .openApp(let name)? = d1.action { #expect(name == "Safari") } else { Issue.record("expected openApp") }
     let fake = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax",
-                          confidence: 1, rationale: "", action: .openApp(name: "Safari"),
+                          confidence: 1, rationale: "", modelReply: nil, action: .openApp(name: "Safari"),
                           gate: "allow", outcome: "", verified: nil, escalation: nil)
     let d2 = try await pol.decide(observation: obs, goal: "open Safari, done", history: [fake])
     if case .done? = d2.action {} else { Issue.record("expected done") }
@@ -248,4 +248,14 @@ private struct StubReasoner: Reasoner {
     #expect(AppResolver.similarity("teks edit", "TextEdit") >= 0.5)
     #expect(AppResolver.similarity("teks edit", "Photo Booth") < 0.5)
     #expect(AppResolver.similarity("sistem seting", "System Settings") >= 0.5)
+}
+
+@Test func llmCodecSalvagesTruncatedReply() {
+    // Real llama3.2:3b output: truncated mid-rationale
+    let d = LLMDecisionCodec.parse(#"{"action":{"type":"openApp","app":"TextEdit","x":0,"ref":"e0","keys":"cmd+t","ms":1000,"confidence":0.9,"rationale:"#)
+    #expect(d != nil)
+    #expect(d?.confidence == 0.9)
+    if case .openApp(let n)? = d?.action { #expect(n == "TextEdit") } else { Issue.record() }
+    let t = LLMDecisionCodec.parse(#"{"action":{"type":"typeText","text":"hello world","confidence":0.8}}"#)
+    if case .typeText(let s)? = t?.action { #expect(s == "hello world") } else { Issue.record() }
 }
