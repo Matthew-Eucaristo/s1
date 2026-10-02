@@ -166,17 +166,48 @@ public struct AgentLoop {
     }
 
     /// Post-action check: re-observe and see if the expectation is visible in
-    /// the AX tree / window titles. Real verification, not self-report.
+    /// the AX tree / window titles. Real verification, not self-report. Apps
+    /// publish their new AX state asynchronously — a verify that runs in the
+    /// same tick as the write can race it, so one short settle + re-observe
+    /// keeps the check honest without hiding real failures.
     private func verify(_ expectation: String, frontmostPID: pid_t?) async -> Bool {
+        // Cold apps (freshly opened document) can take >1s to publish their
+        // new AX state — poll briefly before declaring the write invisible.
+        for attempt in 0..<5 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 400_000_000) }
+            if await expectationVisible(expectation) { return true }
+        }
+        return false
+    }
+
+    private func expectationVisible(_ expectation: String) async -> Bool {
         guard let obs = try? await perceiver.observe(wantScreenshot: false) else { return false }
         let needle = expectation.lowercased()
-        if let tree = obs.axTree {
-            for node in tree.flattened {
-                if let v = node.value?.lowercased(), v.contains(needle) { return true }
-                if let t = node.title?.lowercased(), t.contains(needle) { return true }
+        if treeContains(obs.axTree, needle) { return true }
+        if obs.windows.contains(where: { $0.title?.lowercased().contains(needle) ?? false }) {
+            return true
+        }
+        // A CLI-launched app isn't always frontmost (keystrokes still land) —
+        // its tree would be missed by the frontmost-only check, so walk the
+        // other window-owning apps' trees too (bounded; only on a miss).
+        var seen = Set<pid_t>()
+        for w in obs.windows {
+            guard w.pid != obs.frontmostPID, seen.insert(w.pid).inserted else { continue }
+            if seen.count > 8 { break }
+            if let tree = AXReader.snapshotTree(pid: w.pid), treeContains(tree, needle) {
+                return true
             }
         }
-        return obs.windows.contains { $0.title?.lowercased().contains(needle) ?? false }
+        return false
+    }
+
+    private func treeContains(_ tree: AXNode?, _ needle: String) -> Bool {
+        guard let tree else { return false }
+        for node in tree.flattened {
+            if let v = node.value?.lowercased(), v.contains(needle) { return true }
+            if let t = node.title?.lowercased(), t.contains(needle) { return true }
+        }
+        return false
     }
 
     private func record(_ i: Int, obs: Observation?, by: String, conf: Double?,
