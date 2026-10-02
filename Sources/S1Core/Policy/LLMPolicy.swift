@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// Shared prompt plumbing for model-backed policies and the S2 reasoner:
 /// serialize the observation compactly, ask for a JSON decision, parse it.
 enum LLMDecisionCodec {
-    /// Keep prompts small: role/title/value of the first ~120 AX nodes, window
+    /// Keep prompts small: role/title/value of the first ~60 AX nodes, window
     /// titles, and the app name. Token cost stays low and the model still
     /// grounds actions in real element refs (`e12`).
     static func observationText(_ obs: Snapshot) -> String {

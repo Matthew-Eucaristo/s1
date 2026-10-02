@@ -10,6 +10,7 @@ struct S1: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "s1",
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
+        version: "0.2.0",
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self])
@@ -196,10 +197,14 @@ struct ListenCmd: AsyncParsableCommand {
             ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
             : AXPolicy()
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        // A fresh listen clears a stale kill switch — the user just asked for
+        // a new run, so an old "stop" file must not silently abort step 0.
+        let kill = NSTemporaryDirectory() + "s1-stop"
+        try? FileManager.default.removeItem(atPath: kill)
         let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
-                               killSwitch: NSTemporaryDirectory() + "s1-stop", s2: reasoner)
+                               killSwitch: kill, s2: reasoner)
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
             let done = locale.hasPrefix("id") ? "Selesai" : "Done"
@@ -230,10 +235,12 @@ struct DemoCmd: AsyncParsableCommand {
             .init(action: .captureScreenshot(reason: "final state"), rationale: "evidence"),
             .init(action: .done(summary: "demo complete"), rationale: "finish"),
         ]
+        let kill = NSTemporaryDirectory() + "s1-stop"
+        try? FileManager.default.removeItem(atPath: kill)
         let (report, _) = try await S1Runner.run(goal: "p1-demo-textedit", policy: ScriptedPolicy(steps: steps),
                                artifacts: artifacts, maxSteps: 25, threshold: 0.6,
                                dryRun: dryRun, allowIrreversible: false,
-                               killSwitch: NSTemporaryDirectory() + "s1-stop")
+                               killSwitch: kill)
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
 }
@@ -317,9 +324,13 @@ struct ServeCmd: AsyncParsableCommand {
             let text = try await stt.transcribe(file: URL(fileURLWithPath: file))
             print("heard: \(text)")
             guard !text.isEmpty else { throw ValidationError("nothing transcribed") }
+            // A one-shot has no wake() to clear the daemon's kill switch —
+            // remove the stale file or this run aborts at step 0.
+            let kill = NSTemporaryDirectory() + "s1-serve-stop"
+            try? FileManager.default.removeItem(atPath: kill)
             let (report, _) = try await S1Runner.run(goal: text, policy: makePol(),
                 artifacts: "artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
-                allowIrreversible: false, killSwitch: NSTemporaryDirectory() + "s1-serve-stop",
+                allowIrreversible: false, killSwitch: kill,
                 s2: reasoner)
             if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
             if speak { await Speaker().say("Selesai", language: locale) }
