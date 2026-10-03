@@ -407,7 +407,15 @@ final class AppModel {
                     Task { @MainActor [weak self] in self?.steps.append(rec) }
                 })
             runDir = report.runDir
-            status = report.status.rawValue
+            // "needsHuman" alone is jargon — say what for (denylist, secure
+            // field, irreversible). The triggering step carries the reason.
+            if report.status == .needsHuman,
+               let hit = steps.last(where: { $0.gate.hasPrefix("needsHuman") || $0.escalation?.to == "human" }) {
+                let why = hit.escalation?.reason ?? hit.gate
+                status = "needsHuman — \(why)"
+            } else {
+                status = report.status.rawValue
+            }
             recentGoals.removeAll { $0 == goalText }
             recentGoals.insert(goalText, at: 0)
             if recentGoals.count > 8 { recentGoals.removeLast() }
