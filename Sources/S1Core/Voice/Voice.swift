@@ -215,6 +215,11 @@ public struct SpeechToText: Sendable {
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         if let ctx = analysisContext { try await analyzer.setContext(ctx) }
+        // Apple doc pattern: feed the analyzer its best available format —
+        // the mic's native rate may differ, and odd hardware (8 kHz devices)
+        // would otherwise hand the analyzer a format it can't use.
+        let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        let converter = best.flatMap { AVAudioConverter(from: format, to: $0) }
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         var tapInstalled = false
         // Same cancellation rule as the legacy path: the tap and engine must
@@ -230,7 +235,11 @@ public struct SpeechToText: Sendable {
             continuation.finish()
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            continuation.yield(AnalyzerInput(buffer: buffer))
+            if let converter, let best, let out = Self.convert(buffer, from: format, to: best, using: converter) {
+                continuation.yield(AnalyzerInput(buffer: out))
+            } else {
+                continuation.yield(AnalyzerInput(buffer: buffer))
+            }
         }
         tapInstalled = true
         engine.prepare()
@@ -262,6 +271,24 @@ public struct SpeechToText: Sendable {
         // it is what lands the final transcript chunk.
         try await resultsTask?.value
         return await collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Resample a tap buffer into the analyzer's preferred format.
+    private static func convert(_ buffer: AVAudioPCMBuffer,
+                                from src: AVAudioFormat, to dst: AVAudioFormat,
+                                using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+        let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * dst.sampleRate / src.sampleRate)) + 64
+        guard let out = AVAudioPCMBuffer(pcmFormat: dst, frameCapacity: capacity) else { return nil }
+        var consumed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if consumed { status.pointee = .endOfStream; return nil }
+            consumed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard error == nil, out.frameLength > 0 else { return nil }
+        return out
     }
 }
 
@@ -323,6 +350,9 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     let synth = AVSpeechSynthesizer()
     private let lock = NSLock()
     var finished: CheckedContinuation<Void, Never>?
+    /// Serializes concurrent `say` calls — two overlapping callers would
+    /// overwrite `finished` and leak the first caller's continuation.
+    private var sayTail: Task<Void, Never>?
 
     public override init() {
         super.init()
@@ -336,9 +366,23 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
 
     /// Speak and return after the utterance finishes — bounded by `timeout`
     /// so a wedged synthesizer can't pin the caller (UI status, serve loop).
+    /// Overlapping calls queue behind each other rather than racing the
+    /// shared continuation slot.
     public func say(_ text: String, language: String = "id-ID", timeout: Double = 30) async {
-        // One utterance at a time: a second say() would overwrite `finished`
-        // and leak the first caller's continuation — settle it first.
+        // read-modify-write of the tail under the same lock the continuation
+        // slot uses — an atomic pair or two concurrent callers both chain nil.
+        lock.lock()
+        let prev = sayTail
+        let t = Task { [weak self] in
+            _ = await prev?.value
+            await self?.speakOnce(text, language: language, timeout: timeout)
+        }
+        sayTail = t
+        lock.unlock()
+        await t.value
+    }
+
+    private func speakOnce(_ text: String, language: String, timeout: Double) async {
         self.stop()
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
