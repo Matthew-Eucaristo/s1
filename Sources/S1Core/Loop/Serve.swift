@@ -130,10 +130,19 @@ public final class Serve: @unchecked Sendable {
         try? FileManager.default.removeItem(atPath: config.killSwitch)
         setState(.listening)
         emit(.listening)
-        listenTask = Task { [weak self] in await self?.listenLoop() }
+        // Chain behind the previous task's unwind: its defer must drop the
+        // mic tap/engine BEFORE a new turn grabs the input device, or two
+        // engines race on rapid wake→sleep→wake.
+        let prev = listenTask
+        listenTask = Task { [weak self] in
+            _ = await prev?.value
+            await self?.listenLoop()
+        }
     }
 
-    public func sleep() {
+    public func sleep() { sleep("") }
+
+    private func sleep(_ reason: String) {
         listenTask?.cancel()
         listenTask = nil
         // Land the kill switch too — an in-flight run aborts at its next step
@@ -143,7 +152,7 @@ public final class Serve: @unchecked Sendable {
         speaker.stop()
         if state != .idle {
             setState(.idle)
-            emit(.sleeping)
+            emit(.sleeping, reason)
         }
     }
 
@@ -166,8 +175,7 @@ public final class Serve: @unchecked Sendable {
                 if trimmed.isEmpty {
                     silentTurns += 1
                     if silentTurns >= config.maxSilentTurns {
-                        emit(.sleeping, "silence")
-                        sleep()
+                        sleep("silence")
                         return
                     }
                     continue
@@ -181,8 +189,7 @@ public final class Serve: @unchecked Sendable {
                 errors += 1
                 emit(.error, error.localizedDescription)
                 if errors >= config.maxListenErrors {
-                    emit(.sleeping, "stt errors x\(errors)")
-                    sleep()
+                    sleep("stt errors x\(errors)")
                     return
                 }
                 try? await Task.sleep(nanoseconds: 500_000_000)

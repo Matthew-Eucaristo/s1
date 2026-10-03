@@ -25,6 +25,10 @@ struct ContentView: View {
                         Text("English (en-US)").tag("en-US")
                     }
                     Toggle("Speak result (TTS)", isOn: $model.speakReply)
+                    TextField("Custom words, comma-separated", text: $model.vocabulary)
+                    Text("STT also learns installed app names automatically — say an app name and it lands.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if model.brain == .vlm {
                     Section("Model endpoint") {
@@ -75,11 +79,33 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                HStack(spacing: 8) {
+                    ForEach(examples, id: \.self) { ex in
+                        Button(ex) { model.goal = ex }
+                            .buttonStyle(.glass)
+                            .controlSize(.mini)
+                    }
+                    if !model.recentGoals.isEmpty {
+                        Menu("Recent") {
+                            ForEach(model.recentGoals, id: \.self) { g in
+                                Button(g) { model.goal = g }
+                            }
+                        }
+                        .controlSize(.mini)
+                    }
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
         }
+    }
+
+    /// One-tap starters that exercise the common verbs.
+    private var examples: [String] {
+        model.locale.hasPrefix("id")
+            ? ["buka TextEdit lalu ketik halo", "buka Notes", "tangkap layar"]
+            : ["open TextEdit then type hello", "open Notes", "take a screenshot"]
     }
 
     private var controlRow: some View {

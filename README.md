@@ -59,6 +59,17 @@ SpeechAnalyzer (macOS 26) is used when its assets exist; otherwise s1 falls
 back to `SFSpeechRecognizer` — still on-device. Dictation must be enabled
 (System Settings → Keyboard → Dictation).
 
+**Custom vocabulary** — s1 always feeds the recognizer contextual strings:
+installed app names are learned automatically (say "open Linear" and it
+lands). Add your own jargon to `~/.s1/config.json`:
+
+```json
+{ "vocabulary": ["s1", "Warp", "JIRA"] }
+```
+
+or per command: `--vocabulary "Warp,JIRA"`. Apple's limit is 100 phrases —
+your words rank first, app names fill the rest.
+
 ## Always-on companion
 
 ```bash

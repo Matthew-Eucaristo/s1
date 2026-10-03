@@ -9,7 +9,8 @@ import Foundation
 ///   "vlm":   { "base": "http://localhost:11434/v1", "model": "gemma3:4b" },
 ///   "s2":    { "base": "http://localhost:11434/v1", "model": "gemma3:4b" },
 ///   "locale": "id-ID",
-///   "speak":  true
+///   "speak":  true,
+///   "vocabulary": ["s1", "Warp", "Linear"]
 /// }
 /// ```
 public struct S1Config: Codable, Sendable {
@@ -28,10 +29,16 @@ public struct S1Config: Codable, Sendable {
     public var s2: ModelEndpoint?
     public var locale: String?
     public var speak: Bool?
+    /// Extra words/phrases the STT should bias toward (app names, jargon).
+    /// Apple's contextual-strings limit is 100 total — s1 prepends installed
+    /// app names after these, so user entries always win.
+    public var vocabulary: [String]?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
-                locale: String? = nil, speak: Bool? = nil) {
+                locale: String? = nil, speak: Bool? = nil,
+                vocabulary: [String]? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
+        self.vocabulary = vocabulary
     }
 
     public static var path: String { NSHomeDirectory() + "/.s1/config.json" }

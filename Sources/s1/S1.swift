@@ -106,8 +106,24 @@ struct ConfigCmd: AsyncParsableCommand {
         print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
         print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
         print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")
+        let vocab = S1Config.load().vocabulary ?? []
+        print("vocabulary → \(vocab.count) custom words + installed app names (auto)")
         print("edit the JSON file to swap brains permanently — no rebuild needed")
     }
+}
+
+/// config.json vocabulary + a `--vocabulary a,b,c` flag → the full
+/// contextual-strings list (installed app names added automatically).
+func sttVocabulary(_ csv: String?) -> [String] {
+    let flag = csv?.split(separator: ",").map { String($0) } ?? []
+    return Vocabulary.assemble(custom: flag + (S1Config.load().vocabulary ?? []))
+}
+
+func validatedSTTPolicy(_ policy: String) throws -> String {
+    guard ["ax", "vlm"].contains(policy) else {
+        throw ValidationError("unknown policy \(policy) — use ax or vlm")
+    }
+    return policy
 }
 
 struct TranscribeCmd: AsyncParsableCommand {
@@ -119,12 +135,15 @@ struct TranscribeCmd: AsyncParsableCommand {
     var locale: String = "id-ID"
     @Option(help: "Max seconds of mic recording when --file is omitted.")
     var maxSeconds: Double = 15
+    @Option(help: "Comma-separated words the recognizer should bias toward.")
+    var vocabulary: String?
 
     func run() async throws {
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
-        let stt = SpeechToText(locale: Locale(identifier: locale))
+        let stt = SpeechToText(locale: Locale(identifier: locale),
+                               vocabulary: sttVocabulary(vocabulary))
         let text: String
         if let file {
             guard FileManager.default.fileExists(atPath: file) else {
@@ -174,12 +193,15 @@ struct ListenCmd: AsyncParsableCommand {
     var vlmBase: String?
     @Option(help: "VLM model name (--policy vlm).")
     var vlmModel: String?
+    @Option(help: "Comma-separated words the recognizer should bias toward.")
+    var vocabulary: String?
 
     func run() async throws {
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
-        let stt = SpeechToText(locale: Locale(identifier: locale))
+        let stt = SpeechToText(locale: Locale(identifier: locale),
+                               vocabulary: sttVocabulary(vocabulary))
         let goal: String
         if let file {
             guard FileManager.default.fileExists(atPath: file) else {
@@ -193,7 +215,7 @@ struct ListenCmd: AsyncParsableCommand {
         print("heard: \(goal)")
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
-        let pol: any Policy = policy == "vlm"
+        let pol: any Policy = try validatedSTTPolicy(policy) == "vlm"
             ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
             : AXPolicy()
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
@@ -300,6 +322,8 @@ struct ServeCmd: AsyncParsableCommand {
     var vlmModel: String?
     @Option(help: "Transcribe this audio file once, run it, exit (testing — no mic needed).")
     var file: String?
+    @Option(help: "Comma-separated words the recognizer should bias toward.")
+    var vocabulary: String?
     @Flag(help: "Start in listening state immediately (no hotkey press needed).")
     var wake = false
 
@@ -308,7 +332,9 @@ struct ServeCmd: AsyncParsableCommand {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
         setbuf(stdout, nil)   // daemon: stream events unbuffered
-        let stt = SpeechToText(locale: Locale(identifier: locale))
+        _ = try validatedSTTPolicy(policy)
+        let stt = SpeechToText(locale: Locale(identifier: locale),
+                               vocabulary: sttVocabulary(vocabulary))
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
 
         let makePol: @Sendable () -> any Policy = {

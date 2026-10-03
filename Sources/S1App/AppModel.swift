@@ -27,6 +27,9 @@ final class AppModel {
     /// the tap down and back up while the user is still typing.
     var vlmBase = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
     var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
+    /// User's extra STT words (comma-separated). Read at transcribe time,
+    /// so edits need only a config save — no companion restart.
+    var vocabulary = "" { didSet { scheduleSave() } }
 
     private(set) var steps: [StepRecord] = []
     private(set) var status = "idle"
@@ -46,9 +49,16 @@ final class AppModel {
     /// "artifacts" path lands on the read-only root. Anchor run output under
     /// the same home as the config file instead.
     private let artifactsRoot = NSHomeDirectory() + "/.s1/artifacts"
-    private var stt: SpeechToText { SpeechToText(locale: Locale(identifier: locale)) }
+    private var parsedVocab: [String] {
+        vocabulary.split(separator: ",").map { String($0) }
+    }
+    private var stt: SpeechToText {
+        SpeechToText(locale: Locale(identifier: locale),
+                     vocabulary: Vocabulary.assemble(custom: parsedVocab))
+    }
     private var serve: Serve?
     private var rearmTask: Task<Void, Never>?
+    private var saveTask: Task<Void, Never>?
 
     init() {
         // ~/.s1/config.json seeds the app too — model choices made in the app
@@ -58,6 +68,7 @@ final class AppModel {
         if let b = cfg.vlm?.base { vlmBase = b }
         if let m = cfg.vlm?.model { vlmModel = m }
         if let s = cfg.speak { speakReply = s }
+        if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -116,10 +127,15 @@ final class AppModel {
     func rearmServe() {
         serve?.disarm()
         startServe()
+        saveConfig()
+    }
+
+    private func saveConfig() {
         var cfg = S1Config.load()
         cfg.locale = locale
         cfg.speak = speakReply
         cfg.vlm = .init(base: vlmBase, model: vlmModel)
+        cfg.vocabulary = parsedVocab
         try? cfg.save()
     }
 
@@ -129,6 +145,16 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             self?.rearmServe()
+        }
+    }
+
+    /// Persist-only path for fields that don't affect the running companion.
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            self?.saveConfig()
         }
     }
 
@@ -190,9 +216,14 @@ final class AppModel {
     /// Mic → transcript → run. The voice-first path.
     func listenAndRun() async {
         guard !running, !listening else { return }
-        // One mic at a time: the companion can't share the input device.
+        // One mic at a time: the companion can't share the input device,
+        // and one agent at a time: two concurrent runs would fight the screen.
         guard serveState != .listening else {
             status = "companion is listening — press ⇧⇧ / ⌃⌥Space to pause it first"
+            return
+        }
+        guard serveState != .running else {
+            status = "companion is running — wait or sleep it first"
             return
         }
         listening = true
@@ -215,8 +246,15 @@ final class AppModel {
         listening = false
     }
 
+    /// Goals the user has run, newest first — offered back for quick reruns.
+    private(set) var recentGoals: [String] = []
+
     func run() async {
         guard !running else { return }
+        guard serveState != .running else {
+            status = "companion is running — wait or sleep it first"
+            return
+        }
         let goalText = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goalText.isEmpty else { status = "nothing to run"; return }
         try? FileManager.default.removeItem(atPath: killPath)
@@ -240,6 +278,9 @@ final class AppModel {
                 })
             runDir = report.runDir
             status = report.status.rawValue
+            recentGoals.removeAll { $0 == goalText }
+            recentGoals.insert(goalText, at: 0)
+            if recentGoals.count > 8 { recentGoals.removeLast() }
             if speakReply {
                 let reply = locale.hasPrefix("id") ? "Selesai" : "Done"
                 await speaker.say("\(reply): \(goalText)", language: locale)

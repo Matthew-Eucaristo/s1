@@ -7,9 +7,24 @@ import AVFoundation
 @available(macOS 26, *)
 public struct SpeechToText: Sendable {
     public var locale: Locale
+    /// Phrases the recognizer should bias toward (app names, jargon) —
+    /// Apple's "contextual strings" on both the legacy and Analyzer paths.
+    public var vocabulary: [String]
 
-    public init(locale: Locale = Locale(identifier: "id-ID")) {
+    public init(locale: Locale = Locale(identifier: "id-ID"), vocabulary: [String] = []) {
         self.locale = locale
+        self.vocabulary = vocabulary
+    }
+
+    /// The AnalysisContext carrying our vocabulary — setContext REPLACES the
+    /// analyzer's context, so build the whole thing each time.
+    private var analysisContext: AnalysisContext? {
+        guard !vocabulary.isEmpty else { return nil }
+        let ctx = AnalysisContext()
+        ctx.contextualStrings = [
+            AnalysisContext.ContextualStringsTag(rawValue: "vocabulary"): vocabulary
+        ]
+        return ctx
     }
 
     /// Locales with a downloaded speech model on this machine.
@@ -36,6 +51,7 @@ public struct SpeechToText: Sendable {
         let req = SFSpeechURLRecognitionRequest(url: url)
         req.shouldReportPartialResults = false
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         return try await withCheckedThrowingContinuation { (c: CheckedContinuation<String, Error>) in
             var resumed = false
             rec.recognitionTask(with: req) { result, error in
@@ -65,6 +81,7 @@ public struct SpeechToText: Sendable {
             try await request.downloadAndInstall()
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        if let ctx = analysisContext { try await analyzer.setContext(ctx) }
         guard let file = try? AVAudioFile(forReading: url) else {
             throw S1Error.aborted("cannot open audio file \(url.path)")
         }
@@ -116,6 +133,7 @@ public struct SpeechToText: Sendable {
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = false
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         let collected = Locked<String>("")
         let failure = Locked<Error?>(nil)
         let finished = FinishedFlag()
@@ -166,6 +184,7 @@ public struct SpeechToText: Sendable {
             try await request.downloadAndInstall()
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        if let ctx = analysisContext { try await analyzer.setContext(ctx) }
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         var tapInstalled = false
         // Same cancellation rule as the legacy path: the tap and engine must

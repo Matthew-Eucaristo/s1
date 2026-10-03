@@ -469,6 +469,33 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(calls.get() >= 2)
 }
 
+// MARK: - vocabulary
+
+@Test func vocabularyAssembleDedupesAndCaps() {
+    // Custom words keep their spelling, dedup is case-insensitive on first
+    // seen, "s1" is always present, and the 100-phrase Apple cap holds.
+    let apps = { (1...200).map { "App\($0)" } }
+    let v = Vocabulary.assemble(custom: ["Warp", " warp ", "Linear"], appNames: apps)
+    #expect(v.first == "s1")
+    #expect(v[1] == "Warp")
+    #expect(v[2] == "Linear")
+    #expect(v.count == Vocabulary.appleLimit)
+    let lowered = v.map { $0.lowercased() }
+    #expect(Set(lowered).count == lowered.count)
+}
+
+@Test func configVocabularyRoundTrips() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1cfg-\(UUID().uuidString)")
+    let path = dir.appendingPathComponent("config.json").path
+    var c = S1Config()
+    c.vocabulary = ["s1", "Warp"]
+    try c.save(to: path)
+    #expect(S1Config.load(from: path).vocabulary == ["s1", "Warp"])
+    // A file without the key still decodes (backwards-compatible).
+    try "{}".write(toFile: path, atomically: true, encoding: .utf8)
+    #expect(S1Config.load(from: path).vocabulary == nil)
+}
+
 // MARK: - all-app perception
 
 @Test func appStatesJoinsWorkspaceAndWindowTitles() {
