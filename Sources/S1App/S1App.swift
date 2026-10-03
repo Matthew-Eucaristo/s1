@@ -66,6 +66,7 @@ struct S1App: App {
 private struct MenuBarView: View {
     @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @FocusState private var goalFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -89,6 +90,7 @@ private struct MenuBarView: View {
                 TextField("Goal…", text: $model.goal)
                     .textFieldStyle(.roundedBorder)
                     .font(.callout)
+                    .focused($goalFocused)
                     .onSubmit { Task { await model.run() } }
                 Button {
                     Task { await model.run() }
@@ -128,6 +130,14 @@ private struct MenuBarView: View {
         }
         .padding(12)
         .frame(width: 250)
+        .onAppear {
+            // The popover window finishes appearing after onAppear; focusing
+            // sooner makes it eat the first keystrokes.
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                goalFocused = true
+            }
+        }
     }
 
     private var stateBadge: some View {
