@@ -111,6 +111,8 @@ struct ConfigCmd: AsyncParsableCommand {
         print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")
         let vocab = S1Config.load().vocabulary ?? []
         print("vocabulary → \(vocab.count) custom words + installed app names (auto)")
+        let assembled = Vocabulary.assemble(custom: vocab)
+        print("  resolved: \(assembled.prefix(10).joined(separator: ", "))\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
         print("edit the JSON file to swap brains permanently — no rebuild needed")
     }
 }
@@ -233,8 +235,7 @@ struct ListenCmd: AsyncParsableCommand {
                                killSwitch: kill, s2: reasoner)
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
-            let done = locale.hasPrefix("id") ? "Selesai" : "Done"
-            await Speaker().say("\(done). \(goal)", language: locale)
+            await Speaker().say(locale.hasPrefix("id") ? "Selesai" : "Done", language: locale)
         }
     }
 }
@@ -387,7 +388,8 @@ struct ServeCmd: AsyncParsableCommand {
             print("[\(ev.kind.rawValue)] \(ev.text)")
         }
         serve.armHotkey()
-        print("serve armed — double-tap Shift or ⌃⌥Space toggles listening; Ctrl-C quits")
+        print("serve armed — double-tap Shift or ⌃⌥Space toggles listening")
+        print("say \"stop\"/\"berhenti\" to sleep · Ctrl-C quits")
         if wake { serve.wake() }
         // The global hotkey monitor's handler is delivered through the
         // MAIN run loop, so main must actually spin — queue CFRunLoop there
