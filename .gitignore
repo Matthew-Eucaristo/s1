@@ -8,3 +8,8 @@
 /capture*.png
 
 .env
+
+# release artifacts (built by scripts/release.sh)
+s1-*-macos.tar.gz
+S1-*-app.zip
+dist/
