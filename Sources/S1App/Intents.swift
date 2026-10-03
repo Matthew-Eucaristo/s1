@@ -1,4 +1,5 @@
 import AppIntents
+import ApplicationServices
 import S1Core
 
 /// Siri/Shortcuts/Spotlight integration — the Apple-native way to drive s1:
@@ -18,6 +19,11 @@ struct RunGoalIntent: AppIntent {
     var goal: String
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // Without AX the run dies instantly — say so in the dialog instead
+        // of announcing a run that silently refused.
+        guard AXIsProcessTrusted() else {
+            return .result(dialog: "s1 needs Accessibility permission — grant it in the app first")
+        }
         let busy = await MainActor.run { () -> Bool in
             // Also refuse when a CLI agent owns the screen — otherwise the
             // dialog would announce a run that run() then refuses. Ask the
