@@ -95,6 +95,32 @@ public enum S1Runner {
         try? FileManager.default.removeItem(atPath: path)
     }
 
+    /// Race `work` against the kill-switch file — a model HTTP call ignores
+    /// the file for the whole request timeout otherwise, so `s1 stop` would
+    /// wait minutes. Winner takes; the loser is cancelled (URLSession calls
+    /// unwind through Task cancellation).
+    public static func racingKillSwitch<T: Sendable>(
+        _ path: String?,
+        _ work: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        guard let path else { return try await work() }
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                while true {
+                    try await Task.sleep(nanoseconds: 250_000_000)
+                    if FileManager.default.fileExists(atPath: path) {
+                        throw S1Error.aborted("kill switch")
+                    }
+                    try Task.checkCancellation()
+                }
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
     /// Sleep in ≤0.5s slices so a kill-switch file written mid-wait lands
     /// within half a second instead of after the full duration. Returns
     /// false when interrupted (file present or task cancelled).

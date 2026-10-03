@@ -64,8 +64,16 @@ public struct AgentLoop {
             }
 
             let obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
-            let rec = try await step(i, goal: goal, policy: policy, obs: obs,
+            let rec: StepRecord
+            do {
+                rec = try await step(i, goal: goal, policy: policy, obs: obs,
                                      history: history, logger: logger)
+            } catch is S1Error {
+                // A kill-switch abort landing mid-decision ends the run as
+                // aborted — not as an abstention that escalates to S2.
+                status = .aborted
+                break
+            }
             history.append(rec)
 
             if rec.escalation != nil { escalations += 1 }
@@ -113,8 +121,22 @@ public struct AgentLoop {
         // low-confidence step instead of crashing the run.
         var decision: Decision
         do {
-            decision = try await policy.decide(observation: obs, goal: goal, history: history)
+            // Raced against the kill file — a model request would otherwise
+            // sit out the whole HTTP timeout before `s1 stop` is noticed.
+            let decisionObs = obs
+            decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
+                try await policy.decide(observation: decisionObs, goal: goal, history: history)
+            }
         } catch {
+            if let k = config.killSwitchPath, FileManager.default.fileExists(atPath: k) {
+                // Record the interrupted step, then propagate — the run ends
+                // aborted, not as an abstention that walks into S2.
+                let r = record(i, obs: obs, by: "s1:\(policy.name)", conf: nil,
+                               rat: "kill switch mid-decision", action: nil,
+                               gate: "-", out: "interrupted", ver: nil, esc: nil)
+                try await logger.log(r)
+                throw error
+            }
             decision = Decision(action: nil, confidence: 0,
                                 rationale: "policy error: \(error.localizedDescription)")
         }
@@ -130,9 +152,21 @@ public struct AgentLoop {
                     : "s1 conf \(decision.confidence) < \(config.confidenceThreshold)"
                 esc = StepRecord.Escalation(to: "s2:\(s2.name)", reason: reason)
                 do {
-                    decision = try await s2.decide(observation: obs, goal: goal,
-                                                   history: history, reason: reason)
+                    let s2Obs = obs
+                    decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
+                        try await s2.decide(observation: s2Obs, goal: goal,
+                                            history: history, reason: reason)
+                    }
                 } catch {
+                    if let k = config.killSwitchPath,
+                       FileManager.default.fileExists(atPath: k) {
+                        let r = record(i, obs: obs, by: "s2:\(s2.name)", conf: nil,
+                                       rat: "kill switch mid-decision", action: nil,
+                                       gate: "-", out: "interrupted", ver: nil,
+                                       esc: esc)
+                        try await logger.log(r)
+                        throw error
+                    }
                     decision = Decision(action: nil, confidence: 0,
                                         rationale: "s2 error: \(error.localizedDescription)")
                 }
