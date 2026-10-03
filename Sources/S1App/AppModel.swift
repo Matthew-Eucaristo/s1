@@ -23,7 +23,7 @@ final class AppModel {
     }
 
     var goal = ""
-    var transcript = ""
+    var transcript = "" { didSet { syncHUD() } }
     var brain: Brain = .ax { didSet { rearmServe() } }
     var locale = "id-ID" { didSet { rearmServe(); invalidateStt() } }
     var useS2 = false { didSet { rearmServe() } }
@@ -42,20 +42,24 @@ final class AppModel {
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
+    /// Floating status pill under the camera notch while s1 is doing
+    /// something. Off = the window never exists (see NotchHUD.swift).
+    var notchHUD = true { didSet { if !notchHUD { hud.hide() }; scheduleSave() } }
 
-    private(set) var steps: [StepRecord] = []
-    private(set) var status = "idle"
-    private(set) var running = false
-    private(set) var listening = false
+    private(set) var steps: [StepRecord] = [] { didSet { syncHUD() } }
+    private(set) var status = "idle" { didSet { syncHUD() } }
+    private(set) var running = false { didSet { syncHUD() } }
+    private(set) var listening = false { didSet { syncHUD() } }
     private(set) var runDir: String?
     private(set) var permissions = PermissionReport()
 
     // ---- always-on companion (hotkey -> continuous listening -> run -> listen) ----
-    private(set) var serveState: Serve.State = .idle
-    private(set) var serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
+    private(set) var serveState: Serve.State = .idle { didSet { syncHUD() } }
+    private(set) var serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space" { didSet { syncHUD() } }
     var launchAtLogin = false
 
     private let speaker = Speaker()
+    private let hud = NotchHUDController()
     private let killPath = NSTemporaryDirectory() + "s1-app-stop"
     /// GUI apps launched from Finder/Spotlight have cwd "/" — a relative
     /// "artifacts" path lands on the read-only root. Anchor run output under
@@ -96,6 +100,7 @@ final class AppModel {
         if let vs = cfg.vlmScreenshot { vlmScreenshot = vs }
         if let b = cfg.brain, let kind = Brain(rawValue: b) { brain = kind }
         if let u = cfg.useS2 { useS2 = u }
+        if let n = cfg.notchHUD { notchHUD = n }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -240,6 +245,7 @@ final class AppModel {
         cfg.vlmScreenshot = vlmScreenshot
         cfg.brain = brain.rawValue
         cfg.useS2 = useS2
+        cfg.notchHUD = notchHUD
         try? cfg.save()
     }
 
@@ -475,6 +481,42 @@ final class AppModel {
         listening = false
         speaker.stop()
         status = "stopping…"
+    }
+
+    /// Priority: listening (serve or one-shot mic) > running > a brief
+    /// final-status flash > hidden. Every state-bearing property feeds
+    /// this through didSet so the pill never lies about what's happening.
+    private func syncHUD() {
+        guard notchHUD else { return }
+        if serveState == .listening || listening {
+            hud.show(phase: .listening,
+                     detail: transcript.isEmpty ? "hear a command…" : "heard: \(transcript)")
+            return
+        }
+        if serveState == .running || running {
+            let detail = serveState == .running
+                ? serveStatus
+                : steps.last.map { $0.digest } ?? status
+            hud.show(phase: .running, detail: detail)
+            return
+        }
+        // idle — flash the terminal outcome a beat, then release the panel.
+        switch status {
+        case "done", "aborted", "escalatedToS2", "needsHuman",
+             "maxStepsReached", "stuckLoop":
+            hud.flash(phase: .running, detail: status)
+        case let s where s.hasPrefix("needs human") || s.hasPrefix("error:"):
+            hud.flash(phase: .running, detail: s)
+        default:
+            hud.hide()
+        }
+    }
+
+    /// The pill's stop control: sleeping the listener when it's awake,
+    /// aborting whatever run is in flight otherwise.
+    func hudStopTapped() {
+        if serveState == .listening { toggleServe(); return }
+        if serveState == .running || running { stop() }
     }
 
     func revealRunDir() {

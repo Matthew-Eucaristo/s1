@@ -6,6 +6,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
 ## [Unreleased]
 
 ### Added
+- **Notch HUD** — floating status pill under the camera notch while s1
+  listens or works (boring.notch-style `NSPanel`, positioned via
+  `NSScreen.auxiliaryTopLeftArea/RightArea`); flashes the final status,
+  then releases the window — zero steady-state cost. Toggle in the app's
+  Companion section / `~/.s1/config.json` `notchHUD`.
 - **S1.app** — SwiftUI macOS app: Liquid Glass shell (voice input, live step
   feed, brain/locale/endpoint controls), menu-bar companion, launch-at-login.
 - **Always-on companion** — `s1 serve` daemon + `S1.app`: ⇧⇧ double-tap or

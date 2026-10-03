@@ -48,6 +48,12 @@ struct ContentView: View {
                     }
                     .font(.callout)
                 }
+                Section("Companion") {
+                    Toggle("Notch HUD", isOn: $model.notchHUD)
+                    Text("Floating status pill under the camera notch while s1 listens or works — hidden and released when idle.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("Permissions") {
                     permRow("Accessibility", ok: model.permissions.accessibility,
                             pane: "Privacy_Accessibility")

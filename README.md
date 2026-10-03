@@ -112,6 +112,19 @@ waveform icon shows idle/listening/running, toggles listening, and offers
 **Launch at login** (`SMAppService.mainApp`). The window stays available
 for one-shot commands.
 
+While s1 listens or works, a status pill drops from the camera-notch
+strip — the Dynamic-Island idiom, done the only way third-party Mac apps
+can (a floating `NSPanel` tucked between `NSScreen.auxiliaryTopLeftArea`
+and `auxiliaryTopRightArea`; there's no public notch API). It carries a
+mini stop button and, per Apple's efficiency model, the window only
+exists while s1 is doing something — idle releases it entirely. Disable
+it in the app's Companion section or `~/.s1/config.json` (`"notchHUD": false`).
+
+Measured on this Mac (M-series, macOS 26): armed + idle with nothing on
+screen = **0.0% CPU, ~140 MB RSS**; the CLI agent = **0.0% CPU, ~19 MB**
+mid-run — there are no timers or polling loops anywhere, every state
+change is event-driven (CGEvent tap, serve events, `@Observable`).
+
 Perception includes a whole-Mac view: every observation lists running apps
 + window titles (`AppState`), and `open X` resolves apps outside the
 standard dirs via Spotlight (`mdfind kMDItemKind == 'Application'`).
