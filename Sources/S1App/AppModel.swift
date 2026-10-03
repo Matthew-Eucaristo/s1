@@ -328,11 +328,13 @@ final class AppModel {
         guard !running else { status = "a run is in progress — stop it first"; return }
         // One mic at a time: the companion can't share the input device,
         // and one agent at a time: two concurrent runs would fight the screen.
-        guard serveState != .listening else {
+        // serve.state (synchronous, locked) — NOT serveState, which mirrors
+        // through a Task hop and still reads .idle just after a hotkey wake.
+        guard serve?.state != .listening else {
             status = "companion is listening — press ⇧⇧ / ⌃⌥Space to pause it first"
             return
         }
-        guard serveState != .running else {
+        guard serve?.state != .running else {
             status = "companion is running — wait or sleep it first"
             return
         }
@@ -361,7 +363,9 @@ final class AppModel {
 
     func run() async {
         guard !running else { return }
-        guard serveState != .running else {
+        // Synchronous lock-read like above — the mirrored serveState lags
+        // a MainActor hop and could let a run start mid-companion-run.
+        guard serve?.state != .running else {
             status = "companion is running — wait or sleep it first"
             return
         }
