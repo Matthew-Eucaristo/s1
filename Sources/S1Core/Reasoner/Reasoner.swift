@@ -46,7 +46,9 @@ public struct ChatClient: Sendable {
     /// set on a message it is sent as an OpenAI vision `image_url` part.
     public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
                      temperature: Double = 0.0) async throws -> String {
-        let url = URL(string: "\(endpoint.baseURL)/chat/completions")!
+        guard let url = URL(string: "\(endpoint.baseURL)/chat/completions") else {
+            throw S1Error.aborted("invalid endpoint base URL '\(endpoint.baseURL)' — check config")
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -68,6 +68,12 @@ public struct S1Config: Codable, Sendable {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         try enc.encode(self).write(to: url, options: .atomic)
+        // The file can carry API keys — keep it owner-only (600), like
+        // ~/.ssh/config. Non-destructive: silently skip if chmod fails.
+        if vlm?.key != nil || s2?.key != nil {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
     }
 }
 
