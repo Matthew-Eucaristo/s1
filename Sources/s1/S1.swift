@@ -57,8 +57,9 @@ struct RunCmd: AsyncParsableCommand {
     var vlmBase: String?
     @Option(help: "VLM model name for --policy vlm.")
     var vlmModel: String?
-    @Flag(help: "Attach a screenshot to each VLM decision.")
-    var vlmScreenshot = false
+    @Flag(inversion: .prefixedNo,
+          help: "Attach a screenshot to each VLM decision (default: config vlmScreenshot, else on).")
+    var vlmScreenshot: Bool? = nil
     @Flag(help: "Enable System 2 via S1_S2_* env or defaults (Ollama gemma3:4b).")
     var s2 = false
 
@@ -69,7 +70,7 @@ struct RunCmd: AsyncParsableCommand {
         case "ax":    pol = AXPolicy()
         case "vlm":
             pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                            useScreenshot: vlmScreenshot)
+                            useScreenshot: vlmScreenshot ?? S1Config.load().vlmScreenshot ?? true)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
             pol = try ScriptedPolicy(planJSON: Data(contentsOf: URL(fileURLWithPath: plan)))

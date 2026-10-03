@@ -18,7 +18,8 @@ struct S1App: App {
             CommandMenu("Agent") {
                 Button("Run") { Task { await model.run() } }
                     .keyboardShortcut("r", modifiers: .command)
-                    .disabled(model.running || model.goal.isEmpty)
+                    .disabled(model.running ||
+                              model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Stop") { model.stop() }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(!model.running)
@@ -96,7 +97,8 @@ private struct MenuBarView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.small)
-                .disabled(model.running || model.goal.isEmpty)
+                .disabled(model.running ||
+                          model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if !model.recentGoals.isEmpty {
                 Menu("Recent goals") {
