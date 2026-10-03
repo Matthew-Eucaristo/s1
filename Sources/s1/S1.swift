@@ -585,13 +585,21 @@ struct StopCmd: AsyncParsableCommand {
             try? "stop".write(toFile: NSTemporaryDirectory() + f,
                              atomically: true, encoding: .utf8)
         }
-        // Ask a live listener daemon to quit entirely.
+        // Ask a live CLI listener daemon to quit entirely. The GUI app gets
+        // the kill-switch treatment instead: its serve loop sleeps on the
+        // stop file, its runs abort — SIGTERM would kill the app window
+        // outright (no cleanup, stale pid file).
         let servePid = NSHomeDirectory() + "/.s1/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
            S1Runner.pidLooksLikeS1(pid) {
-            kill(pid, SIGTERM)
-            print("listener pid \(pid): SIGTERM sent")
+            let isApp = S1Runner.pidExePath(pid)?.contains(".app/") ?? false
+            if isApp {
+                print("app listener pid \(pid): stop file sent (sleeps the listener)")
+            } else {
+                kill(pid, SIGTERM)
+                print("listener pid \(pid): SIGTERM sent")
+            }
             did = true
         }
         if S1Runner.anotherRunActive() {

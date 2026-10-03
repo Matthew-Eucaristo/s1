@@ -180,6 +180,13 @@ public final class Serve: @unchecked Sendable {
             do {
                 let text = try await config.transcribe()
                 errors = 0
+                // `s1 stop` (or the app's Stop button) wrote the stop file
+                // while we were transcribing — honor it as "sleep the
+                // listener", not only as a per-run abort.
+                if FileManager.default.fileExists(atPath: config.killSwitch) {
+                    sleep("stopped")
+                    return
+                }
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if Self.isStop(trimmed, phrases: config.stopPhrases) {
                     emit(.heard, trimmed)

@@ -146,6 +146,10 @@ final class AppModel {
                                                             ?? S1Config.load().s2?.key)) : nil,
                 speak: speakOn,
                 artifacts: artifactsRoot,
+                // One stop file for the app: Stop (⌘.) aborts serve-driven
+                // runs the same as Run-button runs — and `s1 stop` writes
+                // it too. The serve loop also sleeps on seeing it.
+                killSwitch: killPath,
                 transcribe: { [weak self] in
                     guard let self else { return "" }
                     return try await self.stt.transcribeMic(maxSeconds: 12)

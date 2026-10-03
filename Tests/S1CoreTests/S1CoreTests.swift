@@ -576,6 +576,43 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(runs.contains { $0.contains("buka-test-done") })
 }
 
+@Test func serveSleepsOnStopFile() async throws {
+    // `s1 stop` (or the app's Stop button) landing mid-utterance must put
+    // the listener to sleep — not just abort the next run.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let kill = dir.appendingPathComponent("ks").path
+    let events = Locked<[ServeEvent.Kind]>([])
+    let turns = Locked(0)
+    let serve = Serve(
+        config: .init(
+            speak: false,
+            artifacts: dir.path,
+            killSwitch: kill,
+            transcribe: {
+                turns.mutate { $0 += 1 }
+                // First turn behaves normally; the file appears after it.
+                if turns.get() == 1 { try? "x".write(toFile: kill, atomically: true, encoding: .utf8) }
+                return "buka test, done"
+            }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { ev in events.mutate { $0.append(ev.kind) } }
+    serve.wake()
+    for _ in 0 ..< 200 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    #expect(serve.state == .idle)
+    #expect(events.get().contains(.sleeping))
+    // The utterance landed after the file was written → dropped, no run.
+    #expect(turns.get() == 1)
+    #expect(!events.get().contains(.runStart))
+    // wake() self-heals the stop file — listening can start again.
+    serve.wake()
+    #expect(!FileManager.default.fileExists(atPath: kill))
+    serve.sleep()
+}
+
 @Test func serveAutoSleepsAfterSilentTurns() async throws {
     let events = Locked<[ServeEvent.Kind]>([])
     let serve = Serve(

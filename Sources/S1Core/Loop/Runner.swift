@@ -23,16 +23,22 @@ public enum S1Runner {
         return true
     }
 
+    /// The executable path for a pid (lowercased), or nil when libproc
+    /// can't read it (foreign process, permission).
+    public static func pidExePath(_ pid: pid_t) -> String? {
+        var buf = [CChar](repeating: 0, count: 4096)   // PROC_PIDPATHINFO_MAXSIZE
+        guard procPidPath(pid, &buf, UInt32(buf.count)) > 0 else { return nil }
+        let bytes = buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self).lowercased()
+    }
+
     /// Is this pid a live s1 binary or the S1 app? Liveness alone lies on
     /// pid reuse — check the executable path too.
     public static func pidLooksLikeS1(_ pid: pid_t) -> Bool {
         guard kill(pid, 0) == 0 else { return false }
-        var buf = [CChar](repeating: 0, count: 4096)   // PROC_PIDPATHINFO_MAXSIZE
-        guard procPidPath(pid, &buf, UInt32(buf.count)) > 0 else { return true }
+        guard let path = pidExePath(pid) else { return true }
         // Couldn't read the path (foreign process, permission) — liveness
         // was proven, so assume busy rather than racing a real agent.
-        let bytes = buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-        let path = String(decoding: bytes, as: UTF8.self).lowercased()
         return path.hasSuffix("/s1") || path.contains("/s1.app/") || path.contains("/s1-cli")
     }
 
