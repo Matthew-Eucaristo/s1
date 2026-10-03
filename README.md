@@ -93,6 +93,19 @@ Perception includes a whole-Mac view: every observation lists running apps
 + window titles (`AppState`), and `open X` resolves apps outside the
 standard dirs via Spotlight (`mdfind kMDItemKind == 'Application'`).
 
+## Siri, Shortcuts, Spotlight
+
+The app ships **App Intents** — the same actions the UI performs are
+system-discoverable:
+
+- "Ask s1 to open TextEdit" / "Run … in s1" → `RunGoalIntent` (brings the
+  window forward, goal prefilled and executed)
+- "Wake s1" / "Toggle s1 listening" → `ToggleListeningIntent` (same switch
+  as the hotkey)
+
+Both appear in Shortcuts.app for automation, and Siri picks up the phrases
+automatically.
+
 ## Brains
 
 ```bash

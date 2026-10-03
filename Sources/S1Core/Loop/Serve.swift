@@ -213,7 +213,7 @@ public final class Serve: @unchecked Sendable {
             emit(.runDone, report.status.rawValue)
             if config.speak {
                 let reply = sayLanguage.hasPrefix("id") ? "Selesai" : "Done"
-                await speaker.say(reply, language: sayLanguage)
+                await speaker.say("\(reply): \(goal)", language: sayLanguage)
             }
         } catch {
             emit(.error, error.localizedDescription)

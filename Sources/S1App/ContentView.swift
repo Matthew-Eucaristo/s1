@@ -25,15 +25,25 @@ struct ContentView: View {
                         Text("English (en-US)").tag("en-US")
                     }
                     Toggle("Speak result (TTS)", isOn: $model.speakReply)
-                    TextField("Custom words, comma-separated", text: $model.vocabulary)
+                    LabeledContent("Custom words") {
+                        TextField("e.g. Warp, JIRA", text: $model.vocabulary)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Text("STT also learns installed app names automatically — say an app name and it lands.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 if model.brain == .vlm {
-                    Section("Model endpoint") {
+                    Section("Model endpoint — S1") {
                         TextField("Base URL", text: $model.vlmBase)
                         TextField("Model", text: $model.vlmModel)
+                    }
+                    .font(.callout)
+                }
+                if model.useS2 {
+                    Section("Model endpoint — S2") {
+                        TextField("Base URL", text: $model.s2Base)
+                        TextField("Model", text: $model.s2Model)
                     }
                     .font(.callout)
                 }
@@ -56,6 +66,7 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 230, ideal: 250)
         } detail: {
             VStack(spacing: 14) {
+                if !model.permissions.ready { onboardingBanner }
                 commandCard
                 controlRow
                 companionRow
@@ -102,6 +113,31 @@ struct ContentView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        }
+    }
+
+    /// First-run guidance: without AX + Screen Recording nothing works,
+    /// so the biggest surface in the window points straight at the fix.
+    private var onboardingBanner: some View {
+        GlassEffectContainer {
+            HStack(spacing: 12) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Grant Accessibility + Screen Recording to begin")
+                        .font(.callout.weight(.semibold))
+                    Text("Each row in the sidebar has an Open Settings shortcut. Relaunch after granting Screen Recording.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Grant…") { model.requestPermissions() }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .rect(cornerRadius: 14))
         }
     }
 
@@ -211,7 +247,7 @@ struct ContentView: View {
     }
 
     private func stepRow(_ rec: StepRecord) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        let row = HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("#\(rec.index)")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
@@ -247,6 +283,9 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        return Button { model.revealRunDir() } label: { row }
+            .buttonStyle(.plain)
+            .help("Reveal this run's artifacts")
     }
 
     private var statusBar: some View {

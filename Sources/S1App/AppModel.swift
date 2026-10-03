@@ -32,6 +32,10 @@ final class AppModel {
     /// the tap down and back up while the user is still typing.
     var vlmBase = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
     var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
+    /// S2 (the escalation reasoner) gets its own endpoint — often a bigger
+    /// model than S1's, or a cloud one behind an API key.
+    var s2Base = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
+    var s2Model = "gemma3:4b" { didSet { scheduleRearm() } }
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
@@ -79,6 +83,8 @@ final class AppModel {
         if let l = cfg.locale { locale = l }
         if let b = cfg.vlm?.base { vlmBase = b }
         if let m = cfg.vlm?.model { vlmModel = m }
+        if let b = cfg.s2?.base { s2Base = b }
+        if let m = cfg.s2?.model { s2Model = m }
         if let s = cfg.speak { speakReply = s }
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
 
@@ -96,6 +102,8 @@ final class AppModel {
         let speakOn = speakReply
         let base = vlmBase
         let model = vlmModel
+        let s2BaseV = s2Base
+        let s2ModelV = s2Model
         let s = Serve(
             config: .init(
                 makePolicy: {
@@ -104,7 +112,7 @@ final class AppModel {
                     }
                     return AXPolicy()
                 },
-                s2: s2On ? LLMReasoner(endpoint: Endpoints.s2()) : nil,
+                s2: s2On ? LLMReasoner(endpoint: Endpoint(baseURL: s2BaseV, model: s2ModelV)) : nil,
                 speak: speakOn,
                 artifacts: artifactsRoot,
                 transcribe: { [weak self] in
@@ -147,6 +155,7 @@ final class AppModel {
         cfg.locale = locale
         cfg.speak = speakReply
         cfg.vlm = .init(base: vlmBase, model: vlmModel)
+        cfg.s2 = .init(base: s2Base, model: s2Model)
         cfg.vocabulary = parsedVocab
         try? cfg.save()
     }
@@ -293,7 +302,9 @@ final class AppModel {
         let pol: any Policy = brain == .vlm
             ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
             : AXPolicy()
-        let reasoner: (any Reasoner)? = useS2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        let reasoner: (any Reasoner)? = useS2
+            ? LLMReasoner(endpoint: Endpoint(baseURL: s2Base, model: s2Model))
+            : nil
 
         do {
             let (report, _) = try await S1Runner.run(
