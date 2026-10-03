@@ -27,6 +27,7 @@ enum LLMDecisionCodec {
             if secureRoles.contains(n.role) { s += " [secure]" }
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
             if let d = n.desc, !d.isEmpty, d != n.title { s += " desc=\"\(d.prefix(40))\"" }
+            if let h = n.help, !h.isEmpty, h != n.title, h != n.desc { s += " help=\"\(h.prefix(40))\"" }
             if let v = n.value, !v.isEmpty, v != n.title { s += " value=\"\(v.prefix(60))\"" }
             lines.append(s)
         }

@@ -68,7 +68,7 @@ public struct AXPolicy: Policy {
     /// Element match quality 0...1: exact title 1.0, prefix 0.8, contains 0.6.
     static func matchScore(_ needle: String, _ node: AXNode) -> Double {
         let n = needle.lowercased()
-        let fields = [node.title, node.desc, node.value, n == "" ? nil : node.role].compactMap { $0?.lowercased() }
+        let fields = [node.title, node.desc, node.help, node.value, n == "" ? nil : node.role].compactMap { $0?.lowercased() }
         var best = 0.0
         for f in fields {
             if f == n { best = max(best, 1.0) }

@@ -147,6 +147,7 @@ public enum AXReader {
             role: attr(el, kAXRoleAttribute) ?? "unknown",
             title: attr(el, kAXTitleAttribute),
             desc: attr(el, kAXDescriptionAttribute),
+            help: attr(el, kAXHelpAttribute),
             value: stringValue(el),
             frame: frame(of: el),
             children: [])
@@ -256,8 +257,10 @@ public enum AXReader {
     static func element(pid: pid_t, ref: String) -> AXUIElement? {
         guard ref.hasPrefix("e"), let target = Int(ref.dropFirst()) else { return nil }
         let app = AXUIElementCreateApplication(pid)
-        // One walk that keeps (element, role, title, desc, frame) per node.
-        var entries: [(el: AXUIElement, role: String, title: String?, desc: String?, frame: CGRect?)] = []
+        // One walk that keeps (element, role, title, desc, help, frame) per
+        // node — help joins identity so tooltip-named controls re-resolve
+        // on drift instead of trusting a stale index.
+        var entries: [(el: AXUIElement, role: String, title: String?, desc: String?, help: String?, frame: CGRect?)] = []
         var counter = 0
         collect(app, counter: &counter, depth: 0, into: &entries)
 
@@ -266,12 +269,12 @@ public enum AXReader {
         let candidate = target < entries.count ? entries[target] : nil
         guard let o else { return candidate?.el }   // no baseline: trust the index
 
-        // Same role and same label (title or desc) → the ref still points
-        // at the same widget.
+        // Same role and same labels → the ref still points at the same widget.
         if let candidate,
            o.role == candidate.role,
            (o.title ?? "") == (candidate.title ?? ""),
-           (o.desc ?? "") == (candidate.desc ?? "") {
+           (o.desc ?? "") == (candidate.desc ?? ""),
+           (o.help ?? "") == (candidate.help ?? "") {
             return candidate.el
         }
         // Index drifted — or the tree shrank past the ref (a dialog closed
@@ -280,9 +283,10 @@ public enum AXReader {
         var best: (AXUIElement, Double)?
         for e in entries {
             guard e.role == o.role else { continue }
-            let oLabel = (o.title?.isEmpty == false ? o.title : o.desc)
+            let oLabel = (o.title?.isEmpty == false ? o.title
+                          : o.desc?.isEmpty == false ? o.desc : o.help)
             if let ot = oLabel, !ot.isEmpty {
-                if e.title == ot || e.desc == ot { return e.el }
+                if e.title == ot || e.desc == ot || e.help == ot { return e.el }
                 continue
             }
             if let of = o.frame, let ef = e.frame {
@@ -294,12 +298,12 @@ public enum AXReader {
     }
 
     static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
-                        into entries: inout [(el: AXUIElement, role: String, title: String?, desc: String?, frame: CGRect?)]) {
+                        into entries: inout [(el: AXUIElement, role: String, title: String?, desc: String?, help: String?, frame: CGRect?)]) {
         guard depth < maxDepth, counter < maxNodes else { return }
         counter += 1
         entries.append((el, attr(el, kAXRoleAttribute) ?? "unknown",
                         attr(el, kAXTitleAttribute), attr(el, kAXDescriptionAttribute),
-                        liveFrame(of: el)))
+                        attr(el, kAXHelpAttribute), liveFrame(of: el)))
         var kids: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
               let arr = kids as? [AXUIElement] else { return }

@@ -77,6 +77,9 @@ public struct AXNode: Codable, Sendable {
     /// AXDescription — where icon-only buttons keep their human label
     /// ("Save", "Bold") when AXTitle is empty.
     public var desc: String?
+    /// AXHelp — the tooltip string; the last-resort human label for
+    /// controls that expose neither a title nor a description.
+    public var help: String?
     public var value: String?
     public var frame: CGRectCodable?
     public var children: [AXNode]

@@ -246,6 +246,7 @@ public struct AgentLoop {
             if let v = node.value?.lowercased(), v.contains(needle) { return true }
             if let t = node.title?.lowercased(), t.contains(needle) { return true }
             if let d = node.desc?.lowercased(), d.contains(needle) { return true }
+            if let h = node.help?.lowercased(), h.contains(needle) { return true }
         }
         return false
     }
