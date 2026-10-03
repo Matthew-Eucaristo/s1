@@ -70,19 +70,29 @@ public enum RunReader {
                     gate: "allow", outcome: "skipped (read-only)",
                     verified: nil, escalation: nil))
             default:
-                let verdict = gate.evaluate(action)
+                // AX refs are only meaningful inside a fresh tree — re-observe
+                // so replayed presses land on the live pid instead of failing
+                // on a nil one. The same observation feeds the secure-field
+                // guards, replaying the loop's password-box protection.
+                let needsObs: Bool = switch action {
+                case .axPress, .axSetValue, .typeText: true
+                default: false
+                }
+                let liveObs = needsObs
+                    ? try? await SystemPerceiver().observe(wantScreenshot: false)
+                    : nil
+                var verdict = gate.evaluate(action)
+                if case .typeText = action, liveObs?.secureTextFocused == true {
+                    verdict = .needsHuman(reason: "focused field is a secure text field")
+                }
+                if case .axSetValue(let ref, _) = action,
+                   S1SecureField.isSecure(ref, in: liveObs?.axTree) {
+                    verdict = .needsHuman(reason: "target is a secure text field")
+                }
                 var outcome = "blocked"
                 if case .allow = verdict {
                     do {
-                        // AX refs are only meaningful inside a fresh tree —
-                        // re-observe so replayed presses land on the live pid
-                        // instead of failing on a nil one.
-                        let pid: pid_t? = switch action {
-                        case .axPress, .axSetValue:
-                            try? await SystemPerceiver().observe(wantScreenshot: false).frontmostPID
-                        default: nil
-                        }
-                        outcome = try await actuator.perform(action, frontmostPID: pid)
+                        outcome = try await actuator.perform(action, frontmostPID: liveObs?.frontmostPID)
                     } catch {
                         outcome = "error: \(error.localizedDescription)"
                     }

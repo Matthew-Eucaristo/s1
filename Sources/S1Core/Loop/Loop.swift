@@ -237,7 +237,7 @@ public struct AgentLoop {
     }
 
     private func isSecureField(_ ref: String, in tree: AXNode?) -> Bool {
-        tree?.flattened.first { $0.ref == ref }?.role == "AXSecureTextField"
+        S1SecureField.isSecure(ref, in: tree)
     }
 
     private func treeContains(_ tree: AXNode?, _ needle: String) -> Bool {
@@ -265,5 +265,13 @@ public struct AgentLoop {
         if label.hasPrefix("deny") { return .deny(reason: label) }
         if label.hasPrefix("needsHuman") { return .needsHuman(reason: label) }
         return .allow
+    }
+}
+
+/// Shared secure-field check — the loop's password guard, also used by
+/// replay so a re-run never types into an AXSecureTextField either.
+enum S1SecureField {
+    static func isSecure(_ ref: String, in tree: AXNode?) -> Bool {
+        tree?.flattened.first { $0.ref == ref }?.role == "AXSecureTextField"
     }
 }
