@@ -180,6 +180,7 @@ enum LLMDecisionCodec {
         case "wait":      a = .wait(seconds: (num("ms") ?? 500) / 1000)
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
         case "moveMouse": a = .moveMouse(x: num("x") ?? 0, y: num("y") ?? 0)
+        case "verify":    a = field("expect").map { .verify(expectation: $0) }
         case "captureScreenshot": a = .captureScreenshot(reason: field("expect") ?? "salvaged")
         case "done":      a = .done(summary: field("expect") ?? "done")
         default:          a = nil
@@ -232,12 +233,22 @@ public struct VLMPolicy: Policy {
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         // Deterministic decomposition (shared with AXPolicy): the model grounds
         // ONE intent per step — small local models can't track a whole plan.
+        // A step that failed (error/blocked outcome) does NOT consume its
+        // intent — the cursor stays so the model retries it differently.
         let intents = AXPolicy.intents(of: goal)
-        guard history.count < intents.count else {
+        let cursor: Int = if let last = history.last,
+                             last.action != nil,
+                             let o = last.outcome,
+                             o.hasPrefix("error:") || o.hasPrefix("blocked:") {
+            history.count - 1
+        } else {
+            history.count
+        }
+        guard cursor < intents.count else {
             return Decision(action: .done(summary: "goal completed"), confidence: 0.9,
                             rationale: "all \(intents.count) intents consumed")
         }
-        let current = intents[history.count]
+        let current = intents[cursor]
         let hint: String
         switch current.verb {
         case "open", "buka", "launch":  hint = "openApp"
@@ -252,7 +263,7 @@ public struct VLMPolicy: Policy {
         default:                        hint = "whichever action type fits"
         }
         let plan = intents.enumerated().map { i, it in
-            "\(i + 1). \(it.verb) \(it.arg)\(i == history.count ? "  <== CURRENT" : (i < history.count ? " (done)" : ""))"
+            "\(i + 1). \(it.verb) \(it.arg)\(i == cursor ? "  <== CURRENT" : (i < cursor ? " (done)" : ""))"
         }.joined(separator: "\n")
         let prompt = """
             You are System 1 of a macOS agent: fast local decisions for GUI control.
