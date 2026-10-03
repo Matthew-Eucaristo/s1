@@ -235,6 +235,7 @@ struct ListenCmd: AsyncParsableCommand {
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
+        let polName = try validatedSTTPolicy(policy)   // fail fast, before the mic turn
         let stt = SpeechToText(locale: Locale(identifier: locale),
                                vocabulary: sttVocabulary(vocabulary))
         let goal: String
@@ -250,7 +251,7 @@ struct ListenCmd: AsyncParsableCommand {
         print("heard: \(goal)")
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
-        let pol: any Policy = try validatedSTTPolicy(policy) == "vlm"
+        let pol: any Policy = polName == "vlm"
             ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
                         useScreenshot: S1Config.load().vlmScreenshot ?? true)
             : AXPolicy()
@@ -506,7 +507,8 @@ struct StatusCmd: AsyncParsableCommand {
         // Last published daemon state.
         if let data = FileManager.default.contents(atPath: Serve.statePath),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let alive = (obj["pid"] as? Int).map { kill(pid_t($0), 0) == 0 } ?? false
+            // Identity, not just liveness — a recycled pid isn't the daemon.
+            let alive = (obj["pid"] as? Int).map { S1Runner.pidLooksLikeS1(pid_t($0)) } ?? false
             if alive {
                 let st = (obj["state"] as? String) ?? "?"
                 let ev = (obj["event"] as? String) ?? "?"
