@@ -47,7 +47,8 @@ public final class Serve: @unchecked Sendable {
                     maxListenErrors: Int = 3,
                     artifacts: String = "artifacts",
                     killSwitch: String = NSTemporaryDirectory() + "s1-serve-stop",
-                    stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur"],
+                    stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur",
+                                             "sleep", "go to sleep", "istirahat"],
                     transcribe: @escaping @Sendable () async throws -> String,
                     isBusy: @escaping @Sendable () async -> Bool = { false }) {
             self.makePolicy = makePolicy

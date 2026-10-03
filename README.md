@@ -82,7 +82,7 @@ swift run s1 serve --wake       # start listening immediately (for SSH/headless 
 Press **⇧⇧** (double-tap either Shift) or **⌃⌥Space** anywhere on the Mac:
 s1 toggles between `idle` and `listening`. While listening it loops
 **hear → run the goal → speak → hear** until you say a stop phrase
-(`stop`, `berhenti`, `matikan`) or press the hotkey again; it auto-sleeps
+(`stop`/`berhenti`/`tidur`/`istirahat`/`sleep`…) or press the hotkey again; it auto-sleeps
 after `--idle-turns` silent turns or repeated STT errors — and after
 repeated run failures (a dead endpoint can't spin hot). Idle uses no mic
 and no model — flat battery. One listener per machine: `~/.s1/serve.pid`
