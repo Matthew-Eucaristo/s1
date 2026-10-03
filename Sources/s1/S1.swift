@@ -82,8 +82,11 @@ struct RunCmd: AsyncParsableCommand {
             } catch {
                 throw ValidationError("""
                     plan file is not valid s1 JSON — expected an array of \
-                    {"action":{"<case>":{params}},"rationale":"…"} entries, e.g. \
-                    [{"action":{"openApp":{"name":"TextEdit"}}},{"action":{"done":{"summary":"ok"}}}]
+                    {"action":{"<case>":{params}},"rationale":"…"} entries; \
+                    single-payload actions wrap their value as "_0". Example: \
+                    [{"action":{"openApp":{"name":"TextEdit"}},"rationale":"open"},\
+                    {"action":{"typeText":{"_0":"halo"}},"rationale":"type"},\
+                    {"action":{"done":{"summary":"ok"}},"confidence":0.9,"rationale":"end"}]
                     """)
             }
         default: throw ValidationError("unknown policy \(policy)")

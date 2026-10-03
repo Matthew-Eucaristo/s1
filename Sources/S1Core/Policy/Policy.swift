@@ -59,6 +59,14 @@ public struct ScriptedPolicy: Policy {
         public init(action: Action, confidence: Double = 1.0, rationale: String = "scripted") {
             self.action = action; self.confidence = confidence; self.rationale = rationale
         }
+        /// Hand-written plans shouldn't have to repeat defaults — confidence
+        /// and rationale decode to 1.0/"scripted" when omitted.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            action = try c.decode(Action.self, forKey: .action)
+            confidence = try c.decodeIfPresent(Double.self, forKey: .confidence) ?? 1.0
+            rationale = try c.decodeIfPresent(String.self, forKey: .rationale) ?? "scripted"
+        }
     }
     public var steps: [Step]
 

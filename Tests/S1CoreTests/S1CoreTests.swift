@@ -1212,3 +1212,20 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
                         encoding: .utf8)
     #expect(jl.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 2)
 }
+
+@Test func scriptedPolicyParsesPlanJSON() throws {
+    // Codable's wire shape for single-payload cases is {"<case>":{"_0":v}}.
+    let json = Data("""
+      [{"action":{"openApp":{"name":"TextEdit"}},"confidence":1.0,"rationale":"open"},
+       {"action":{"typeText":{"_0":"halo"}},"rationale":"type"},
+       {"action":{"done":{"summary":"ok"}},"confidence":0.9,"rationale":"end"}]
+    """.utf8)
+    let p = try ScriptedPolicy(planJSON: json)
+    #expect(p.steps.count == 3)
+    #expect(p.steps[1].action == Action.typeText("halo"))
+    // Missing required fields fails decode — the CLI maps this to a
+    // readable "--plan" validation error.
+    #expect(throws: (any Error).self) {
+        _ = try ScriptedPolicy(planJSON: Data(#"{"oops":1}"#.utf8))
+    }
+}
