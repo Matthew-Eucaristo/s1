@@ -146,12 +146,15 @@ public enum AXReader {
          kAXHelpAttribute, kAXValueAttribute, kAXPositionAttribute, kAXSizeAttribute] as CFArray
     }
 
-    static func walk(_ el: AXUIElement, depth: Int, counter: inout Int) -> AXNode? {
-        guard depth < maxDepth, counter < maxNodes else { return nil }
-        let ref = "e\(counter)"; counter += 1
-
+    /// One node's scalar reads in a single IPC round-trip, with the
+    /// per-attribute fallback for apps that fail the multi-copy.
+    /// Shared by `walk` (observation trees) and `collect` (re-resolve walks)
+    /// so the act path gets the same batching win as the observe path.
+    private static func nodeAttrs(_ el: AXUIElement)
+        -> (role: String, title: String?, desc: String?, help: String?,
+            value: String?, frame: CGRect?) {
         var role = "unknown", title: String?, desc: String?, help: String?,
-            value: String?, frame: CGRectCodable? = nil
+            value: String?, frame: CGRect? = nil
         var vals: CFArray?
         if AXUIElementCopyMultipleAttributeValues(el, scalarAttrs(),
                                                   AXCopyMultipleAttributeOptions(rawValue: 0),
@@ -162,7 +165,7 @@ public enum AXReader {
             desc = arr[2] as? String
             help = arr[3] as? String
             value = stringifyValue(arr[4])
-            frame = extractFrame(pos: arr[5], size: arr[6]).map(CGRectCodable.init)
+            frame = extractFrame(pos: arr[5], size: arr[6])
         } else {
             // Older apps can fail the multi-copy — per-attr fallback keeps
             // them observable rather than invisible.
@@ -171,11 +174,19 @@ public enum AXReader {
             desc = attr(el, kAXDescriptionAttribute)
             help = attr(el, kAXHelpAttribute)
             value = stringValue(el)
-            frame = Self.frame(of: el)
+            frame = liveFrame(of: el)
         }
+        return (role, title, desc, help, value, frame)
+    }
 
-        var node = AXNode(ref: ref, role: role, title: title, desc: desc,
-                          help: help, value: value, frame: frame, children: [])
+    static func walk(_ el: AXUIElement, depth: Int, counter: inout Int) -> AXNode? {
+        guard depth < maxDepth, counter < maxNodes else { return nil }
+        let ref = "e\(counter)"; counter += 1
+
+        let a = nodeAttrs(el)
+        var node = AXNode(ref: ref, role: a.role, title: a.title, desc: a.desc,
+                          help: a.help, value: a.value,
+                          frame: a.frame.map(CGRectCodable.init), children: [])
 
         var kids: CFTypeRef?
         if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
@@ -346,9 +357,8 @@ public enum AXReader {
                         into entries: inout [(el: AXUIElement, role: String, title: String?, desc: String?, help: String?, frame: CGRect?)]) {
         guard depth < maxDepth, counter < maxNodes else { return }
         counter += 1
-        entries.append((el, attr(el, kAXRoleAttribute) ?? "unknown",
-                        attr(el, kAXTitleAttribute), attr(el, kAXDescriptionAttribute),
-                        attr(el, kAXHelpAttribute), liveFrame(of: el)))
+        let a = nodeAttrs(el)
+        entries.append((el, a.role, a.title, a.desc, a.help, a.frame))
         var kids: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
               let arr = kids as? [AXUIElement] else { return }
