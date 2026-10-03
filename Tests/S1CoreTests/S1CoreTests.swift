@@ -1117,3 +1117,20 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(t.contains("* TextEdit: doc.txt"))
     #expect(t.contains("  Safari: GitHub | Tab 2"))
 }
+
+@Test func historyTextShowsOnlyLastSixSteps() {
+    let history: [StepRecord] = (0..<8).map { i in
+        StepRecord(index: i, time: Date(), observation: "o", decidedBy: "s1:ax",
+                   confidence: 1.0, rationale: "r", modelReply: nil,
+                   action: .typeText("x\(i)"), gate: "allow", outcome: "typed",
+                   verified: nil, escalation: nil)
+    }
+    let t = LLMDecisionCodec.historyText(history)
+    #expect(t.hasPrefix("COMPLETED"))
+    #expect(!t.contains("step 1:"))          // older steps trimmed off
+    #expect(t.contains("step 7: type(x7) -> typed"))
+}
+
+@Test func historyTextEmptyReadsNone() {
+    #expect(LLMDecisionCodec.historyText([]) == "(none)")
+}
