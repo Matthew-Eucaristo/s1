@@ -1134,3 +1134,45 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
 @Test func historyTextEmptyReadsNone() {
     #expect(LLMDecisionCodec.historyText([]) == "(none)")
 }
+
+// MARK: - Endpoints precedence
+
+@Test func endpointArgBeatsEnvBeatsConfig() {
+    var cfg = S1Config()
+    cfg.vlm = .init(base: "http://cfg/v1", model: "cfg-model", key: "cfg-key", numCtx: 4096)
+    let env = ["S1_VLM_BASE": "http://env/v1", "S1_VLM_MODEL": "env-model",
+               "S1_VLM_KEY": "env-key", "S1_NUM_CTX": "2048"]
+    // bare: env wins over config
+    let e1 = Endpoints.vlm(env: env, config: cfg)
+    #expect(e1.baseURL == "http://env/v1")
+    #expect(e1.model == "env-model")
+    #expect(e1.apiKey == "env-key")
+    #expect(e1.numCtx == 2048)
+    // explicit arg beats env
+    let e2 = Endpoints.vlm(base: "http://flag/v1", model: "flag-model",
+                           env: env, config: cfg)
+    #expect(e2.baseURL == "http://flag/v1")
+    #expect(e2.model == "flag-model")
+    // no env, no flag → config
+    let e3 = Endpoints.vlm(env: [:], config: cfg)
+    #expect(e3.baseURL == "http://cfg/v1")
+    #expect(e3.model == "cfg-model")
+    #expect(e3.apiKey == "cfg-key")
+    #expect(e3.numCtx == 4096)
+}
+
+@Test func endpointDefaultsWhenNothingSet() {
+    let e = Endpoints.vlm(env: [:], config: S1Config())
+    #expect(e.baseURL == "http://localhost:11434/v1")
+    #expect(e.model == "gemma3:4b")
+    #expect(e.apiKey == nil)
+    #expect(e.numCtx == 8192)
+    let s = Endpoints.s2(env: ["S1_S2_MODEL": "big-model"], config: S1Config())
+    #expect(s.model == "big-model")
+    #expect(s.baseURL == "http://localhost:11434/v1")  // env base unset → default
+}
+
+@Test func endpointTrimsTrailingSlash() {
+    let e = Endpoints.vlm(base: "http://x/v1/", env: [:], config: S1Config())
+    #expect(e.baseURL == "http://x/v1")
+}
