@@ -458,6 +458,7 @@ struct ServeCmd: AsyncParsableCommand {
         let serve = Serve(
             config: .init(makePolicy: makePol, s2: reasoner, speak: speak,
                           listenSeconds: listenSeconds, maxSilentTurns: idleTurns,
+                          lockPath: pidPath,
                           transcribe: { try await stt.transcribeMic(maxSeconds: listenSeconds) }),
             locale: Locale(identifier: locale),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]

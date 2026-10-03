@@ -30,6 +30,9 @@ public final class Serve: @unchecked Sendable {
         public var maxListenErrors: Int
         public var artifacts: String
         public var killSwitch: String
+        /// One-listener lock (~/.s1/serve.pid). `wake()` re-verifies it —
+        /// a stolen or deleted lock must not let two listeners coexist.
+        public var lockPath: String?
         /// Utterances that end the listening session instead of running.
         public var stopPhrases: [String]
         /// Injectable transcription — real path is the mic; tests/demos feed files.
@@ -47,6 +50,7 @@ public final class Serve: @unchecked Sendable {
                     maxListenErrors: Int = 3,
                     artifacts: String = "artifacts",
                     killSwitch: String = NSTemporaryDirectory() + "s1-serve-stop",
+                    lockPath: String? = nil,
                     stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur",
                                              "sleep", "go to sleep", "istirahat"],
                     transcribe: @escaping @Sendable () async throws -> String,
@@ -60,6 +64,7 @@ public final class Serve: @unchecked Sendable {
             self.maxListenErrors = maxListenErrors
             self.artifacts = artifacts
             self.killSwitch = killSwitch
+            self.lockPath = lockPath
             self.stopPhrases = stopPhrases
             self.transcribe = transcribe
             self.isBusy = isBusy
@@ -138,6 +143,14 @@ public final class Serve: @unchecked Sendable {
 
     public func wake() {
         guard state == .idle else { return }
+        // One listener per machine — re-verify on every wake, not just at
+        // startup: a deleted or stolen pid file would otherwise let this
+        // wake run alongside a competitor's listener.
+        if let lockPath = config.lockPath,
+           !S1Runner.holdsPidFile(lockPath) {
+            do { try S1Runner.claimPidFile(lockPath, what: "s1 listener") }
+            catch { emit(.error, "another listener is running"); return }
+        }
         try? FileManager.default.removeItem(atPath: config.killSwitch)
         setState(.listening)
         emit(.listening)

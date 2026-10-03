@@ -150,6 +150,7 @@ final class AppModel {
                 // runs the same as Run-button runs — and `s1 stop` writes
                 // it too. The serve loop also sleeps on seeing it.
                 killSwitch: killPath,
+                lockPath: NSHomeDirectory() + "/.s1/serve.pid",
                 transcribe: { [weak self] in
                     guard let self else { return "" }
                     return try await self.stt.transcribeMic(maxSeconds: 12)

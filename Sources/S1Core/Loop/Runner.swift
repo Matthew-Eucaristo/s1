@@ -42,6 +42,15 @@ public enum S1Runner {
         return path.hasSuffix("/s1") || path.contains("/s1.app/") || path.contains("/s1-cli")
     }
 
+    /// Does `path` hold THIS process's pid? Used to distinguish "we already
+    /// claimed it" from "a competitor holds it" on re-entrant checks.
+    public static func holdsPidFile(_ path: String) -> Bool {
+        guard let txt = try? String(contentsOfFile: path, encoding: .utf8),
+              let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return false }
+        return pid == ProcessInfo.processInfo.processIdentifier
+    }
+
     /// Take the run lock, or throw `.busy` if a live s1 process holds it.
     /// Pair every successful call with `releaseRunLock()` (defer).
     public static func acquireRunLock() throws {
