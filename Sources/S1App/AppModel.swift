@@ -177,9 +177,21 @@ final class AppModel {
                 case .armed: self.serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
                 case .listening: self.serveState = .listening; self.serveStatus = "listening…"
                 case .heard: self.serveStatus = "heard: \(ev.text)"; self.transcript = ev.text
-                case .runStart: self.serveState = .running; self.serveStatus = "running: \(ev.text)"
-                case .step: self.serveStatus = "running · \(ev.text)"
-                case .runDone: self.serveStatus = ev.text
+                case .runStart:
+                    self.serveState = .running
+                    self.serveStatus = "running: \(ev.text)"
+                    // Companion turns get the same live feed as the Run
+                    // button — a voice turn should show its steps, not just
+                    // its status line.
+                    self.steps = []
+                    self.status = "running"
+                case .step:
+                    self.serveStatus = "running · \(ev.text)"
+                    if let rec = ev.record { self.steps.append(rec) }
+                case .runDone:
+                    self.serveStatus = ev.text
+                    self.status = ev.text
+                    if let dir = ev.dir { self.runDir = dir }
                 case .sleeping: self.serveState = .idle; self.serveStatus = "idle (sleeping)"
                 case .stopped: self.serveState = .idle; self.serveStatus = "stopped"
                 case .error: self.serveStatus = "error: \(ev.text)"

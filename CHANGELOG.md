@@ -36,6 +36,13 @@ this project is pre-1.0 — breaking changes land in minor versions.
   logs the same digest per step.
 - **`s1 ax <app|pid>`** — inspect any running app's tree, not just the
   frontmost one.
+- **Serve→feed wiring** — companion voice turns now populate the app's step
+  feed, status, and run-dir link live (ServeEvent carries each `StepRecord`
+  plus the run dir on `runDone`).
+- **`scripts/dev-cert.sh`** — one-time setup creating a stable self-signed
+  codesigning identity ("S1 Dev Cert"); `make-app.sh` signs with it so TCC
+  grants survive rebuilds (ad-hoc signing resets them every rebuild).
+  Override with `S1_SIGN_IDENTITY`.
 - OSS essentials — MIT license, ATTRIBUTIONS, CONTRIBUTING, SECURITY,
   CI (macOS 26 build+test), release workflow, Homebrew formula template.
 

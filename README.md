@@ -30,9 +30,14 @@ git clone https://github.com/Matthew-Eucaristo/s1.git && cd s1
 s1 preflight                          # shows which macOS permissions are missing
 
 # The app:
-./scripts/make-app.sh                 # builds dist/S1.app (universal, ad-hoc signed)
+./scripts/dev-cert.sh                 # once: stable dev cert → TCC grants survive rebuilds
+./scripts/make-app.sh                 # builds dist/S1.app (universal)
 open dist/S1.app                      # or copy it to /Applications
 ```
+
+> Without `dev-cert.sh`, make-app.sh falls back to ad-hoc signing — which
+> resets your TCC grants (Accessibility, Screen Recording, Input Monitoring)
+> on every rebuild. dev-cert.sh is a one-time setup that makes grants stick.
 
 ## Try it (3 steps)
 

@@ -7,7 +7,18 @@ public struct ServeEvent: Sendable {
     }
     public var kind: Kind
     public var text: String
-    public init(_ kind: Kind, _ text: String = "") { self.kind = kind; self.text = text }
+    /// Full step record on `.step` events (nil otherwise) — lets a UI
+    /// render the live feed, not just the digest line.
+    public var record: StepRecord?
+    /// Artifacts dir on `.runDone` — the UI's "open run folder" affordance.
+    public var dir: String?
+    public init(_ kind: Kind, _ text: String = "",
+                record: StepRecord? = nil, dir: String? = nil) {
+        self.kind = kind
+        self.text = text
+        self.record = record
+        self.dir = dir
+    }
 }
 
 /// The always-on companion loop: a hotkey wakes it, it listens continuously,
@@ -258,7 +269,7 @@ public final class Serve: @unchecked Sendable {
         emit(.runStart, goal)
         var ok = true
         do {
-            let (report, _) = try await S1Runner.run(
+            let (report, logger) = try await S1Runner.run(
                 goal: goal, policy: config.makePolicy(), artifacts: config.artifacts,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: config.killSwitch,
@@ -266,9 +277,9 @@ public final class Serve: @unchecked Sendable {
                 onStep: { [onEvent] rec in
                     // The full digest (decider, conf, action → outcome) —
                     // the daemon's log should tell the whole story per step.
-                    onEvent(ServeEvent(.step, rec.digest))
+                    onEvent(ServeEvent(.step, rec.digest, record: rec))
                 })
-            emit(.runDone, report.status.rawValue)
+            emit(.runDone, report.status.rawValue, dir: logger.runDir.path)
             // A kill file means the user cancelled — sleep must mean silent,
             // so an aborted run never says "Stopped" after the fact.
             if config.speak && !FileManager.default.fileExists(atPath: config.killSwitch) {
@@ -306,9 +317,10 @@ public final class Serve: @unchecked Sendable {
         }
     }
 
-    private func emit(_ kind: ServeEvent.Kind, _ text: String = "") {
+    private func emit(_ kind: ServeEvent.Kind, _ text: String = "",
+                      record: StepRecord? = nil, dir: String? = nil) {
         writeState(kind, text)
-        onEvent(ServeEvent(kind, text))
+        onEvent(ServeEvent(kind, text, record: record, dir: dir))
     }
 
     /// Publish state transitions for `s1 status`. Only lifecycle events land
