@@ -68,5 +68,15 @@ this project is pre-1.0 — breaking changes land in minor versions.
   prompt's `[pressable]` markers.
 - `--vlm-screenshot/--no-vlm-screenshot` honors config (default on);
   menu-bar and menu Run buttons trim whitespace like the window's.
+- Serve auto-sleeps on consecutive *run* failures too — a broken endpoint
+  could spin the daemon forever while the mic kept working (run errors
+  now have their own counter, not reset by a successful transcription).
+- One listener per machine: `~/.s1/serve.pid` is the lock — a second
+  `s1 serve` (or serve inside S1.app + CLI) is refused instead of both
+  racing on the same hotkey.
+- Replay re-applies the secure-field guards to its live snapshot — a
+  re-run can't type into a password box the original run skipped.
+- Legacy-mic listen exits as soon as the final transcript lands (was:
+  always burned the rest of the turn).
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
