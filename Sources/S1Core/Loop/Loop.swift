@@ -223,8 +223,26 @@ public struct AgentLoop {
         if case .typeText = action, obs.secureTextFocused {
             verdict = .needsHuman(reason: "focused field is a secure text field")
         }
+        // Paste (Cmd+V) lands in a password box without a keystroke —
+        // keyCombo gets the same guard.
+        if case .keyCombo = action, obs.secureTextFocused {
+            verdict = .needsHuman(reason: "focused field is a secure text field")
+        }
         if case .axSetValue(let ref, _) = action, isSecureField(ref, in: obs.axTree) {
             verdict = .needsHuman(reason: "target is a secure text field")
+        }
+        // Keystrokes into a terminal become commands on Return — text
+        // headed there is scanned with the command-level list, so a plain
+        // "rm file" can't ride in under the flag-bearing patterns.
+        if SafetyGate.terminalApps.contains(obs.frontmostApp ?? "") {
+            let payload: String? = switch action {
+            case .typeText(let t): t
+            case .axSetValue(_, let v): v
+            default: nil
+            }
+            if let payload, case .needsHuman(let r) = gate.evaluateTerminalPayload(payload) {
+                verdict = .needsHuman(reason: r)
+            }
         }
         var outcome = "blocked"
         var verified: Bool?

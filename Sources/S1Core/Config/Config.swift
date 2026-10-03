@@ -74,6 +74,8 @@ public struct S1Config: Codable, Sendable {
 
     public func save(to path: String = S1Config.path) throws {
         let url = URL(fileURLWithPath: path)
+        // ~/.s1 holds credentials + run artifacts — owner-only, like ~/.ssh.
+        S1Home.ensurePrivate()
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let enc = JSONEncoder()

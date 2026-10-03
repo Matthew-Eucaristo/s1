@@ -5,6 +5,33 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 ## [Unreleased]
 
+### Security
+- **Terminal-aware typing** — text destined for a terminal's command line
+  (Terminal, iTerm2, kitty, alacritty, WezTerm, ghostty, Warp, Hyper,
+  tmux…) is scanned with a command-level deny-list: flag-less `rm`,
+  `sudo`/`su`, `ssh`, force-push, package removal, `defaults write`,
+  `> /dev/` writes, disk/power ops all route to a human. Same scan in
+  replay. Caught live: `buka Terminal lalu ketik rm x` typed `rm x` into
+  a live shell before this landed.
+- **openApp deny-list** — the app NAME is scanned: opening Passwords,
+  1Password, or Keychain Access now escalates (credential surface).
+  `*password*` matching tightened to catch "Passwords"/"1Password".
+- **Secure-field value redaction** — AXSecureTextField values are never
+  read (some hosts expose raw text despite the role): not into the
+  snapshot, not steps.jsonl, not model prompts.
+- **keyCombo secure guard** — Cmd+V paste could reach a password box
+  without keystrokes; keyCombo now escalates while a secure field has
+  focus (live + replay).
+- **Executable URL schemes deny-listed** — `javascript:`, `vbscript:`,
+  `data:text/html` typed anywhere escalates (address-bar paste-jacking).
+- **Prompt-injection hardening** — model prompts wrap screen content as
+  UNTRUSTED DATA; only the goal is an instruction.
+- **openApp activation wait** — openApplication returned before the
+  window server flipped frontmost, so the next observe could inject
+  keystrokes into the wrong app; now waits (bounded ~2s) for real
+  keyboard ownership — fixes mistargeted typing and a gate-evaluation
+  race.
+
 ### Added
 - **Notch HUD** — floating status pill under the camera notch while s1
   listens or works (boring.notch-style `NSPanel`, positioned via

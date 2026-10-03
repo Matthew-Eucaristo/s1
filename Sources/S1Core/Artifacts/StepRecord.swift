@@ -44,6 +44,19 @@ public struct StepRecord: Codable, Sendable {
 }
 
 /// Per-run artifact writer: <run>/meta.json, <run>/steps.jsonl, <run>/screens/.
+/// `~/.s1` holds the config file (possibly API keys), pid locks, and
+/// per-run artifacts with verbatim goal text + screenshots — owner-only,
+/// same convention as `~/.ssh`. Idempotent and non-destructive.
+public enum S1Home {
+    public static let path = NSHomeDirectory() + "/.s1"
+
+    public static func ensurePrivate() {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: path, withIntermediateDirectories: true)
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+    }
+}
+
 public actor RunLogger {
     public nonisolated let runDir: URL
     public nonisolated let goal: String
@@ -58,6 +71,7 @@ public actor RunLogger {
                 onStep: (@Sendable (StepRecord) -> Void)? = nil) throws {
         self.onStep = onStep
         self.goal = goal
+        S1Home.ensurePrivate()
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let slug = goal.lowercased()

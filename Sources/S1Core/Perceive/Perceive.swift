@@ -202,6 +202,10 @@ public enum AXReader {
             value = stringValue(el)
             frame = liveFrame(of: el)
         }
+        // A secure field's value is a credential-in-progress: never read it
+        // at all — not into the snapshot, the step log, or a model prompt.
+        // (Some hosts expose the raw text via AXValue despite the role.)
+        if role == "AXSecureTextField" { value = nil }
         return (role, title, desc, help, value, frame)
     }
 

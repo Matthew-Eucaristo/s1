@@ -210,16 +210,24 @@ public struct CGEventActuator: Actuator {
 
     func openApp(named name: String) async throws {
         let ws = NSWorkspace.shared
-        if let url = AppResolver.resolve(name) {
-            // "open X" means "use X" — an app opened in the background never
-            // comes forward, and the next typeText lands in whatever had
-            // focus. Activate explicitly; it also covers the already-running
-            // relaunch path.
-            let cfg = NSWorkspace.OpenConfiguration()
-            cfg.activates = true
-            try await ws.openApplication(at: url, configuration: cfg)
-        } else {
+        guard let url = AppResolver.resolve(name) else {
             throw S1Error.aborted("app not found: \(name)")
+        }
+        // "open X" means "use X" — an app opened in the background never
+        // comes forward, and the next typeText lands in whatever had
+        // focus. Activate explicitly; it also covers the already-running
+        // relaunch path.
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+        try await ws.openApplication(at: url, configuration: cfg)
+        // openApplication returns before the window server flips frontmost —
+        // the next observe would still see the OLD app and could inject
+        // keystrokes into it (or miss a terminal's command scan). Wait,
+        // bounded, until the opened app actually owns the keyboard.
+        let wanted = url.standardizedFileURL
+        for _ in 0..<40 {   // ~2s max
+            if ws.frontmostApplication?.bundleURL?.standardizedFileURL == wanted { return }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 }

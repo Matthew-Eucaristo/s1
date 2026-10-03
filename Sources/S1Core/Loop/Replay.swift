@@ -86,7 +86,7 @@ public enum RunReader {
                 // on a nil one. The same observation feeds the secure-field
                 // guards, replaying the loop's password-box protection.
                 let needsObs: Bool = switch action {
-                case .axPress, .axSetValue, .typeText: true
+                case .axPress, .axSetValue, .typeText, .keyCombo: true
                 default: false
                 }
                 let liveObs = needsObs
@@ -96,9 +96,25 @@ public enum RunReader {
                 if case .typeText = action, liveObs?.secureTextFocused == true {
                     verdict = .needsHuman(reason: "focused field is a secure text field")
                 }
+                // Paste reaches a password box without a keystroke.
+                if case .keyCombo = action, liveObs?.secureTextFocused == true {
+                    verdict = .needsHuman(reason: "focused field is a secure text field")
+                }
                 if case .axSetValue(let ref, _) = action,
                    S1SecureField.isSecure(ref, in: liveObs?.axTree) {
                     verdict = .needsHuman(reason: "target is a secure text field")
+                }
+                // Replay of text into a terminal gets the command scan too —
+                // a recorded "ls" is fine, a recorded "rm file" isn't.
+                if SafetyGate.terminalApps.contains(liveObs?.frontmostApp ?? "") {
+                    let payload: String? = switch action {
+                    case .typeText(let t): t
+                    case .axSetValue(_, let v): v
+                    default: nil
+                    }
+                    if let payload, case .needsHuman(let r) = gate.evaluateTerminalPayload(payload) {
+                        verdict = .needsHuman(reason: r)
+                    }
                 }
                 var outcome = "blocked"
                 if case .allow = verdict {

@@ -50,6 +50,9 @@ public enum Action: Codable, Sendable, Equatable {
         case .keyCombo(let k): return k
         case .shell(let c): return [c]
         case .custom(let n, let p): return [n] + p.values
+        // The app being opened matters too — "Passwords"/"Keychain" is a
+        // credential surface, not just a launch.
+        case .openApp(let n): return [n]
         default: return []
         }
     }

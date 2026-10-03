@@ -127,6 +127,51 @@ private func jsonlDecoder() -> JSONDecoder {
     }
 }
 
+@Test func executableURLSchemesRouteToHuman() {
+    let gate = SafetyGate(allowReversible: true, allowIrreversible: true)
+    // Typed into an address bar these execute — paste-jacking in one string.
+    for t in ["javascript:alert(document.cookie)", "javascript : fetch('//evil')",
+              "vbscript:msgbox(1)", "data:text/html,<script>alert(1)</script>",
+              "data: text/html;base64,PHNjcmlwdA=="] {
+        if case .needsHuman(let r) = gate.evaluate(.typeText(t)) {
+            #expect(r.contains("denylist"), "\(t) should be denylisted")
+        } else { Issue.record("exec URL scheme must escalate: \(t)") }
+    }
+    // Ordinary "data:" prose and https URLs stay free.
+    #expect(gate.evaluate(.typeText("data: 5 rows in the table")) == .allow)
+    #expect(gate.evaluate(.typeText("https://example.com")) == .allow)
+}
+
+@Test func openAppNameIsScanned() {
+    let gate = SafetyGate(allowReversible: true)
+    // Credential surfaces escalate on the NAME — the app, not just text.
+    for app in ["Passwords", "1Password", "Keychain Access", "Kata Sandi"] {
+        if case .needsHuman(let r) = gate.evaluate(.openApp(name: app)) {
+            #expect(r.contains("denylist"), "\(app) should be denylisted")
+        } else { Issue.record("credential app must escalate: \(app)") }
+    }
+    #expect(gate.evaluate(.openApp(name: "TextEdit")) == .allow)
+    #expect(gate.evaluate(.openApp(name: "Notes")) == .allow)
+}
+
+@Test func terminalTypingGetsCommandScan() {
+    let gate = SafetyGate(allowReversible: true)
+    // In a terminal, text becomes commands — plain `rm` (no flags) and
+    // `sudo` must escalate even though they'd type freely into TextEdit.
+    for t in ["rm dokumen.txt", "sudo echo hi", "ssh admin@prod",
+              "git push --force origin main", "defaults write com.apple.finder x",
+              "brew uninstall node", "chmod -R 777 ."] {
+        if case .needsHuman(let r) = gate.evaluateTerminalPayload(t) {
+            #expect(r.contains("terminal:"), "\(t) should hit the terminal list")
+        } else { Issue.record("terminal payload must escalate: \(t)") }
+    }
+    // Benign shell text stays free — ls/cd/echo are everyday terminal use.
+    for ok in ["ls -la", "cd ~/Documents", "echo done", "git status",
+               "cat README.md", "npm install"] {
+        #expect(gate.evaluateTerminalPayload(ok) == .allow, "\(ok) must stay free")
+    }
+}
+
 // MARK: - secure text fields
 
 @Test func secureFieldEscalatesTyping() async throws {
