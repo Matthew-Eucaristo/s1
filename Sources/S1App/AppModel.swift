@@ -98,6 +98,15 @@ final class AppModel {
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         startServe()
+        // TCC grants land in System Settings while s1 is open — re-check
+        // when the app reactivates so the sidebar stops showing stale ⚠
+        // without forcing a relaunch.
+        Task {
+            for await _ in NotificationCenter.default.notifications(
+                named: NSApplication.didBecomeActiveNotification) {
+                refreshPermissions()
+            }
+        }
     }
 
     /// Arm the companion: installs the global hotkey (double-tap Shift and
