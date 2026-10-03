@@ -38,10 +38,14 @@ struct ContentView: View {
                     .font(.callout)
                 }
                 Section("Permissions") {
-                    permRow("Accessibility", ok: model.permissions.accessibility)
-                    permRow("Screen recording", ok: model.permissions.screenRecording)
-                    permRow("Microphone", ok: model.permissions.microphone)
-                    permRow("Input monitoring", ok: model.permissions.inputMonitoring)
+                    permRow("Accessibility", ok: model.permissions.accessibility,
+                            pane: "Privacy_Accessibility")
+                    permRow("Screen recording", ok: model.permissions.screenRecording,
+                            pane: "Privacy_ScreenCapture")
+                    permRow("Microphone", ok: model.permissions.microphone,
+                            pane: "Privacy_Microphone")
+                    permRow("Input monitoring", ok: model.permissions.inputMonitoring,
+                            pane: "Privacy_ListenEvent")
                     Button("Request / re-check") { model.requestPermissions() }
                     Text("Screen-recording grants apply on next app launch.")
                         .font(.caption)
@@ -112,9 +116,9 @@ struct ContentView: View {
         GlassEffectContainer(spacing: 18) {
             HStack(spacing: 18) {
                 Button {
-                    Task { await model.listenAndRun() }
+                    model.toggleListen()
                 } label: {
-                    Image(systemName: model.listening ? "waveform" : "mic.fill")
+                    Image(systemName: model.listening ? "stop.fill" : "mic.fill")
                         .font(.system(size: 26, weight: .semibold))
                         .frame(width: 58, height: 58)
                         .contentShape(Circle())
@@ -203,6 +207,7 @@ struct ContentView: View {
             .padding(.horizontal, 2)
         }
         .scrollIndicators(.automatic)
+        .defaultScrollAnchor(.bottom)
     }
 
     private func stepRow(_ rec: StepRecord) -> some View {
@@ -267,11 +272,20 @@ struct ContentView: View {
         .padding(.horizontal, 4)
     }
 
-    private func permRow(_ label: String, ok: Bool) -> some View {
+    private func permRow(_ label: String, ok: Bool, pane: String) -> some View {
         HStack {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(ok ? .green : .orange)
             Text(label).font(.callout)
+            if !ok {
+                Spacer()
+                Button("Open Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.mini)
+            }
         }
     }
 

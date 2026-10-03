@@ -20,7 +20,7 @@ final class AppModel {
     var goal = ""
     var transcript = ""
     var brain: Brain = .ax { didSet { rearmServe() } }
-    var locale = "id-ID" { didSet { rearmServe() } }
+    var locale = "id-ID" { didSet { rearmServe(); invalidateStt() } }
     var useS2 = false { didSet { rearmServe() } }
     var speakReply = true { didSet { rearmServe() } }
     /// Text fields debounce — rearming the hotkey per keystroke would tear
@@ -29,7 +29,7 @@ final class AppModel {
     var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
-    var vocabulary = "" { didSet { scheduleSave() } }
+    var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
 
     private(set) var steps: [StepRecord] = []
     private(set) var status = "idle"
@@ -52,10 +52,17 @@ final class AppModel {
     private var parsedVocab: [String] {
         vocabulary.split(separator: ",").map { String($0) }
     }
+    /// Cached: Vocabulary.assemble scans /Applications and locale changes
+    /// rebuild the recognizer — neither belongs on a per-access path.
+    private var _stt: SpeechToText?
     private var stt: SpeechToText {
-        SpeechToText(locale: Locale(identifier: locale),
-                     vocabulary: Vocabulary.assemble(custom: parsedVocab))
+        if let _stt { return _stt }
+        let s = SpeechToText(locale: Locale(identifier: locale),
+                             vocabulary: Vocabulary.assemble(custom: parsedVocab))
+        _stt = s
+        return s
     }
+    private func invalidateStt() { _stt = nil }
     private var serve: Serve?
     private var rearmTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -213,9 +220,24 @@ final class AppModel {
         listening = false
     }
 
-    /// Mic → transcript → run. The voice-first path.
+    /// Mic → transcript → run. The voice-first path. Tapping the mic while
+    /// it listens cancels — the task handle lives in `listenTask`.
+    private var listenTask: Task<Void, Never>?
+
+    func toggleListen() {
+        if listening {
+            listenTask?.cancel()
+            listenTask = nil
+            listening = false
+            status = "stopped"
+            return
+        }
+        listenTask = Task { await listenAndRun() }
+    }
+
     func listenAndRun() async {
-        guard !running, !listening else { return }
+        guard !listening else { return }
+        guard !running else { status = "a run is in progress — stop it first"; return }
         // One mic at a time: the companion can't share the input device,
         // and one agent at a time: two concurrent runs would fight the screen.
         guard serveState != .listening else {
@@ -228,8 +250,10 @@ final class AppModel {
         }
         listening = true
         status = "listening…"
+        defer { listening = false; listenTask = nil }
         do {
             let text = try await stt.transcribeMic(maxSeconds: 20)
+            guard !Task.isCancelled else { return }
             transcript = text
             if text.isEmpty {
                 status = "heard nothing"
@@ -238,12 +262,10 @@ final class AppModel {
                 status = "heard: \(text)"
                 listening = false
                 await run()
-                return
             }
         } catch {
-            status = "mic: \(error.localizedDescription)"
+            if !Task.isCancelled { status = "mic: \(error.localizedDescription)" }
         }
-        listening = false
     }
 
     /// Goals the user has run, newest first — offered back for quick reruns.
@@ -281,6 +303,7 @@ final class AppModel {
             recentGoals.removeAll { $0 == goalText }
             recentGoals.insert(goalText, at: 0)
             if recentGoals.count > 8 { recentGoals.removeLast() }
+            running = false
             if speakReply {
                 let reply = locale.hasPrefix("id") ? "Selesai" : "Done"
                 await speaker.say("\(reply): \(goalText)", language: locale)
