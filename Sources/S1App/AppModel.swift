@@ -399,7 +399,7 @@ final class AppModel {
             : nil
 
         do {
-            let (report, _) = try await S1Runner.run(
+            let (report, logger) = try await S1Runner.run(
                 goal: goalText, policy: pol, artifacts: artifactsRoot,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: killPath, s2: reasoner,
@@ -409,8 +409,12 @@ final class AppModel {
             runDir = report.runDir
             // "needsHuman" alone is jargon — say what for (denylist, secure
             // field, irreversible). The triggering step carries the reason.
+            // Read it from the log file, NOT the live `steps` array: those
+            // arrive through MainActor Task hops that can still be in flight
+            // when the run returns, so the reason lookup could race-empty.
+            let recorded = (try? RunReader.steps(in: logger.runDir)) ?? steps
             if report.status == .needsHuman,
-               let hit = steps.last(where: { $0.gate.hasPrefix("needsHuman") || $0.escalation?.to == "human" }) {
+               let hit = recorded.last(where: { $0.gate.hasPrefix("needsHuman") || $0.escalation?.to == "human" }) {
                 var why = hit.escalation?.reason ?? hit.gate
                 // The gate label wraps its reason — "needsHuman(denylist: x)"
                 // → "denylist: x", so the status doesn't stutter the prefix.
