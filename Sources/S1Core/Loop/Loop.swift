@@ -63,7 +63,19 @@ public struct AgentLoop {
                 break
             }
 
-            let obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
+            let obs: Snapshot
+            do {
+                obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
+            } catch {
+                // Evidence continuity: a perception failure must land in
+                // steps.jsonl too — otherwise the run file ends mid-thought
+                // with no trace of why.
+                try await logger.log(record(i, obs: nil, by: "system", conf: nil,
+                                            rat: "observation failed", action: nil,
+                                            gate: "-", out: error.localizedDescription,
+                                            ver: nil, esc: nil))
+                throw error
+            }
             let rec: StepRecord
             do {
                 rec = try await step(i, goal: goal, policy: policy, obs: obs,

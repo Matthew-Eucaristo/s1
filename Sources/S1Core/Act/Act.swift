@@ -27,18 +27,27 @@ public struct CGEventActuator: Actuator {
         switch action {
         case .moveMouse(let x, let y):
             let p = CGPoint(x: x, y: y)
-            CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            guard let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                    mouseCursorPosition: p, mouseButton: .left) else {
+                throw S1Error.aborted("cannot create mouse event")
+            }
+            ev.post(tap: .cghidEventTap)
             return "mouse -> (\(x), \(y))"
 
         case .click(let x, let y):
             let p = CGPoint(x: x, y: y)
             let src = CGEventSource(stateID: .hidSystemState)
-            CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
-                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                    mouseCursorPosition: p, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: p, mouseButton: .left) else {
+                // A nil event must fail loudly — logging "click" for a click
+                // that never posted is phantom evidence.
+                throw S1Error.aborted("cannot create click events")
+            }
+            down.post(tap: .cghidEventTap)
             usleep(60_000)
-            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
-                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
             return "click (\(x), \(y))"
 
         case .typeText(let text):
@@ -179,6 +188,7 @@ public struct CGEventActuator: Actuator {
         let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)
         let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)
         down?.flags = flags
+        up?.flags = flags   // modifiers stay "held" through the release
         down?.post(tap: .cghidEventTap)
         usleep(50_000)
         up?.post(tap: .cghidEventTap)
