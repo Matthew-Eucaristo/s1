@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>S1 listens for your spoken commands so it can operate your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>

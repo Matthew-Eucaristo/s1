@@ -38,8 +38,8 @@ struct RunCmd: AsyncParsableCommand {
     var goal: String?
     @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
     var task: String?
-    @Option(help: "Policy: scripted | dummy | ax | vlm")
-    var policy: String = "ax"
+    @Option(help: "Policy: scripted | dummy | ax | vlm (default: ax; --plan implies scripted)")
+    var policy: String?
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
     @Option(help: "Artifacts root directory.")
@@ -65,8 +65,11 @@ struct RunCmd: AsyncParsableCommand {
     var s2 = false
 
     func run() async throws {
+        // --plan is a program to replay: scripted is the only policy that
+        // consumes it. Resolve it implicitly so `s1 run --plan` just works.
+        let policyName = policy ?? (plan != nil ? "scripted" : "ax")
         let pol: any Policy
-        switch policy {
+        switch policyName {
         case "dummy": pol = DummyPolicy()
         case "ax":    pol = AXPolicy()
         case "vlm":
@@ -380,7 +383,11 @@ struct AXCmd: AsyncParsableCommand {
         let flat = tree.flattened
         for n in flat.prefix(250) {
             let label = n.title ?? n.desc ?? n.help ?? n.value ?? ""
-            print("  \(n.ref) [\(n.role)]\(AXSemantics.markers(for: n.role)) \(label)")
+            var loc = ""
+            if let f = n.frame {
+                loc = String(format: "  @(%.0f,%.0f %.0fx%.0f)", f.x, f.y, f.w, f.h)
+            }
+            print("  \(n.ref) [\(n.role)]\(AXSemantics.markers(for: n.role)) \(label)\(loc)")
         }
         if flat.count > 250 { print("  … \(flat.count - 250) more nodes") }
     }
