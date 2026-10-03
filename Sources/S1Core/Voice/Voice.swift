@@ -367,6 +367,18 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(prefix) }
     }
 
+    /// The best installed voice for a language — premium > enhanced >
+    /// default. `AVSpeechSynthesisVoice(language:)` picks whatever Apple
+    /// marked default, which is the base quality even when the user
+    /// downloaded the enhanced variant in Accessibility settings.
+    static func preferredVoice(language: String) -> AVSpeechSynthesisVoice? {
+        let prefix = String(language.prefix(2))
+        let candidates = voices(matching: language.isEmpty ? prefix : language)
+            .isEmpty ? voices(matching: prefix) : voices(matching: language)
+        return candidates.max(by: { $0.quality.rawValue < $1.quality.rawValue })
+            ?? AVSpeechSynthesisVoice(language: language)
+    }
+
     /// Speak and return after the utterance finishes — bounded by `timeout`
     /// so a wedged synthesizer can't pin the caller (UI status, serve loop).
     /// Overlapping calls queue behind each other rather than racing the
@@ -391,7 +403,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
                 let u = AVSpeechUtterance(string: text)
-                u.voice = AVSpeechSynthesisVoice(language: language)
+                u.voice = Self.preferredVoice(language: language)
                 await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
                     self.lock.lock()
                     self.finished = c
