@@ -45,6 +45,16 @@ public struct AgentLoop {
         var status: RunStatus = .maxStepsReached
 
         for i in 0..<config.maxSteps {
+            // A cancelled owner task ends the run even when no kill-switch
+            // file is configured (e.g. a forgotten config, or a caller that
+            // cancels instead of writing the file).
+            if Task.isCancelled {
+                status = .aborted
+                try await logger.log(record(i, obs: nil, by: "system", conf: nil,
+                                            rat: "task cancelled", action: nil,
+                                            gate: "-", out: "cancelled", ver: nil, esc: nil))
+                break
+            }
             if let k = config.killSwitchPath, FileManager.default.fileExists(atPath: k) {
                 status = .aborted
                 try await logger.log(record(i, obs: nil, by: "system", conf: nil,
@@ -70,7 +80,9 @@ public struct AgentLoop {
             // S2 was consulted and still couldn't decide — stop instead of
             // burning steps on an unrecoverable abstention.
             if rec.action == nil, rec.escalation != nil { status = .escalatedToS2; break }
-            // Stuck-loop guard: identical action 3× in a row never converges.
+            // Stuck-loop guards: the same action 3× in a row never converges,
+            // and neither does an A-B-A-B oscillation (click, wait, click,
+            // wait…) — both burn steps forever without the check.
             if history.suffix(3).count == 3,
                let a0 = history[history.count - 1].action,
                history.suffix(3).allSatisfy({ $0.action == a0 }) {
@@ -79,6 +91,16 @@ public struct AgentLoop {
                                             gate: "-", out: "aborted", ver: nil, esc: nil))
                 status = .stuckLoop
                 break
+            }
+            if history.suffix(4).count == 4 {
+                let tail = history.suffix(4).compactMap { $0.action }
+                if tail.count == 4, tail[0] == tail[2], tail[1] == tail[3], tail[0] != tail[1] {
+                    try await logger.log(record(history.count, obs: nil, by: "system", conf: nil,
+                                                rat: "stuck loop: A-B-A-B oscillation", action: nil,
+                                                gate: "-", out: "aborted", ver: nil, esc: nil))
+                    status = .stuckLoop
+                    break
+                }
             }
         }
         return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)

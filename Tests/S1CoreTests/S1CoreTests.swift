@@ -357,6 +357,25 @@ private struct StubReasoner: Reasoner {
     #expect(rep.steps == 3)
 }
 
+@Test func alternatingActionOscillationAbortsWithStuckLoop() async throws {
+    // A-B-A-B policies also never converge — catch the two-step pattern too.
+    struct PingPongPolicy: Policy {
+        let name = "pingpong"
+        func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
+            let a: Action = history.count.isMultiple(of: 2)
+                ? .keyCombo(keys: ["cmd", "tab"]) : .wait(seconds: 0)
+            return Decision(action: a, confidence: 0.9, rationale: "alternate")
+        }
+    }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "stuck", root: dir, config: [:])
+    var cfg = LoopConfig(); cfg.maxSteps = 10
+    let loop = AgentLoop(config: cfg, perceiver: NullPerceiver(), actuator: DryRunActuator(), gate: SafetyGate())
+    let rep = try await loop.run(goal: "stuck", policy: PingPongPolicy(), logger: logger)
+    #expect(rep.status == .stuckLoop)
+    #expect(rep.steps == 4)
+}
+
 // MARK: - hotkey
 
 @Test func chordMatcherRequiresExactFlags() {
