@@ -56,6 +56,13 @@ this project is pre-1.0 — breaking changes land in minor versions.
   markers and an explicit never-type rule in the decision format.
 
 ### Fixed
+- **Phantom click/typing outcomes** — `CGEvent`/`CGEventSource` creation
+  failures (nil events) now throw `S1Error.aborted` instead of logging a
+  fake success; `keyCombo` keeps modifier flags on the key-up event so the
+  release isn't read as bare keys.
+- **Observation failures now land in steps.jsonl** — an `observe()` throw
+  writes a terminal "observation failed" record before propagating (was:
+  run died with no evidence row).
 - **MenuBarExtra run crash** — runs started from the menu-bar quick-goal
   field died instantly ("Block was expected to execute on queue
   com.apple.main-thread"): `observe()`'s AX reads now run on the main
