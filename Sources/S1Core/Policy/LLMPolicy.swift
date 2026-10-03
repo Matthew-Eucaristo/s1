@@ -209,12 +209,19 @@ enum LLMDecisionCodec {
         switch a.type {
         case "moveMouse": return .moveMouse(x: a.x ?? 0, y: a.y ?? 0)
         case "click":     return .click(x: a.x ?? 0, y: a.y ?? 0)
-        case "axPress":   return .axPress(ref: a.ref ?? "")
-        case "axSetValue": return .axSetValue(ref: a.ref ?? "", value: a.value ?? a.text ?? "")
-        case "typeText":  return .typeText(a.text ?? "")
-        case "keyCombo":  return .keyCombo(keys: a.keys.map { $0.lowercased() })
+        // A missing/empty ref can't act meaningfully — abstain (nil) so the
+        // step escalates instead of erroring against a blank element id.
+        case "axPress":   guard let ref = a.ref, !ref.isEmpty else { return nil }
+                          return .axPress(ref: ref)
+        case "axSetValue": guard let ref = a.ref, !ref.isEmpty else { return nil }
+                          return .axSetValue(ref: ref, value: a.value ?? a.text ?? "")
+        case "typeText":  guard let t = a.text, !t.isEmpty else { return nil }
+                          return .typeText(t)
+        case "keyCombo":  guard !a.keys.isEmpty else { return nil }
+                          return .keyCombo(keys: a.keys.map { $0.lowercased() })
         case "scroll":    return .scroll(dx: a.dx ?? 0, dy: a.dy ?? 0)
-        case "openApp":   return .openApp(name: a.app ?? a.text ?? "")
+        case "openApp":   guard let n = a.app ?? a.text, !n.isEmpty else { return nil }
+                          return .openApp(name: n)
         case "wait":      return .wait(seconds: a.ms.map { $0 / 1000 } ?? a.seconds ?? 0.5)
         case "captureScreenshot": return .captureScreenshot(reason: a.expect ?? "requested by model")
         case "verify":    return .verify(expectation: a.expect ?? "")
