@@ -148,7 +148,11 @@ final class AppModel {
                     guard let self else { return "" }
                     return try await self.stt.transcribeMic(maxSeconds: 12)
                 },
-            isBusy: { [weak self] in await self?.running ?? false }),
+            isBusy: { [weak self] in
+                // Our own Run button OR another process's agent (a CLI
+                // `s1 run`/`s1 serve` holds ~/.s1/run.pid) owns the screen.
+                if await self?.running == true { return true }
+                return S1Runner.anotherRunActive() }),
             locale: Locale(identifier: loc),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in

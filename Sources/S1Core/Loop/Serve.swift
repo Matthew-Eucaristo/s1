@@ -50,7 +50,8 @@ public final class Serve: @unchecked Sendable {
                     stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur",
                                              "sleep", "go to sleep", "istirahat"],
                     transcribe: @escaping @Sendable () async throws -> String,
-                    isBusy: @escaping @Sendable () async -> Bool = { false }) {
+                    isBusy: @escaping @Sendable () async -> Bool = {
+                        S1Runner.anotherRunActive() }) {
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak

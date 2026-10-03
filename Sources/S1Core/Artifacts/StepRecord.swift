@@ -97,6 +97,7 @@ public enum S1Error: Error, CustomStringConvertible, LocalizedError {
     case screenshotFailed(String)
     case axFailed(String)
     case aborted(String)
+    case busy(String)
 
     public var description: String {
         switch self {
@@ -104,6 +105,7 @@ public enum S1Error: Error, CustomStringConvertible, LocalizedError {
         case .screenshotFailed(let m): return "screenshot failed: \(m)"
         case .axFailed(let m): return "accessibility error: \(m)"
         case .aborted(let m): return "aborted: \(m)"
+        case .busy(let m): return m
         }
     }
 
