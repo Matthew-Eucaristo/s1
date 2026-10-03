@@ -44,6 +44,23 @@ this project is pre-1.0 — breaking changes land in minor versions.
   markers and an explicit never-type rule in the decision format.
 
 ### Fixed
+- **Phantom typing closed** — `s1 run`, `s1 demo`, serve runs, and live
+  replay now fail fast on missing Accessibility (`requireAccessibility`)
+  instead of posting CGEvents that silently drop while the log claims
+  "typed N chars". CONTRIBUTING documents the rebuild-invalidation trap
+  (ad-hoc builds change cdhash → pane toggles go stale → `tccutil reset`).
+- `.wait` steps clamp to 300s (and NaN/negative → 0) — a model emitting
+  "wait an hour" can no longer park a run; still kill-switch interruptible.
+- App endpoint fields no longer clobber `S1_VLM_*`/`S1_S2_*` env overrides
+  — precedence stays flag > env > file > default like the CLI; Serve's S2
+  now resolves numCtx+key through `Endpoints.s2()` too.
+- `s1 config` warns when config.json exists but is malformed (silent
+  default-fallback had made user typos invisible).
+- `s1 listen` refuses while the listener daemon actively holds the mic
+  (two audio engines grabbing input failed cryptically).
+- `RunGoalIntent` refuses on the synchronous `serveIsListening` — the
+  mirrored `serveState` lagged a MainActor hop and could admit a Siri-run
+  mid-companion-run (same race fixed earlier in `run()`/`listenAndRun()`).
 - `s1 stop` semantics unified — SIGTERM only for `s1 serve`; the app
   listener is slept via stop file (window survives, state cleans up).
   Serve `wake()` re-verifies the one-listener lock (a deleted/stolen
