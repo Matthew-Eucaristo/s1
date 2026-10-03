@@ -123,5 +123,19 @@ this project is pre-1.0 — breaking changes land in minor versions.
   release is pid-checked (`releasePidFile`).
 - `AXValueGetValue` result honoured — a wrong-typed AXValue vendored by
   a foreign app yields nil instead of a zero-size frame.
+- `s1 stop` interrupts an in-flight model call — `decide()` is raced
+  against the kill file (was: sat out the 300s HTTP timeout), and
+  mid-decision aborts report `aborted` instead of a fake S2 escalation.
+- Grammar: `and`/`dan` split into a new intent only when followed by a
+  verb — "type milk and honey" used to drop "honey" as an unknown intent.
+- `AXReader.element()` no longer trusts a stale index when the recorded
+  node's identity is gone — fails the action instead of pressing a
+  different control (a wrong click is worse than a clean error).
+- The serve daemon emits `listening` when a run hands control back —
+  the app badge stopped showing "running" (and blocked Listen) until
+  the next utterance landed.
+- The serve daemon's run loop re-enters `CFRunLoopRun` when its last
+  source drops — a dropped event tap used to exit main silently and
+  kill the whole listener.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
