@@ -89,7 +89,7 @@ enum LLMDecisionCodec {
         {"action":{"type":"<TYPE>","<FIELD>":"<VALUE>"},"confidence":<0.0 to 1.0>,"rationale":"<why this action, in this screen>"}
         - The goal may list several steps separated by commas — do them left to right; a "done" step means the task is finished.
         - "type" is exactly ONE of: click, moveMouse, axPress, axSetValue, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, done. Never write more than one.
-        - Fields by type: click/moveMouse take "x","y"; axPress/axSetValue take "ref"; axSetValue also "value"; typeText takes "text"; keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy"; wait takes "ms"; verify/done take "expect".
+        - Fields by type: click/moveMouse take "x","y"; axPress/axSetValue take "ref"; axSetValue also "value"; typeText takes "text"; keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
         - Use "ref" (an AX element id like e3) whenever the target is in the AX tree — prefer axPress over click.
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
         - axPress only on nodes marked [pressable]. e0 is the application ROOT, not a button.

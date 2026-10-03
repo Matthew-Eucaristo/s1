@@ -50,8 +50,11 @@ public struct CGEventActuator: Actuator {
             return "keyCombo \(keys.joined(separator: "+"))"
 
         case .scroll(let dx, let dy):
+            // Convention: positive dy scrolls content DOWN (like a browser's
+            // scrollY), documented in the decision prompt. CGEvent wheel1 is
+            // the opposite sign — positive wheel1 moves content up.
             CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                    wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)?
+                    wheelCount: 2, wheel1: Int32(-dy), wheel2: Int32(-dx), wheel3: 0)?
                 .post(tap: .cghidEventTap)
             return "scroll (\(dx), \(dy))"
 
