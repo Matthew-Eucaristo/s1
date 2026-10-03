@@ -411,8 +411,13 @@ final class AppModel {
             // field, irreversible). The triggering step carries the reason.
             if report.status == .needsHuman,
                let hit = steps.last(where: { $0.gate.hasPrefix("needsHuman") || $0.escalation?.to == "human" }) {
-                let why = hit.escalation?.reason ?? hit.gate
-                status = "needsHuman — \(why)"
+                var why = hit.escalation?.reason ?? hit.gate
+                // The gate label wraps its reason — "needsHuman(denylist: x)"
+                // → "denylist: x", so the status doesn't stutter the prefix.
+                if why.hasPrefix("needsHuman("), why.hasSuffix(")") {
+                    why = String(why.dropFirst("needsHuman(".count).dropLast())
+                }
+                status = "needs human — \(why)"
             } else {
                 status = report.status.rawValue
             }
