@@ -81,8 +81,11 @@ Press **⇧⇧** (double-tap either Shift) or **⌃⌥Space** anywhere on the Ma
 s1 toggles between `idle` and `listening`. While listening it loops
 **hear → run the goal → speak → hear** until you say a stop phrase
 (`stop`, `berhenti`, `matikan`) or press the hotkey again; it auto-sleeps
-after `--idle-turns` silent turns or repeated STT errors. Idle uses no mic
-and no model — flat battery.
+after `--idle-turns` silent turns or repeated STT errors — and after
+repeated run failures (a dead endpoint can't spin hot). Idle uses no mic
+and no model — flat battery. One listener per machine: `~/.s1/serve.pid`
+is the lock, so `s1 serve` alongside S1.app is refused instead of
+double-triggering on the same hotkey.
 
 The S1 app is the same daemon with a menu-bar face (`MenuBarExtra`): the
 waveform icon shows idle/listening/running, toggles listening, and offers

@@ -9,14 +9,15 @@ the gate, the logger, or the UI.
 ```swift
 public protocol Policy: Sendable {          // System 1 — fast, per-step
     var name: String { get }
-    var useScreenshot: Bool { get }          // wants the screenshot attached?
-    func decide(goal: String, observation: Snapshot,
+    var wantsScreenshot: Bool { get }        // wants the screenshot attached?
+    func decide(observation: Snapshot, goal: String,
                 history: [StepRecord]) async throws -> Decision
 }
 
 public protocol Reasoner: Sendable {        // System 2 — slow, on escalation
     var name: String { get }
-    func reason(prompt: String, observation: Snapshot) async throws -> Decision
+    func decide(observation: Snapshot, goal: String,
+                history: [StepRecord], reason: String) async throws -> Decision
 }
 ```
 
@@ -47,7 +48,7 @@ they don't have to be the same vendor, model, or machine.
 
 1. Conform to `Policy` (or `Reasoner`) in `S1Core`. Be `Sendable` —
    decisions happen on the loop's task.
-2. Honor `useScreenshot = false` unless you truly need pixels: screenshots
+2. Honor `wantsScreenshot = false` unless you truly need pixels: screenshots
    cost a capture per step and the reason is always logged.
 3. Return `nil` action for "I don't know" — the runner handles abstention
    honestly; never fake `.done`.
