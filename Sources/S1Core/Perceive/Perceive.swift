@@ -211,8 +211,12 @@ public enum AXReader {
               let s = size as CFTypeRef?, CFGetTypeID(s) == AXValueGetTypeID()
         else { return nil }
         var point = CGPoint.zero, sz = CGSize.zero
-        AXValueGetValue((p as! AXValue), .cgPoint, &point)
-        AXValueGetValue((s as! AXValue), .cgSize, &sz)
+        // The type IDs matched AXValue, but a hostile process could still
+        // vendor a value whose inner type isn't CGPoint/CGSize — the getter
+        // returns false rather than crash; honour it.
+        guard AXValueGetValue((p as! AXValue), .cgPoint, &point),
+              AXValueGetValue((s as! AXValue), .cgSize, &sz)
+        else { return nil }
         return CGRect(origin: point, size: sz)
     }
 
@@ -246,8 +250,9 @@ public enum AXReader {
               CFGetTypeID(pv) == AXValueGetTypeID(), CFGetTypeID(sv) == AXValueGetTypeID()
         else { return nil }
         var p = CGPoint.zero, s = CGSize.zero
-        AXValueGetValue((pv as! AXValue), .cgPoint, &p)
-        AXValueGetValue((sv as! AXValue), .cgSize, &s)
+        guard AXValueGetValue((pv as! AXValue), .cgPoint, &p),
+              AXValueGetValue((sv as! AXValue), .cgSize, &s)
+        else { return nil }
         return CGRect(origin: p, size: s)
     }
 
