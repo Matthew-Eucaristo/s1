@@ -113,13 +113,23 @@ final class AppModel {
 
     /// Arm the companion: installs the global hotkey (double-tap Shift and
     /// ⌃⌥Space both work). Idle = zero mic, zero model — battery stays flat.
-    /// S2 endpoint for app-initiated work — same resolution the CLI uses
-    /// (fields override base/model, env/config still supply the API key).
+    /// S2 endpoint for app-initiated work — same resolution the CLI uses.
+    /// The in-app field is the user's live choice: it beats the config file
+    /// but NOT an env override (precedence stays flag > env > file > default).
     private func s2Endpoint() -> Endpoint {
         var e = Endpoints.s2()
-        e.baseURL = s2Base
-        e.model = s2Model
+        let env = ProcessInfo.processInfo.environment
+        if env["S1_S2_BASE"] == nil { e.baseURL = s2Base }
+        if env["S1_S2_MODEL"] == nil { e.model = s2Model }
         return e
+    }
+
+    /// VLM endpoint — same precedence as `s2Endpoint`.
+    private func vlmEndpoint() -> Endpoint {
+        let env = ProcessInfo.processInfo.environment
+        return Endpoints.vlm(
+            base: env["S1_VLM_BASE"] == nil ? vlmBase : nil,
+            model: env["S1_VLM_MODEL"] == nil ? vlmModel : nil)
     }
 
     private func startServe() {
@@ -127,23 +137,21 @@ final class AppModel {
         let brainKind = brain
         let s2On = useS2
         let speakOn = speakReply
-        let base = vlmBase
-        let model = vlmModel
-        let s2BaseV = s2Base
-        let s2ModelV = s2Model
         let shot = vlmScreenshot
+        // Resolve endpoints now (MainActor) — the closures Serve holds are
+        // non-isolated and must not reach back into the model.
+        let vlmEp = vlmEndpoint()
+        let s2Ep = s2Endpoint()
         let s = Serve(
             config: .init(
                 makePolicy: {
                     if brainKind == .vlm {
-                        return VLMPolicy(endpoint: Endpoints.vlm(base: base, model: model),
+                        return VLMPolicy(endpoint: vlmEp,
                                          useScreenshot: shot)
                     }
                     return AXPolicy()
                 },
-                s2: s2On ? LLMReasoner(endpoint: Endpoint(baseURL: s2BaseV, model: s2ModelV,
-                                                         apiKey: ProcessInfo.processInfo.environment["S1_S2_KEY"]
-                                                            ?? S1Config.load().s2?.key)) : nil,
+                s2: s2On ? LLMReasoner(endpoint: s2Ep) : nil,
                 speak: speakOn,
                 artifacts: artifactsRoot,
                 // One stop file for the app: Stop (⌘.) aborts serve-driven
@@ -384,8 +392,7 @@ final class AppModel {
         status = "running"
 
         let pol: any Policy = brain == .vlm
-            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                        useScreenshot: vlmScreenshot)
+            ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot)
             : AXPolicy()
         let reasoner: (any Reasoner)? = useS2
             ? LLMReasoner(endpoint: s2Endpoint())
