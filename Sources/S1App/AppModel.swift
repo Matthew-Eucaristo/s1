@@ -262,8 +262,16 @@ final class AppModel {
         }
     }
 
-    /// Hotkey-equivalent toggle for menu/UI buttons.
-    func toggleServe() { serve?.toggle() }
+    /// Hotkey-equivalent toggle for menu/UI buttons. A nil companion means
+    /// a CLI `s1 serve` owns the listener slot — say so instead of silently
+    /// doing nothing when the button is tapped.
+    func toggleServe() {
+        guard let s = serve else {
+            serveStatus = "companion off — a CLI `s1 serve` holds the listener"
+            return
+        }
+        s.toggle()
+    }
 
     /// The Serve object's own state — synchronous under its lock, unlike
     /// `serveState` which mirrors events through an async MainActor hop
