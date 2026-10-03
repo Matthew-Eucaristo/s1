@@ -448,6 +448,11 @@ final class AppModel {
 
     func stop() {
         try? "stop".write(toFile: killPath, atomically: true, encoding: .utf8)
+        // An in-flight listen doesn't check the kill file — cancel it too,
+        // or Stop leaves the mic live until the turn times out.
+        listenTask?.cancel()
+        listenTask = nil
+        listening = false
         speaker.stop()
         status = "stopping…"
     }
