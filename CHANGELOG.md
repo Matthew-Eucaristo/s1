@@ -43,4 +43,30 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `axSetValue` targeting one, routes to `needsHuman`. Models see `[secure]`
   markers and an explicit never-type rule in the decision format.
 
+### Fixed
+- Denylist widened: `dd` to `/dev/*` any flag order, `csrutil|bless|fdisk|
+  newfs_*|gpt destroy`, `launchctl bootout|disable|unload`; `dd` to a
+  regular file is no longer denylisted.
+- Daemon no longer starts a second agent while a run is in flight
+  (`Config.isBusy` drops the utterance and keeps listening).
+- Loop aborts on `Task.isCancelled` and on A-B-A-B action oscillation
+  (was: only same-action thrice).
+- STT continuation double-resume race fixed with a claimed-once flag —
+  a late error can no longer erase a landed transcript.
+- S2 decisions now see step history and the decision-engine system
+  message (was deciding blind to prior failures).
+- `AXReader.element()` re-resolves by identity when the tree shrank
+  between snapshot and act (was: nil → step error).
+- Screenshot capture skipped entirely when no sink is attached (was:
+  captured then discarded).
+- `SpeechAnalyzer.prepareToAnalyze` pre-warms the speech model so the
+  first utterance isn't cold-slow.
+- `config.json` saved with API keys gets 0600 permissions; a malformed
+  endpoint URL throws a readable error instead of crashing.
+- AX policy: `blocked:` outcomes stop the intent chain, empty `key`
+  combos abstain, and the pressable-role set is shared with the LLM
+  prompt's `[pressable]` markers.
+- `--vlm-screenshot/--no-vlm-screenshot` honors config (default on);
+  menu-bar and menu Run buttons trim whitespace like the window's.
+
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD

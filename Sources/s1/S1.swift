@@ -13,7 +13,8 @@ struct S1: AsyncParsableCommand {
         version: "0.2.0",
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
-                      ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self])
+                      ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
+                      TasksCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -401,6 +402,26 @@ struct ServeCmd: AsyncParsableCommand {
             CFRunLoopRun()
         }
         while true { try await Task.sleep(for: .seconds(3600)) }
+    }
+}
+
+struct TasksCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "tasks",
+        abstract: "List the task library (tasks/*.txt) usable with --task.")
+    @Option(help: "Task library directory.")
+    var dir: String = "tasks"
+
+    func run() async throws {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
+            print("no task library at \(dir)/ — create tasks/<name>.txt files")
+            return
+        }
+        for n in names.sorted() where n.hasSuffix(".txt") {
+            let name = String(n.dropLast(4))
+            let first = (try? String(contentsOfFile: "\(dir)/\(n)", encoding: .utf8))?
+                .components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespaces) ?? ""
+            print("\(name)\(first.isEmpty ? "" : "  —  \(first)")")
+        }
     }
 }
 
