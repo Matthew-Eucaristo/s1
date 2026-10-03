@@ -168,6 +168,13 @@ swift run s1 replay artifacts/<run-dir> --dry-run   # re-execute a recorded run
 swift run s1 tasks                                # list what's in the library
 ```
 
+Notes on the library: `download-file` expects a local server — run
+`python3 -m http.server 8000` in a folder containing `test.zip` first
+(Safari downloads it, then s1 opens the Downloads popover and verifies the
+entry; on repeat runs Safari renames to `test-1.zip` — download fresh or
+adjust the `verify` token). `read-screen` verifies text an earlier task
+typed into TextEdit.
+
 ## Permissions (macOS TCC)
 
 `s1 preflight` reports what's missing and prints exact instructions.

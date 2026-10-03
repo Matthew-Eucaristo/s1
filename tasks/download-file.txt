@@ -1,1 +1,1 @@
-open Safari, wait 3000, key cmd+l, wait 500, type http://localhost:8000/test.zip, key return, wait 4000, done
+open Safari, wait 3000, key cmd+l, wait 500, type http://localhost:8000/test.zip, key return, wait 4000, click Downloads, wait 1000, verify test.zip, done
