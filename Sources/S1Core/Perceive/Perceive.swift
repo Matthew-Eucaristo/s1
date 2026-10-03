@@ -48,9 +48,11 @@ public struct SystemPerceiver: Perceiver {
 
         obs.appStates = Self.appStates(windows: obs.windows, frontmostPID: obs.frontmostPID)
 
-        if wantScreenshot {
+        // No sink → nothing can consume the image, so skip the capture
+        // entirely rather than burning a SCK round-trip for a discarded bitmap.
+        if wantScreenshot, let screenshotSink {
             let image = try await Self.captureScreen()
-            obs.screenshotPath = try await screenshotSink?(image)
+            obs.screenshotPath = try await screenshotSink(image)
         }
         return obs
     }
@@ -258,20 +260,23 @@ public enum AXReader {
         var entries: [(el: AXUIElement, role: String, title: String?, desc: String?, frame: CGRect?)] = []
         var counter = 0
         collect(app, counter: &counter, depth: 0, into: &entries)
-        guard target < entries.count else { return nil }
 
-        let candidate = entries[target]
         let orig = treeStore.get(pid)?.flattened
-        guard let origNode = orig, target < origNode.count else { return candidate.el }
-        let o = origNode[target]
+        let o = orig.flatMap { target < $0.count ? $0[target] : nil }
+        let candidate = target < entries.count ? entries[target] : nil
+        guard let o else { return candidate?.el }   // no baseline: trust the index
+
         // Same role and same label (title or desc) → the ref still points
         // at the same widget.
-        if o.role == candidate.role,
+        if let candidate,
+           o.role == candidate.role,
            (o.title ?? "") == (candidate.title ?? ""),
            (o.desc ?? "") == (candidate.desc ?? "") {
             return candidate.el
         }
-        // Index drifted — find the recorded node by identity instead.
+        // Index drifted — or the tree shrank past the ref (a dialog closed
+        // and rebuilt its tree shorter). Find the recorded node by identity
+        // instead of giving up at the bounds check.
         var best: (AXUIElement, Double)?
         for e in entries {
             guard e.role == o.role else { continue }
@@ -285,7 +290,7 @@ public enum AXReader {
                 if d < 24, d < (best?.1 ?? .infinity) { best = (e.el, d) }
             }
         }
-        return best?.0 ?? candidate.el   // worst case: trust the index
+        return best?.0 ?? candidate?.el   // worst case: trust the index
     }
 
     static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
