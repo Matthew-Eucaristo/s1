@@ -182,6 +182,16 @@ swift run s1 ax                 # dump the frontmost app's AX tree (debug percei
 swift run s1 capture --out out.png # one screenshot (checks Screen Recording grant)
 swift run s1 say "halo" --language id-ID # TTS only
 swift run s1 transcribe --file audio.aiff # STT only
+swift run s1 run --policy scripted --plan plan.json # replay a hand-written plan
+```
+
+A plan file is a JSON array of steps — each `action` is the enum's
+single-key form (`{"<case>":{params}}`):
+
+```json
+[{"action":{"openApp":{"name":"TextEdit"}},"rationale":"open"},
+ {"action":{"typeText":"halo"},"rationale":"type"},
+ {"action":{"done":{"summary":"ok"}},"rationale":"fin"}]
 ```
 
 ## Permissions (macOS TCC)

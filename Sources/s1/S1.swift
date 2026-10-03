@@ -74,7 +74,18 @@ struct RunCmd: AsyncParsableCommand {
                             useScreenshot: vlmScreenshot ?? S1Config.load().vlmScreenshot ?? true)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
-            pol = try ScriptedPolicy(planJSON: Data(contentsOf: URL(fileURLWithPath: plan)))
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: plan)) else {
+                throw ValidationError("cannot read plan file: \(plan)")
+            }
+            do {
+                pol = try ScriptedPolicy(planJSON: data)
+            } catch {
+                throw ValidationError("""
+                    plan file is not valid s1 JSON — expected an array of \
+                    {"action":{"<case>":{params}},"rationale":"…"} entries, e.g. \
+                    [{"action":{"openApp":{"name":"TextEdit"}}},{"action":{"done":{"summary":"ok"}}}]
+                    """)
+            }
         default: throw ValidationError("unknown policy \(policy)")
         }
         let goalText: String
@@ -85,7 +96,10 @@ struct RunCmd: AsyncParsableCommand {
                 throw ValidationError("task file not found or empty: \(p)")
             }
             goalText = g
-        } else if let goal { goalText = goal } else {
+        } else if let goal { goalText = goal } else if plan != nil {
+            // A scripted plan IS the program — the filename is its label.
+            goalText = "plan:\(URL(fileURLWithPath: plan ?? "").deletingPathExtension().lastPathComponent)"
+        } else {
             throw ValidationError("pass --goal or --task")
         }
         guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
