@@ -103,6 +103,7 @@ private struct MenuBarView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.small)
+                .accessibilityLabel("Run")
                 .disabled(model.running ||
                           model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

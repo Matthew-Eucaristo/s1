@@ -96,6 +96,7 @@ struct NotchHUDView: View {
         HStack(spacing: 9) {
             Image(systemName: phase == .listening ? "waveform" : "brain")
                 .font(.callout.weight(.semibold))
+                .accessibilityHidden(true)
                 .symbolEffect(.pulse, isActive: true)
                 .frame(width: 16)
             Text(phase == .listening ? "listening" : "working")

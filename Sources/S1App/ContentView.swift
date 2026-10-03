@@ -139,6 +139,7 @@ struct ContentView: View {
                 Image(systemName: "hand.raised.fill")
                     .font(.title2)
                     .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Grant \(missingPermissions) to begin")
                         .font(.callout.weight(.semibold))
@@ -289,6 +290,7 @@ struct ContentView: View {
                 Image(systemName: "arrow.up.right.circle")
                     .foregroundStyle(.orange)
                     .help("\(esc.to): \(esc.reason)")
+                    .accessibilityLabel("escalated to \(esc.to)")
             }
             if let conf = rec.confidence {
                 Text(String(format: "%.2f", conf))
@@ -299,6 +301,7 @@ struct ContentView: View {
             if let v = rec.verified {
                 Image(systemName: v ? "checkmark.seal.fill" : "xmark.seal")
                     .foregroundStyle(v ? .green : .red)
+                    .accessibilityLabel(v ? "verified" : "not verified")
             }
         }
         .padding(.horizontal, 12)
