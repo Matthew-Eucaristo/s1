@@ -78,5 +78,22 @@ this project is pre-1.0 — breaking changes land in minor versions.
   re-run can't type into a password box the original run skipped.
 - Legacy-mic listen exits as soon as the final transcript lands (was:
   always burned the rest of the turn).
+- SpeechAnalyzer mic turns now also end on speech end (0.9s quiet grace
+  after the last final segment) instead of always burning `maxSeconds`.
+- Cross-process screen ownership: `~/.s1/run.pid` lock means a second
+  agent run refuses instead of fighting the live one for the keyboard;
+  `s1 status`/`s1 stop` add daemon observability and an off switch.
+- Pid-file checks verify executable identity via proc_pidpath — a stale
+  pid recycled by an unrelated process can no longer block a run or be
+  SIGTERM'd by `s1 stop`.
+- AXHelp joins title/description in element labels and ref identity —
+  icon-only toolbar buttons are now matchable (and named in `s1 ax`).
+- AX attribute reads batch into one IPC call per node
+  (`AXUIElementCopyMultipleAttributeValues`) — roughly half the per-step
+  observe latency on wide trees.
+- Scroll direction convention fixed: dy>0 scrolls content down (browser
+  scrollY semantics) and is documented in the decision prompt.
+- Process-kill commands (`pkill`/`killall`/`kill -9`) are denylisted —
+  the agent can't destroy the session it runs in.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
