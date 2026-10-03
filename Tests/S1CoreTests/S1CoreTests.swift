@@ -86,6 +86,22 @@ private func jsonlDecoder() -> JSONDecoder {
     }
 }
 
+@Test func processKillRoutesToHuman() {
+    let gate = SafetyGate(allowReversible: true, allowIrreversible: true)
+    // kill <pid> kills with default SIGTERM — as denylisted as kill -9.
+    for cmd in ["kill 1234", "kill -9 1234", "kill -TERM 42", "pkill Finder",
+                "killall Safari", "xkill"] {
+        if case .needsHuman(let r) = gate.evaluate(.shell(command: cmd)) {
+            #expect(r.contains("denylist"), "\(cmd) should be denylisted")
+        } else { Issue.record("process kill must escalate: \(cmd)") }
+    }
+    // The word "kill" alone (docs, chat text) stays free.
+    #expect(gate.evaluate(.typeText("how to kill a process")) == .allow)
+    if case .needsHuman(let r) = gate.evaluate(.shell(command: "echo killed it")) {
+        #expect(!r.contains("denylist"))
+    }
+}
+
 // MARK: - secure text fields
 
 @Test func secureFieldEscalatesTyping() async throws {
