@@ -222,7 +222,14 @@ public enum AXReader {
     private final class TreeStore: @unchecked Sendable {
         private let lock = NSLock()
         private var map: [pid_t: AXNode] = [:]
-        func set(_ t: AXNode, pid: pid_t) { lock.lock(); map[pid] = t; lock.unlock() }
+        /// Bounded: long-running companions would otherwise accumulate
+        /// trees for apps that quit hours ago.
+        func set(_ t: AXNode, pid: pid_t) {
+            lock.lock()
+            if map.count >= 16, map[pid] == nil { map.removeAll(keepingCapacity: true) }
+            map[pid] = t
+            lock.unlock()
+        }
         func get(_ pid: pid_t) -> AXNode? { lock.lock(); defer { lock.unlock() }; return map[pid] }
     }
     static func noteTree(_ tree: AXNode, pid: pid_t) { treeStore.set(tree, pid: pid) }
@@ -234,8 +241,8 @@ public enum AXReader {
     static func element(pid: pid_t, ref: String) -> AXUIElement? {
         guard ref.hasPrefix("e"), let target = Int(ref.dropFirst()) else { return nil }
         let app = AXUIElementCreateApplication(pid)
-        // One walk that keeps (element, role, title, frame) per node.
-        var entries: [(el: AXUIElement, role: String, title: String?, frame: CGRect?)] = []
+        // One walk that keeps (element, role, title, desc, frame) per node.
+        var entries: [(el: AXUIElement, role: String, title: String?, desc: String?, frame: CGRect?)] = []
         var counter = 0
         collect(app, counter: &counter, depth: 0, into: &entries)
         guard target < entries.count else { return nil }
@@ -244,16 +251,20 @@ public enum AXReader {
         let orig = treeStore.get(pid)?.flattened
         guard let origNode = orig, target < origNode.count else { return candidate.el }
         let o = origNode[target]
-        // Same role and same title → the ref still points at the same widget.
-        if o.role == candidate.role, (o.title ?? "") == (candidate.title ?? "") {
+        // Same role and same label (title or desc) → the ref still points
+        // at the same widget.
+        if o.role == candidate.role,
+           (o.title ?? "") == (candidate.title ?? ""),
+           (o.desc ?? "") == (candidate.desc ?? "") {
             return candidate.el
         }
         // Index drifted — find the recorded node by identity instead.
         var best: (AXUIElement, Double)?
         for e in entries {
             guard e.role == o.role else { continue }
-            if let ot = o.title, !ot.isEmpty {
-                if e.title == ot { return e.el }
+            let oLabel = (o.title?.isEmpty == false ? o.title : o.desc)
+            if let ot = oLabel, !ot.isEmpty {
+                if e.title == ot || e.desc == ot { return e.el }
                 continue
             }
             if let of = o.frame, let ef = e.frame {
@@ -265,11 +276,12 @@ public enum AXReader {
     }
 
     static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
-                        into entries: inout [(el: AXUIElement, role: String, title: String?, frame: CGRect?)]) {
+                        into entries: inout [(el: AXUIElement, role: String, title: String?, desc: String?, frame: CGRect?)]) {
         guard depth < maxDepth, counter < maxNodes else { return }
         counter += 1
         entries.append((el, attr(el, kAXRoleAttribute) ?? "unknown",
-                        attr(el, kAXTitleAttribute), liveFrame(of: el)))
+                        attr(el, kAXTitleAttribute), attr(el, kAXDescriptionAttribute),
+                        liveFrame(of: el)))
         var kids: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
               let arr = kids as? [AXUIElement] else { return }
