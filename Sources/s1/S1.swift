@@ -52,8 +52,8 @@ struct RunCmd: AsyncParsableCommand {
     var dryRun = false
     @Flag(help: "Queue irreversible actions for human confirmation.")
     var allowIrreversible = false
-    @Option(help: "Kill-switch file path (abort if it appears).")
-    var killSwitch: String? = nil
+    @Option(help: "Kill-switch file path (abort if it appears). Default: the shared s1-stop file `s1 stop` writes.")
+    var killSwitch: String = NSTemporaryDirectory() + "s1-stop"
     @Option(help: "VLM endpoint base URL for --policy vlm (OpenAI-compatible).")
     var vlmBase: String?
     @Option(help: "VLM model name for --policy vlm.")
@@ -92,6 +92,9 @@ struct RunCmd: AsyncParsableCommand {
             throw ValidationError("empty goal — pass --goal or --task")
         }
         let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        // A stale switch from an earlier `s1 stop` would abort this run at
+        // step 0 — disarm it now that a run is genuinely starting.
+        try? FileManager.default.removeItem(atPath: killSwitch)
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)

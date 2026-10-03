@@ -88,6 +88,22 @@ public enum S1Runner {
 
     /// Removes the lock only when WE hold it — a dry-run (which never
     /// acquires) must not delete a live run's lock file.
+    /// Sleep in ≤0.5s slices so a kill-switch file written mid-wait lands
+    /// within half a second instead of after the full duration. Returns
+    /// false when interrupted (file present or task cancelled).
+    public static func sleepInterruptibly(_ seconds: Double,
+                                          killSwitchPath: String? = nil) async -> Bool {
+        var remaining = seconds
+        while remaining > 0 {
+            let slice = min(0.5, remaining)
+            try? await Task.sleep(nanoseconds: UInt64(slice * 1e9))
+            if Task.isCancelled { return false }
+            if let k = killSwitchPath, FileManager.default.fileExists(atPath: k) { return false }
+            remaining -= slice
+        }
+        return true
+    }
+
     public static func releaseRunLock() {
         guard let txt = try? String(contentsOfFile: lockPath, encoding: .utf8),
               pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines))

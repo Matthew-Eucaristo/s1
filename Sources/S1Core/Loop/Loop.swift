@@ -175,12 +175,19 @@ public struct AgentLoop {
 
         switch verdict {
         case .allow:
-            do {
-                outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
-            } catch {
-                // A failed action is evidence too — log it and keep looping
-                // (the model sees "error:" and picks a different move).
-                outcome = "error: \(error.localizedDescription)"
+            if case .wait(let s) = action {
+                // Wait in the loop, not the actuator: a 60s `wait` must hear
+                // the kill switch within ~0.5s, not when it finally ends.
+                outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: config.killSwitchPath)
+                    ? "waited \(s)s" : "interrupted (kill switch)"
+            } else {
+                do {
+                    outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
+                } catch {
+                    // A failed action is evidence too — log it and keep looping
+                    // (the model sees "error:" and picks a different move).
+                    outcome = "error: \(error.localizedDescription)"
+                }
             }
         case .deny(let r), .needsHuman(let r):
             outcome = "blocked: \(r)"

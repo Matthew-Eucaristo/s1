@@ -102,10 +102,15 @@ public enum RunReader {
                 }
                 var outcome = "blocked"
                 if case .allow = verdict {
-                    do {
-                        outcome = try await actuator.perform(action, frontmostPID: liveObs?.frontmostPID)
-                    } catch {
-                        outcome = "error: \(error.localizedDescription)"
+                    if case .wait(let s) = action {
+                        outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: killSwitchPath)
+                            ? "waited \(s)s" : "interrupted (kill switch)"
+                    } else {
+                        do {
+                            outcome = try await actuator.perform(action, frontmostPID: liveObs?.frontmostPID)
+                        } catch {
+                            outcome = "error: \(error.localizedDescription)"
+                        }
                     }
                 }
                 try await logger.log(StepRecord(index: i, time: Date(),
