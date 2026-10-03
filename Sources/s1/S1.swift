@@ -112,11 +112,25 @@ struct RunCmd: AsyncParsableCommand {
         // A stale switch from an earlier `s1 stop` would abort this run at
         // step 0 — disarm it now that a run is genuinely starting.
         try? FileManager.default.removeItem(atPath: killSwitch)
+        // Live step feed — a 25-step run is otherwise silent for minutes and
+        // reads as hung. Same digest format the app feed shows.
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
-                               allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2)
+                               allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2,
+                               onStep: { rec in print(stepLine(rec)) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
+}
+
+/// One-line step digest for CLI feeds — "[3] s1:ax typeText(\"hi\") → typed · conf 0.95".
+func stepLine(_ r: StepRecord) -> String {
+    var s = "[\(r.index)] \(r.decidedBy)"
+    if let c = r.confidence { s += String(format: " %.2f", c) }
+    if let a = r.action { s += " \(a)" }
+    if let o = r.outcome { s += " → \(o)" }
+    if let v = r.verified { s += v ? " ✓" : " ✗verify" }
+    if let e = r.escalation { s += " ⚑→\(e.to)" }
+    return s
 }
 
 struct ConfigCmd: AsyncParsableCommand {
@@ -302,7 +316,8 @@ struct ListenCmd: AsyncParsableCommand {
         let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
-                               killSwitch: kill, s2: reasoner)
+                               killSwitch: kill, s2: reasoner,
+                               onStep: { rec in print(stepLine(rec)) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
             await Speaker().say(locale.hasPrefix("id") ? "Selesai" : "Done", language: locale)
