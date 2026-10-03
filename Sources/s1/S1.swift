@@ -414,7 +414,7 @@ struct ServeCmd: AsyncParsableCommand {
         let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
         if let txt = try? String(contentsOfFile: pidPath, encoding: .utf8),
            let other = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
-           kill(other, 0) == 0 {
+           S1Runner.pidLooksLikeS1(other) {
             throw ValidationError("another s1 listener is already running (pid \(other)) — quit it or use its hotkey")
         }
         try? FileManager.default.createDirectory(
@@ -498,7 +498,7 @@ struct StatusCmd: AsyncParsableCommand {
         let servePid = NSHomeDirectory() + "/.s1/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
-           kill(pid, 0) == 0 {
+           S1Runner.pidLooksLikeS1(pid) {
             print("listener     running (pid \(pid))")
         } else {
             print("listener     not running")
@@ -536,7 +536,7 @@ struct StopCmd: AsyncParsableCommand {
         let servePid = NSHomeDirectory() + "/.s1/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
-           kill(pid, 0) == 0 {
+           S1Runner.pidLooksLikeS1(pid) {
             kill(pid, SIGTERM)
             print("listener pid \(pid): SIGTERM sent")
             did = true
