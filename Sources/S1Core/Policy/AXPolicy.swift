@@ -47,6 +47,7 @@ public struct AXPolicy: Policy {
             .replacingOccurrences(of: " then ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " dan ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " and then ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " and ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " terus ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " trus ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " kemudian ", with: ",", options: .caseInsensitive)
@@ -117,7 +118,12 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a combo like cmd+s")
             }
-            return Decision(action: .keyCombo(keys: intent.arg.split(separator: "+").map { $0.lowercased() }),
+            // "cmd+s" typed, "cmd s" said — both split into the combo list.
+            let keys = intent.arg.lowercased()
+                .split(separator: "+")
+                .flatMap { $0.split(separator: " ") }
+                .map(String.init)
+            return Decision(action: .keyCombo(keys: keys),
                             confidence: 0.95,
                             rationale: "key combo")
         case "wait", "tunggu":
@@ -157,35 +163,56 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a target")
             }
+            // "isi <field> dengan <value>" / "set <field> to <value>" —
+            // the needle is the field name; the value is what lands in it.
+            var needle = intent.arg, setValue: String? = nil
+            if intent.verb == "set" || intent.verb == "isi" {
+                for sep in [" dengan ", " menjadi ", " to ", "=", ":"] {
+                    if let r = intent.arg.range(of: sep, options: .caseInsensitive) {
+                        needle = String(intent.arg[intent.arg.startIndex..<r.lowerBound])
+                            .trimmingCharacters(in: .whitespaces)
+                        setValue = String(intent.arg[r.upperBound...])
+                            .trimmingCharacters(in: .whitespaces)
+                        break
+                    }
+                }
+                if setValue == nil { setValue = intent.arg }
+            }
+            guard !needle.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs a field name")
+            }
             guard let tree = observation.axTree else {
                 return Decision(action: nil, confidence: 0.2,
-                                rationale: "need AX tree to find '\(intent.arg)'")
+                                rationale: "need AX tree to find '\(needle)'")
             }
             let candidates: [(AXNode, Double)] = tree.flattened
-                .map { ($0, AXPolicy.matchScore(intent.arg, $0)) }
+                .map { ($0, AXPolicy.matchScore(needle, $0)) }
                 .filter { $0.1 > 0 }
                 .sorted { $0.1 > $1.1 }
             guard let (node, score) = candidates.first else {
                 return Decision(action: nil, confidence: 0.25,
-                                rationale: "no AX element matches '\(intent.arg)'")
+                                rationale: "no AX element matches '\(needle)'")
             }
             let isPressable = AXPolicy.pressableRoles.contains(node.role)
             let action: Action
-            if intent.verb == "set" || intent.verb == "isi" {
-                action = .axSetValue(ref: node.ref, value: intent.arg)
+            if let setValue {
+                action = .axSetValue(ref: node.ref, value: setValue)
             } else if isPressable {
                 action = .axPress(ref: node.ref)
             } else {
-                let f = node.frame
-                let cx: Double = (f?.x ?? 0) + (f?.w ?? 0) / 2
-                let cy: Double = (f?.y ?? 0) + (f?.h ?? 0) / 2
-                action = .click(x: cx, y: cy)
+                // No frame → clicking (0,0) would hit the menu bar corner.
+                guard let f = node.frame else {
+                    return Decision(action: nil, confidence: 0.2,
+                                    rationale: "matched \(node.ref) but it has no frame to click")
+                }
+                action = .click(x: f.x + f.w / 2, y: f.y + f.h / 2)
             }
             // Ambiguity penalty: second-place close behind → less sure.
             let runnerUp = candidates.dropFirst().first?.1 ?? 0
             let confidence = min(0.95, score * (runnerUp > score - 0.15 ? 0.75 : 1.0))
             return Decision(action: action, confidence: confidence,
-                            rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? "")\" score=\(score)")
+                            rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? node.desc ?? node.help ?? "")\" score=\(score)")
         default:
             return Decision(action: nil, confidence: 0.1,
                             rationale: "unknown verb '\(intent.verb)' — needs a smarter brain")

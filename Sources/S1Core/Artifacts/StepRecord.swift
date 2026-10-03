@@ -53,7 +53,15 @@ public actor RunLogger {
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             .prefix(40)
-        runDir = root.appendingPathComponent("\(stamp)-\(slug)")
+        // Same goal in the same second (e.g. app + serve firing together)
+        // would share one dir and interleave its steps.jsonl — uniquify.
+        var candidate = root.appendingPathComponent("\(stamp)-\(slug)")
+        var n = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = root.appendingPathComponent("\(stamp)-\(slug)-\(n)")
+            n += 1
+        }
+        runDir = candidate
         try FileManager.default.createDirectory(at: runDir.appendingPathComponent("screens"), withIntermediateDirectories: true)
         var meta = config
         meta["goal"] = goal
