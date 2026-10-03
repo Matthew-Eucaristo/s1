@@ -501,6 +501,47 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(!Serve.isStop("", phrases: phrases))
 }
 
+@Test func racingKillSwitchAbortsInFlightWork() async throws {
+    // A kill file landing mid-work must win the race — the model-call path
+    // depends on it for `s1 stop` responsiveness.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let kill = dir.appendingPathComponent("ks").path
+    // Work that would take 30s; the file appears ~0.1s in — abort should
+    // land in ~0.35s (one 250ms poll tick), not after 30s.
+    let t0 = Date()
+    Task {
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        try? "x".write(toFile: kill, atomically: true, encoding: .utf8)
+    }
+    do {
+        _ = try await S1Runner.racingKillSwitch(kill) { () -> Int in
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            return 42
+        }
+        Issue.record("racingKillSwitch should have thrown")
+    } catch is S1Error {
+        #expect(Date().timeIntervalSince(t0) < 5)
+    }
+    // And the fast path: no kill file → work result passes through.
+    let v = try await S1Runner.racingKillSwitch(nil) { 7 }
+    #expect(v == 7)
+}
+
+@Test func releasePidFileOnlyRemovesOurOwn() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let mine = dir.appendingPathComponent("mine.pid").path
+    let theirs = dir.appendingPathComponent("theirs.pid").path
+    try String(ProcessInfo.processInfo.processIdentifier).write(toFile: mine, atomically: true, encoding: .utf8)
+    try "1".write(toFile: theirs, atomically: true, encoding: .utf8)
+    S1Runner.releasePidFile(mine)
+    S1Runner.releasePidFile(theirs)
+    #expect(!FileManager.default.fileExists(atPath: mine))
+    #expect(FileManager.default.fileExists(atPath: theirs))
+    try? FileManager.default.removeItem(at: dir)
+}
+
 @Test func serveRunUsesConfiguredPolicy() async throws {
     // Prove an utterance becomes a goal and reaches the agent loop:
     // feed one command, then a stop phrase — both via injected transcribe.
