@@ -244,6 +244,14 @@ final class AppModel {
     /// Hotkey-equivalent toggle for menu/UI buttons.
     func toggleServe() { serve?.toggle() }
 
+    /// The Serve object's own state — synchronous under its lock, unlike
+    /// `serveState` which mirrors events through an async MainActor hop
+    /// (so it still reads `idle` for a beat after toggle()).
+    var serveIsListening: Bool {
+        guard let s = serve else { return false }
+        return s.state != .idle
+    }
+
     func toggleLoginItem() {
         do {
             if launchAtLogin {

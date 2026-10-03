@@ -45,7 +45,9 @@ struct ToggleListeningIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let listening = await MainActor.run { () -> Bool in
             AppModel.shared.toggleServe()
-            return AppModel.shared.serveState != .idle
+            // The UI-mirrored serveState lags a Task hop — ask the Serve
+            // object itself or the dialog lies about the toggle.
+            return AppModel.shared.serveIsListening
         }
         return .result(dialog: listening ? "s1 is listening" : "s1 is asleep")
     }
