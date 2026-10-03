@@ -258,6 +258,24 @@ Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
 
 macOS attributes TCC grants to the *responsible* process: run `s1` from Terminal and **Terminal** needs the Accessibility / Screen Recording / Speech Recognition grants — not just the `s1` binary. `s1 preflight` reports what the current host is missing.
 
+## Known limits (honest)
+
+- **Small GUI models are still young.** `gemma3:4b` is the interim default
+  because it's the smallest model we benchmarked that finishes multi-step
+  goals; GUI-tuned models (Fara1.5, GUI-Owl, UI-TARS, Holo) are the
+  upgrade path — the protocol makes swapping a config edit, not a refactor.
+- **AX coverage isn't everything.** Apps that don't expose an
+  accessibility tree (some Electron, games, remote desktops) fall back to
+  screenshot-grounded VLM steps — slower and model-dependent by design.
+- **Voice needs real audio hardware.** `s1 listen`/`serve` mic paths need a
+  microphone + Speech Recognition grant; `transcribe --file` is the
+  headless/testable path.
+- **iOS is out of scope.** Apple gives no third-party AX/event-injection
+  APIs on iOS — full control there is Siri/Shortcuts-only territory.
+  (Design notes in `PLAN.md` §7.)
+- **TCC belongs to the responsible process** — grants follow your terminal
+  app when running via `swift run` or a CLI in a shell.
+
 ## Contributing
 
 See `CONTRIBUTING.md` — setup, how to test (unit + real TCC runs), conventions, PR flow.
