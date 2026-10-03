@@ -92,7 +92,8 @@ NOT fire ⇧⇧ — any key between the taps resets the gesture.
 
 ```bash
 s1 status      # daemon alive? state? is a run in progress?
-s1 stop        # abort any in-flight run + quit the listener
+s1 stop        # abort any in-flight run + stop the listener
+               # (SIGTERM for `s1 serve`; the app only sleeps — window survives)
 ```
 
 `~/.s1/run.pid` marks screen ownership — a second agent run refuses while

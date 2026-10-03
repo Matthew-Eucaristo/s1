@@ -44,6 +44,16 @@ this project is pre-1.0 — breaking changes land in minor versions.
   markers and an explicit never-type rule in the decision format.
 
 ### Fixed
+- `s1 stop` semantics unified — SIGTERM only for `s1 serve`; the app
+  listener is slept via stop file (window survives, state cleans up).
+  Serve `wake()` re-verifies the one-listener lock (a deleted/stolen
+  serve.pid can no longer double-listen), and the serve loop sleeps on
+  seeing the stop file so `s1 stop` also ends a running utterance turn.
+- `wait` intents parse real units — "wait 2 seconds"/"tunggu 500 ms"/
+  "wait 1.5 minutes" land at the right duration (was: always 0.5s); the
+  LLM codec also accepts a `seconds` field fallback.
+- `s1 metrics`/`replay` on a non-run dir report "not a run directory"
+  instead of raw Foundation errors.
 - Denylist widened: `dd` to `/dev/*` any flag order, `csrutil|bless|fdisk|
   newfs_*|gpt destroy`, `launchctl bootout|disable|unload`; `dd` to a
   regular file is no longer denylisted.
