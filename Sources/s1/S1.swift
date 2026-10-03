@@ -459,7 +459,8 @@ struct ServeCmd: AsyncParsableCommand {
             let (report, _) = try await S1Runner.run(goal: text, policy: makePol(),
                 artifacts: "artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: kill,
-                s2: reasoner)
+                s2: reasoner,
+                onStep: { rec in print(rec.digest) })
             if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
             if speak {
                 let done = locale.hasPrefix("id") ? "Selesai" : "Done"
