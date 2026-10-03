@@ -891,3 +891,25 @@ private func rec(action: Action?, outcome: String?) -> StepRecord {
              rec(action: .done(summary: "x"), outcome: nil)]
     #expect(VLMPolicy.cursorIndex(history: c, intentCount: 2) == 2)
 }
+
+// MARK: - interruptible wait
+
+@Test func sleepInterruptiblyHearsKillSwitchMidWait() async throws {
+    let dir = NSTemporaryDirectory() + "s1-test-\(UUID().uuidString)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let kill = dir + "/stop"
+    let clock = ContinuousClock()
+    let t0 = clock.now
+    // Arm the switch after ~0.3s — a 30s wait must end near-instantly.
+    Task { try? await Task.sleep(nanoseconds: 300_000_000)
+           try? "x".write(toFile: kill, atomically: true, encoding: .utf8) }
+    let full = await S1Runner.sleepInterruptibly(30, killSwitchPath: kill)
+    #expect(full == false)
+    #expect(clock.now - t0 < .seconds(3))
+}
+
+@Test func sleepInterruptiblySleepsFullyWithoutSwitch() async throws {
+    let full = await S1Runner.sleepInterruptibly(0.2, killSwitchPath: "/nonexistent")
+    #expect(full == true)
+}
