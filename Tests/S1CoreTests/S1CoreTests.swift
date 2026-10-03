@@ -34,10 +34,18 @@ private func jsonlDecoder() -> JSONDecoder {
     let gate = SafetyGate(allowReversible: true, allowIrreversible: true)
     for cmd in ["rm -rf /tmp/x", "rm -fr .", "rm -r -f /var/junk", "rm -rfv /",
                 "mkfs.ext4 /dev/disk0", "dd of=/dev/disk1 if=/tmp/img", "dd if=/dev/zero of=/dev/disk2",
+                "dd bs=4M if=/tmp/img of=/dev/rdisk2", "dd conv=sync of=/dev/disk0",
+                "csrutil disable", "bless --folder /Volumes/x", "fdisk -i /dev/disk0",
+                "newfs_hfs /dev/disk1s2", "launchctl bootout system/com.example.daemon",
                 "diskutil eraseDisk APFS X /dev/disk0", ":(){ :|:& };:"] {
         let v = gate.evaluate(.shell(command: cmd))
         #expect(v != .allow, "should not allow: \(cmd)")
     }
+    // dd writing to a regular FILE isn't denylisted — it stays a normal
+    // irreversible step (needsHuman for confirmation), same as any shell.
+    if case .needsHuman(let r) = gate.evaluate(.shell(command: "dd if=img of=/tmp/out.dmg")) {
+        #expect(!r.contains("denylist"))
+    } else { Issue.record("dd to a file must not be denylisted") }
     // Non-destructive rm doesn't trip the denylist (shell stays a normal
     // irreversible step — needsHuman for confirmation, not denylisted).
     if case .needsHuman(let r) = gate.evaluate(.shell(command: "rm -v /tmp/old.log")) {

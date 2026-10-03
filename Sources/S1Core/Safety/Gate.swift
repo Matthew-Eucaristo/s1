@@ -31,7 +31,15 @@ public struct SafetyGate: Sendable {
         // Destructive shell variants — any rm flag bundle containing r or f
         // (-rf, -fr, -r -f, -vrf) routes to a human; plain rm -i stays free.
         (#"(?i)\brm\s+(-\w*\s+)*-\w*[rf]"#, "destructive shell"),
-        (#"(?i)\b(mkfs|diskutil\s+erase|dd\s+(if|of)=)"#, "destructive shell"),
+        (#"(?i)\b(mkfs|diskutil\s+erase)"#, "destructive shell"),
+        // dd is dangerous only when it writes to a device — any flag order
+        // (dd bs=4M if=x of=/dev/rdisk2). Writing an image to a file is a
+        // normal irreversible step, not denylisted.
+        (#"(?i)\bdd\b[^|;&]*\bof=\s*/dev/"#, "destructive shell"),
+        // Disk/boot/service-bypass tools that can brick or persistently
+        // alter the machine — humans only.
+        (#"(?i)\b(csrutil|bless|fdisk|newfs_\w+|gpt\s+destroy)\b"#, "destructive shell"),
+        (#"(?i)\blaunchctl\s+(bootout|disable|unload)\b"#, "destructive shell"),
         // The fork bomb is punctuation-only — a \b anchor can never match it.
         (#":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"#, "destructive shell"),
         // Power/session control — an agent must not log out or power off.
