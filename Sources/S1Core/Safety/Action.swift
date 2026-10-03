@@ -104,6 +104,9 @@ public struct Snapshot: Codable, Sendable {
     public var axTree: AXNode?
     public var appStates: [AppState] = []
     public var screenshotPath: String?
+    /// True while an AXSecureTextField (password input) has keyboard focus —
+    /// the gate routes keystrokes to a human instead of typing into it.
+    public var secureTextFocused: Bool = false
 
     /// One-line digest for the step log.
     public var summary: String {

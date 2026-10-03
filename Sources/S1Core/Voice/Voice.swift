@@ -161,7 +161,13 @@ public struct SpeechToText: Sendable {
         tapInstalled = true
         engine.prepare()
         try engine.start()
-        try await Task.sleep(nanoseconds: UInt64(maxSeconds * 1e9))
+        // Listen for the full turn — but bail the moment recognition fails
+        // instead of sleeping through a dead recognizer.
+        var waited = 0.0
+        while waited < maxSeconds, failure.value == nil {
+            try await Task.sleep(nanoseconds: 200_000_000)
+            waited += 0.2
+        }
         // Give the final result a moment to arrive, then settle.
         for _ in 0 ..< 20 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
         task.finish()

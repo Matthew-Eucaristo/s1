@@ -137,7 +137,17 @@ public struct AgentLoop {
             obs = try await perceiver.observe(wantScreenshot: true)
         }
 
-        let verdict = gate.evaluate(action)
+        var verdict = gate.evaluate(action)
+        // Secure-field guard: a password box must never be filled by an
+        // agent — not by raw keystrokes (focus check) nor a targeted AX
+        // write (ref's role check). Escalates to a human, same as the
+        // deny list.
+        if case .typeText = action, obs.secureTextFocused {
+            verdict = .needsHuman(reason: "focused field is a secure text field")
+        }
+        if case .axSetValue(let ref, _) = action, isSecureField(ref, in: obs.axTree) {
+            verdict = .needsHuman(reason: "target is a secure text field")
+        }
         var outcome = "blocked"
         var verified: Bool?
 
@@ -202,6 +212,10 @@ public struct AgentLoop {
             }
         }
         return false
+    }
+
+    private func isSecureField(_ ref: String, in tree: AXNode?) -> Bool {
+        tree?.flattened.first { $0.ref == ref }?.role == "AXSecureTextField"
     }
 
     private func treeContains(_ tree: AXNode?, _ needle: String) -> Bool {

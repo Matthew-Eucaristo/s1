@@ -62,6 +62,71 @@ private func jsonlDecoder() -> JSONDecoder {
     #expect(SafetyGate().evaluate(.typeText("hello world")) == .allow)
 }
 
+@Test func powerCommandsRouteToHuman() {
+    let gate = SafetyGate(allowReversible: true, allowIrreversible: true)
+    for cmd in ["shutdown -h now", "sudo reboot", "halt",
+                "osascript -e 'tell app \"System Events\" to shut down'",
+                "osascript -e 'tell app \"System Events\" to log out'",
+                "pmset sleepnow"] {
+        if case .needsHuman(let r) = gate.evaluate(.shell(command: cmd)) {
+            #expect(r.contains("denylist"), "\(cmd) should be denylisted")
+        } else { Issue.record("power command must escalate: \(cmd)") }
+    }
+    // Everyday commands stay free of the new patterns.
+    if case .needsHuman(let r) = gate.evaluate(.shell(command: "echo restart count")) {
+        #expect(!r.contains("denylist"))
+    }
+}
+
+// MARK: - secure text fields
+
+@Test func secureFieldEscalatesTyping() async throws {
+    // Focused AXSecureTextField → typeText must reach a human, never keys.
+    var obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                       windows: [], axTree: nil, screenshotPath: nil)
+    obs.secureTextFocused = true
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(observation: obs),
+                         actuator: DryRunActuator(), gate: SafetyGate())
+    let plan = ScriptedPolicy(steps: [.init(action: .typeText("hunter2"), confidence: 1.0)])
+    let report = try await loop.run(goal: "g", policy: plan, logger: logger)
+    #expect(report.status == .needsHuman)
+    let lines = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+    #expect(lines.contains("secure text field"))
+}
+
+@Test func secureFieldAxSetEscalates() async throws {
+    // Targeted write into a secure field is caught by the ref's role.
+    let field = AXNode(ref: "e5", role: "AXSecureTextField", title: "Password",
+                       desc: nil, value: nil, frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, value: nil, frame: nil, children: [field])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(observation: obs),
+                         actuator: DryRunActuator(), gate: SafetyGate())
+    let plan = ScriptedPolicy(steps: [.init(action: .axSetValue(ref: "e5", value: "hunter2"), confidence: 1.0)])
+    let report = try await loop.run(goal: "g", policy: plan, logger: logger)
+    #expect(report.status == .needsHuman)
+    // A normal text field stays writable.
+    let safe = AXNode(ref: "e5", role: "AXTextField", title: "Name",
+                      desc: nil, value: nil, frame: nil, children: [])
+    let safeTree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                          desc: nil, value: nil, frame: nil, children: [safe])
+    let obs2 = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                        windows: [], axTree: safeTree, screenshotPath: nil)
+    let logger2 = try RunLogger(goal: "test", root: dir.appendingPathComponent("b"), config: [:])
+    let loop2 = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(observation: obs2),
+                          actuator: DryRunActuator(), gate: SafetyGate())
+    let plan2 = ScriptedPolicy(steps: [.init(action: .axSetValue(ref: "e5", value: "x"), confidence: 1.0),
+                                       .init(action: .done(summary: "ok"))])
+    let rep2 = try await loop2.run(goal: "g", policy: plan2, logger: logger2)
+    #expect(rep2.status == .done)
+}
+
 // MARK: - steps.jsonl format
 
 @Test func stepRecordSerializesToSingleJSONLine() throws {

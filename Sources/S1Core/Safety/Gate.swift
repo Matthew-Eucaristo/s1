@@ -34,6 +34,10 @@ public struct SafetyGate: Sendable {
         (#"(?i)\b(mkfs|diskutil\s+erase|dd\s+(if|of)=)"#, "destructive shell"),
         // The fork bomb is punctuation-only — a \b anchor can never match it.
         (#":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"#, "destructive shell"),
+        // Power/session control — an agent must not log out or power off.
+        (#"(?i)\b(shutdown|reboot|halt|poweroff)\b"#, "power/session control"),
+        (#"(?i)\bpmset\s+(sleep|restart|shutdown)"#, "power/session control"),
+        (#"(?i)osascript.*(shut\s*down|restart|log\s*out|sleep)"#, "power/session control"),
     ]
 
     public init(allowReversible: Bool = true, allowIrreversible: Bool = false) {

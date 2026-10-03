@@ -39,6 +39,7 @@ public struct SystemPerceiver: Perceiver {
         if let app = NSWorkspace.shared.frontmostApplication {
             obs.frontmostApp = app.localizedName
             obs.frontmostPID = app.processIdentifier
+            obs.secureTextFocused = AXReader.focusedElementIsSecure(pid: app.processIdentifier)
             if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
                 obs.axTree = tree
                 AXReader.noteTree(tree, pid: app.processIdentifier)
@@ -233,6 +234,18 @@ public enum AXReader {
         func get(_ pid: pid_t) -> AXNode? { lock.lock(); defer { lock.unlock() }; return map[pid] }
     }
     static func noteTree(_ tree: AXNode, pid: pid_t) { treeStore.set(tree, pid: pid) }
+
+    /// Whether the app's keyboard focus sits in an AXSecureTextField —
+    /// the voice-typing path must never fill a password box.
+    public static func focusedElementIsSecure(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+              let el = v, CFGetTypeID(el) == AXUIElementGetTypeID()
+        else { return false }
+        let role = attr(el as! AXUIElement, kAXRoleAttribute)
+        return role == "AXSecureTextField"
+    }
 
     /// Live element lookup behind a ref (`e<n>` = walk-order index in the
     /// snapshot the policy saw). UI mutations between observe and act shift

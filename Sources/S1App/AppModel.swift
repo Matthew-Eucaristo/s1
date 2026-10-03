@@ -332,7 +332,12 @@ final class AppModel {
             saveConfig()
             running = false
             if speakReply {
-                let reply = locale.hasPrefix("id") ? "Selesai" : "Done"
+                let id = locale.hasPrefix("id")
+                let reply: String = switch report.status {
+                case .done: id ? "Selesai" : "Done"
+                case .needsHuman, .escalatedToS2: id ? "Butuh kamu" : "Needs you"
+                default: id ? "Berhenti" : "Stopped"
+                }
                 await speaker.say("\(reply): \(goalText)", language: locale)
             }
         } catch {
