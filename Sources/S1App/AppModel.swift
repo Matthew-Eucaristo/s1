@@ -94,6 +94,8 @@ final class AppModel {
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
         if let r = cfg.recent { recentGoals = r }
         if let vs = cfg.vlmScreenshot { vlmScreenshot = vs }
+        if let b = cfg.brain, let kind = Brain(rawValue: b) { brain = kind }
+        if let u = cfg.useS2 { useS2 = u }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -200,6 +202,8 @@ final class AppModel {
         cfg.vocabulary = parsedVocab
         cfg.recent = recentGoals
         cfg.vlmScreenshot = vlmScreenshot
+        cfg.brain = brain.rawValue
+        cfg.useS2 = useS2
         try? cfg.save()
     }
 

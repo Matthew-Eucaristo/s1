@@ -38,15 +38,23 @@ public struct S1Config: Codable, Sendable {
     public var recent: [String]?
     /// Whether the VLM brain attaches a screenshot per step (app toggle).
     public var vlmScreenshot: Bool?
+    /// The app's chosen System 1 ("ax" | "vlm") — persisted so a restart
+    /// keeps the brain the user picked.
+    public var brain: String?
+    /// Whether the app escalates low-confidence steps to S2.
+    public var useS2: Bool?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
                 vocabulary: [String]? = nil, recent: [String]? = nil,
-                vlmScreenshot: Bool? = nil) {
+                vlmScreenshot: Bool? = nil, brain: String? = nil,
+                useS2: Bool? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
         self.vocabulary = vocabulary
         self.recent = recent
         self.vlmScreenshot = vlmScreenshot
+        self.brain = brain
+        self.useS2 = useS2
     }
 
     public static var path: String { NSHomeDirectory() + "/.s1/config.json" }

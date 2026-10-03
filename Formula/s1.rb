@@ -24,7 +24,9 @@ class S1 < Formula
   depends_on macos: :sequoia
 
   def install
-    system "swift", "build", "--disable-sandbox", "-c", "release"
+    # Build only the CLI product — the package also contains the S1.app
+    # target, and a GUI-target failure must never break `brew install s1`.
+    system "swift", "build", "--disable-sandbox", "-c", "release", "--product", "s1"
     bin.install ".build/release/s1"
   end
 
