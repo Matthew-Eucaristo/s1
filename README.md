@@ -194,14 +194,15 @@ Sources/S1Core/
   Safety/    Action classes, hard deny-list, kill switch
   Preflight/ TCC checks incl. the relaunch invariant
   Artifacts/ per-run dir: meta.json + steps.jsonl + screens/
-  Loop/      see → decide → gate → act → verify → log
-Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say · listen · serve
+  Loop/      see → decide → gate → act → verify → log · Serve — always-on
+             listen→run→speak daemon, auto-sleep, kill switch · Runner lock
+  Hotkey/    passive CGEvent tap (listen-only): ⇧⇧ double-tap + ⌃⌥Space chord
+Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say
+             · listen · serve · status · stop · config · tasks · metrics
+             · replay
 Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
              (MenuBarExtra + hotkey + login item), mic + file STT, live step
-             feed, brain/locale/model pickers, permission status
-Sources/S1Core/
-  Hotkey/    passive CGEvent tap (listen-only): ⇧⇧ double-tap + ⌃⌥Space chord
-  Loop/      Serve — always-on listen→run→speak daemon, auto-sleep, kill switch
+             feed, brain/locale/model pickers, permission status, App Intents
 ```
 
 ## Safety

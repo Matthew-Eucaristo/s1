@@ -41,7 +41,7 @@ Real-world checks that can't run in CI (they need TCC grants):
 
 ```sh
 s1 run --task open-app --policy ax            # deterministic AX policy
-s1 run --policy vlm --task type-text          # local VLM (Ollama)
+s1 run --policy vlm --task fill-form          # local VLM (Ollama)
 s1 listen --file voice.aiff --locale id-ID    # STT → run → optional TTS
 s1 metrics artifacts/<run-dir>/               # evidence from any run
 ```
