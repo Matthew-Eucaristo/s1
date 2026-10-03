@@ -100,6 +100,15 @@ final class AppModel {
 
     /// Arm the companion: installs the global hotkey (double-tap Shift and
     /// ⌃⌥Space both work). Idle = zero mic, zero model — battery stays flat.
+    /// S2 endpoint for app-initiated work — same resolution the CLI uses
+    /// (fields override base/model, env/config still supply the API key).
+    private func s2Endpoint() -> Endpoint {
+        var e = Endpoints.s2()
+        e.baseURL = s2Base
+        e.model = s2Model
+        return e
+    }
+
     private func startServe() {
         let loc = locale
         let brainKind = brain
@@ -114,12 +123,14 @@ final class AppModel {
             config: .init(
                 makePolicy: {
                     if brainKind == .vlm {
-                        return VLMPolicy(endpoint: Endpoint(baseURL: base, model: model),
+                        return VLMPolicy(endpoint: Endpoints.vlm(base: base, model: model),
                                          useScreenshot: shot)
                     }
                     return AXPolicy()
                 },
-                s2: s2On ? LLMReasoner(endpoint: Endpoint(baseURL: s2BaseV, model: s2ModelV)) : nil,
+                s2: s2On ? LLMReasoner(endpoint: Endpoint(baseURL: s2BaseV, model: s2ModelV,
+                                                         apiKey: ProcessInfo.processInfo.environment["S1_S2_KEY"]
+                                                            ?? S1Config.load().s2?.key)) : nil,
                 speak: speakOn,
                 artifacts: artifactsRoot,
                 transcribe: { [weak self] in
@@ -313,7 +324,7 @@ final class AppModel {
                         useScreenshot: vlmScreenshot)
             : AXPolicy()
         let reasoner: (any Reasoner)? = useS2
-            ? LLMReasoner(endpoint: Endpoint(baseURL: s2Base, model: s2Model))
+            ? LLMReasoner(endpoint: s2Endpoint())
             : nil
 
         do {

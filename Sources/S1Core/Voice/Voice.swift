@@ -198,7 +198,12 @@ public struct SpeechToText: Sendable {
         var tapInstalled = false
         // Same cancellation rule as the legacy path: the tap and engine must
         // come down even when the task is cancelled mid-listen.
+        var resultsTask: Task<Void, Error>?
+        var inputTask: Task<Void, Error>?
         defer {
+            // Cancelled mid-listen → children must not outlive the scope.
+            resultsTask?.cancel()
+            inputTask?.cancel()
             if tapInstalled { input.removeTap(onBus: 0) }
             engine.stop()
             continuation.finish()
@@ -211,21 +216,21 @@ public struct SpeechToText: Sendable {
         try engine.start()
 
         let collected = TextCollector()
-        let resultsTask = Task {
+        resultsTask = Task {
             for try await result in transcriber.results {
                 if result.isFinal {
                     await collected.append(String(result.text.characters))
                 }
             }
         }
-        let inputTask = Task { try await analyzer.start(inputSequence: stream) }
+        inputTask = Task { try await analyzer.start(inputSequence: stream) }
         try await Task.sleep(nanoseconds: UInt64(maxSeconds * 1e9))
         continuation.finish()
-        try await inputTask.value
+        try await inputTask?.value
         try await analyzer.finalizeAndFinishThroughEndOfInput()
         // The results stream terminates once the analyzer finishes — awaiting
         // it is what lands the final transcript chunk.
-        try await resultsTask.value
+        try await resultsTask?.value
         return await collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

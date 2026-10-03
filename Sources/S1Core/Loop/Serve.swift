@@ -144,7 +144,9 @@ public final class Serve: @unchecked Sendable {
 
     private func sleep(_ reason: String) {
         listenTask?.cancel()
-        listenTask = nil
+        // Keep the (cancelled) task reference: the next wake() chains behind
+        // its unwind so the mic tap is down before a new turn starts. Setting
+        // it nil here would let two audio engines race on rapid toggles.
         // Land the kill switch too — an in-flight run aborts at its next step
         // instead of finishing a task the user already cancelled.
         try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
