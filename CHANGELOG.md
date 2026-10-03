@@ -56,6 +56,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
   markers and an explicit never-type rule in the decision format.
 
 ### Fixed
+- **MenuBarExtra run crash** — runs started from the menu-bar quick-goal
+  field died instantly ("Block was expected to execute on queue
+  com.apple.main-thread"): `observe()`'s AX reads now run on the main
+  actor, since HIServices asserts when the first `AXUIElement` contact
+  lands on a cooperative-pool thread. Verified end-to-end.
 - **Phantom typing closed** — `s1 run`, `s1 demo`, serve runs, and live
   replay now fail fast on missing Accessibility (`requireAccessibility`)
   instead of posting CGEvents that silently drop while the log claims
