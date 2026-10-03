@@ -25,6 +25,7 @@ enum LLMDecisionCodec {
             if editableRoles.contains(n.role) { s += " [editable]" }
             if scrollableRoles.contains(n.role) { s += " [scrollable]" }
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
+            if let d = n.desc, !d.isEmpty, d != n.title { s += " desc=\"\(d.prefix(40))\"" }
             if let v = n.value, !v.isEmpty, v != n.title { s += " value=\"\(v.prefix(60))\"" }
             lines.append(s)
         }
@@ -177,6 +178,9 @@ enum LLMDecisionCodec {
         case "click":     a = .click(x: num("x") ?? 0, y: num("y") ?? 0)
         case "keyCombo":  a = field("keys").map { .keyCombo(keys: $0.split(separator: "+").map { $0.lowercased() }) }
         case "wait":      a = .wait(seconds: (num("ms") ?? 500) / 1000)
+        case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
+        case "moveMouse": a = .moveMouse(x: num("x") ?? 0, y: num("y") ?? 0)
+        case "captureScreenshot": a = .captureScreenshot(reason: field("expect") ?? "salvaged")
         case "done":      a = .done(summary: field("expect") ?? "done")
         default:          a = nil
         }
@@ -241,6 +245,9 @@ public struct VLMPolicy: Policy {
         case "key", "keys", "hotkey", "press": hint = "keyCombo (e.g. \"cmd+f\") — or click/axPress for a UI element"
         case "wait", "tunggu":          hint = "wait"
         case "verify", "cek", "check", "pastikan": hint = "verify"
+        case "screenshot", "capture", "screencap", "tangkap", "tangkapan", "foto", "potret", "ambil":
+            hint = "captureScreenshot"
+        case "scroll", "gulir", "geser": hint = "scroll (dx/dy pixel deltas)"
         case "done", "selesai":         hint = "done"
         default:                        hint = "whichever action type fits"
         }

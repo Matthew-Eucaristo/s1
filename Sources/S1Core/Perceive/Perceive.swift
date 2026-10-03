@@ -143,6 +143,7 @@ public enum AXReader {
             ref: ref,
             role: attr(el, kAXRoleAttribute) ?? "unknown",
             title: attr(el, kAXTitleAttribute),
+            desc: attr(el, kAXDescriptionAttribute),
             value: stringValue(el),
             frame: frame(of: el),
             children: [])

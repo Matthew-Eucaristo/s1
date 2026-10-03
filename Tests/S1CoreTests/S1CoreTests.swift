@@ -177,9 +177,9 @@ private func jsonlDecoder() -> JSONDecoder {
 
 @Test func axPolicyMatchesAXElementAndClickUnknownVerbAbstains() async throws {
     let pol = AXPolicy()
-    let node = AXNode(ref: "e5", role: "AXButton", title: "Save", value: nil,
+    let node = AXNode(ref: "e5", role: "AXButton", title: "Save", desc: nil, value: nil,
                       frame: CGRectCodable(CGRect(x: 10, y: 20, width: 40, height: 20)), children: [])
-    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", value: nil,
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", desc: nil, value: nil,
                       frame: nil, children: [node])
     let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
                           windows: [], axTree: tree, screenshotPath: nil)
@@ -467,6 +467,50 @@ private final class Locked<T>: @unchecked Sendable {
     }
     #expect(serve.state == .idle)
     #expect(calls.get() >= 2)
+}
+
+// MARK: - ax policy command grammar
+
+@Test func axPolicyIndonesianAndEdgeVerbs() async throws {
+    let pol = AXPolicy()
+    let obs = NullPerceiver().observation
+    // Indonesian screenshot verb (was an unknown-verb escalation before).
+    if case .captureScreenshot? = try await pol.decide(
+        observation: obs, goal: "tangkap layar", history: []).action {} else {
+        Issue.record("tangkap layar should capture a screenshot")
+    }
+    // Scroll directions.
+    if case .scroll(let dx, let dy)? = try await pol.decide(
+        observation: obs, goal: "gulir atas", history: []).action {
+        #expect(dx == 0 && dy < 0)
+    } else { Issue.record("gulir atas should scroll up") }
+    // "wait 2" = seconds, "wait 2000" = ms, "wait 500ms" explicit.
+    if case .wait(let s)? = try await pol.decide(
+        observation: obs, goal: "tunggu 2", history: []).action {
+        #expect(s == 2)
+    } else { Issue.record("tunggu 2 should wait") }
+    if case .wait(let s)? = try await pol.decide(
+        observation: obs, goal: "wait 2000", history: []).action {
+        #expect(s == 2)
+    } else { Issue.record("wait 2000 should wait") }
+    // Conjunctions: "kemudian" splits intents too.
+    #expect(AXPolicy.intents(of: "buka TextEdit kemudian ketik halo").count == 2)
+}
+
+@Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {
+    // A failed "open" must not let the next intent type into a random app.
+    let pol = AXPolicy()
+    var rec = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax",
+                         confidence: 0.9, rationale: nil, modelReply: nil,
+                         action: .openApp(name: "Nope"), gate: "allow",
+                         outcome: "error: app not found: Nope", verified: nil, escalation: nil)
+    let obs = NullPerceiver().observation
+    let d = try await pol.decide(observation: obs, goal: "buka Nope lalu ketik halo", history: [rec])
+    #expect(d.action == nil && d.confidence < 0.6)
+    // ...but a clean previous step does not trip the guard.
+    rec.outcome = "opened Nope"
+    let d2 = try await pol.decide(observation: obs, goal: "buka TextEdit lalu ketik halo", history: [rec])
+    #expect(d2.action != nil)
 }
 
 // MARK: - vocabulary

@@ -4,9 +4,11 @@ import Foundation
 /// command grammar and resolves targets against the AX tree. Confidence is a
 /// real score (match quality), so weak parses naturally escalate to S2.
 ///
-/// Grammar: `open <app>` · `click <label>` · `type <text>` · `key <combo>` ·
-/// `wait <ms>` · `screenshot` · `done` — the honest baseline every smarter
-/// S1 must beat before earning a place in the loop.
+/// Grammar (English + Indonesian): `open/buka <app>` · `click/klik <label>` ·
+/// `type/ketik <text>` · `key <combo>` · `wait/tunggu <s|ms>` ·
+/// `scroll/gulir <arah>` · `screenshot/tangkap` · `verify/cek` · `done/selesai`
+/// — the honest baseline every smarter S1 must beat before earning a place
+/// in the loop.
 public struct AXPolicy: Policy {
     public let name = "ax"
     /// Seconds waited between queued sub-commands; the policy consumes one
@@ -46,6 +48,12 @@ public struct AXPolicy: Policy {
             .replacingOccurrences(of: " dan ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " and then ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " terus ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " trus ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " kemudian ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " habis itu ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " abis itu ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " setelah itu ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " lantas ", with: ",", options: .caseInsensitive)
             .components(separatedBy: CharacterSet(charactersIn: ",;"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -60,7 +68,7 @@ public struct AXPolicy: Policy {
     /// Element match quality 0...1: exact title 1.0, prefix 0.8, contains 0.6.
     static func matchScore(_ needle: String, _ node: AXNode) -> Double {
         let n = needle.lowercased()
-        let fields = [node.title, node.value, n == "" ? nil : node.role].compactMap { $0?.lowercased() }
+        let fields = [node.title, node.desc, node.value, n == "" ? nil : node.role].compactMap { $0?.lowercased() }
         var best = 0.0
         for f in fields {
             if f == n { best = max(best, 1.0) }
@@ -82,6 +90,12 @@ public struct AXPolicy: Policy {
             return Decision(action: .done(summary: "goal completed"), confidence: 0.95,
                             rationale: "all \(intents.count) intents consumed")
         }
+        // A failed step stops the chain instead of cascading — "buka X lalu
+        // ketik Y" must not type into a random app when the open failed.
+        if let last = history.last, last.outcome?.hasPrefix("error:") == true {
+            return Decision(action: nil, confidence: 0.15,
+                            rationale: "previous step failed — abstaining instead of cascading")
+        }
         let intent = intents[history.count]
         switch intent.verb {
         case "open", "buka", "launch":
@@ -95,11 +109,28 @@ public struct AXPolicy: Policy {
                             confidence: 0.95,
                             rationale: "key combo")
         case "wait", "tunggu":
-            return Decision(action: .wait(seconds: (Double(intent.arg) ?? 500) / 1000), confidence: 0.95,
-                            rationale: "wait")
-        case "screenshot", "capture":
+            // "wait 2" means seconds to a human; "wait 2000" means ms.
+            // Explicit suffixes win; bare numbers >= 100 read as ms.
+            let arg = intent.arg.lowercased()
+            let n = Double(arg.replacingOccurrences(of: "ms", with: "")
+                .replacingOccurrences(of: "s", with: "")) ?? 0.5
+            let secs = arg.hasSuffix("ms") ? n / 1000 : (arg.hasSuffix("s") ? n : (n >= 100 ? n / 1000 : n))
+            return Decision(action: .wait(seconds: secs), confidence: 0.95,
+                            rationale: "wait \(secs)s")
+        case "screenshot", "capture", "screencap", "tangkap", "tangkapan", "foto", "potret", "ambil":
             return Decision(action: .captureScreenshot(reason: "requested in goal"), confidence: 0.95,
                             rationale: "screenshot requested")
+        case "scroll", "gulir", "geser":
+            // Voice says directions, pixels come out (wheel1 = vertical).
+            let d: (Double, Double)
+            switch intent.arg.lowercased() {
+            case "up", "atas":              d = (0, -300)
+            case "left", "kiri":           d = (-300, 0)
+            case "right", "kanan":         d = (300, 0)
+            default:                       d = (0, 300)   // "down"/"bawah" + bare "scroll"
+            }
+            return Decision(action: .scroll(dx: d.0, dy: d.1), confidence: 0.9,
+                            rationale: "scroll \(intent.arg.isEmpty ? "down" : intent.arg)")
         case "verify", "cek", "check", "pastikan":
             return Decision(action: .verify(expectation: intent.arg), confidence: 0.9,
                             rationale: "verify '\(intent.arg)' on screen")

@@ -74,6 +74,9 @@ public struct AXNode: Codable, Sendable {
     public var ref: String
     public var role: String
     public var title: String?
+    /// AXDescription — where icon-only buttons keep their human label
+    /// ("Save", "Bold") when AXTitle is empty.
+    public var desc: String?
     public var value: String?
     public var frame: CGRectCodable?
     public var children: [AXNode]

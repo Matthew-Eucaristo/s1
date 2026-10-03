@@ -156,11 +156,21 @@ public final class Hotkey: @unchecked Sendable {
                 return
             }
         case .flagsChanged:
-            let shiftHeld = event.flags.contains(.maskShift)
+            // Map the moved keycode to ITS flag — works for trackers on any
+            // modifier, not just Shift (56/60 shift, 55/61 cmd, 58/62 opt,
+            // 59/63 ctrl per HID key codes).
+            let flagMask: CGEventFlags = switch keyCode {
+            case 56, 60: .maskShift
+            case 55, 61: .maskCommand
+            case 58, 62: .maskAlternate
+            case 59, 63: .maskControl
+            default: []
+            }
+            let modHeld = event.flags.contains(flagMask)
             var tracked = false
             for i in trackers.indices where trackers[i].keyCodes.contains(keyCode) {
                 tracked = true
-                if trackers[i].feed(keyCode: keyCode, isDown: shiftHeld, at: t) {
+                if trackers[i].feed(keyCode: keyCode, isDown: modHeld, at: t) {
                     onTrigger()
                     trackers[i] = ModifierTapTracker(
                         keyCodes: Array(trackers[i].keyCodes), within: trackers[i].within)
