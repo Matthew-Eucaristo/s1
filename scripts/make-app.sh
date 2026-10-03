@@ -36,11 +36,12 @@ cp assets/menubar-18.png "$APP/Contents/Resources/s1-menubar.png" 2>/dev/null ||
 cp assets/menubar-36.png "$APP/Contents/Resources/s1-menubar@2x.png" 2>/dev/null || true
 
 # Prefer the stable dev cert; fall back to ad-hoc (-) when absent.
+# No --deep: deprecated by Apple, and this bundle holds a single binary.
 if security find-identity -v -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
-    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+    codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null
     echo "signed with '$SIGN_IDENTITY' (stable TCC identity across rebuilds)"
 else
-    codesign --force --deep --sign - "$APP" >/dev/null
+    codesign --force --sign - "$APP" >/dev/null
     echo "note: no '$SIGN_IDENTITY' identity — ad-hoc signed; TCC grants will reset each rebuild"
     echo "      run scripts/dev-cert.sh once to create a stable local dev cert"
 fi
