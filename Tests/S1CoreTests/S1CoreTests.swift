@@ -1047,3 +1047,73 @@ private func rec(action: Action?, outcome: String?) -> StepRecord {
     let full = await S1Runner.sleepInterruptibly(0.2, killSwitchPath: "/nonexistent")
     #expect(full == true)
 }
+
+// MARK: - LLMDecisionCodec.observationText
+
+private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
+    var o = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                     windows: [], axTree: root, screenshotPath: nil)
+    o.appStates = states
+    return o
+}
+
+@Test func observationTextMarksActionableRoles() {
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, help: nil, value: nil, frame: nil, children: [
+        AXNode(ref: "e1", role: "AXButton", title: "Save",
+               desc: nil, help: nil, value: nil, frame: nil, children: []),
+        AXNode(ref: "e2", role: "AXTextField", title: "Name",
+               desc: nil, help: nil, value: nil, frame: nil, children: []),
+        AXNode(ref: "e3", role: "AXSecureTextField", title: "Password",
+               desc: nil, help: nil, value: nil, frame: nil, children: []),
+        AXNode(ref: "e4", role: "AXScrollArea", title: nil,
+               desc: nil, help: nil, value: nil, frame: nil, children: []),
+    ])
+    let t = LLMDecisionCodec.observationText(obsWithTree(tree))
+    #expect(t.contains("e1 AXButton [pressable] \"Save\""))
+    #expect(t.contains("e2 AXTextField [editable] \"Name\""))
+    #expect(t.contains("e3 AXSecureTextField [secure] \"Password\""))
+    #expect(t.contains("e4 AXScrollArea [scrollable]"))
+}
+
+@Test func observationTextDescDedupesTitleAndLabelsIconOnly() {
+    // Icon-only button: no title, label in desc — the model must still see it.
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, help: nil, value: nil, frame: nil, children: [
+        AXNode(ref: "e1", role: "AXButton", title: nil,
+               desc: "Bold", help: nil, value: nil, frame: nil, children: []),
+        AXNode(ref: "e2", role: "AXButton", title: "Same",
+               desc: "Same", help: nil, value: nil, frame: nil, children: []),
+    ])
+    let t = LLMDecisionCodec.observationText(obsWithTree(tree))
+    #expect(t.contains("e1 AXButton [pressable] desc=\"Bold\""))
+    // title == desc must not print twice
+    #expect(t.contains("e2 AXButton [pressable] \"Same\""))
+    #expect(!t.contains("\"Same\" desc=\"Same\""))
+}
+
+@Test func observationTextCapsNodeCount() {
+    // 100-node tree → only ~60 reach the prompt (token budget).
+    let kids = (0..<100).map {
+        AXNode(ref: "e\($0 + 1)", role: "AXStaticText", title: "n\($0)",
+               desc: nil, help: nil, value: nil, frame: nil, children: [])
+    }
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, help: nil, value: nil, frame: nil, children: kids)
+    let t = LLMDecisionCodec.observationText(obsWithTree(tree))
+    // flattened = root + kids → prefix(60) ends at e59; e60 is the first cut.
+    #expect(t.contains("e59 AXStaticText \"n58\""))
+    #expect(!t.contains("e60"))
+}
+
+@Test func observationTextRendersAppStates() {
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, help: nil, value: nil, frame: nil, children: [])
+    let states = [
+        AppState(name: "TextEdit", pid: 1, isActive: true, windowTitles: ["doc.txt"]),
+        AppState(name: "Safari", pid: 2, isActive: false, windowTitles: ["GitHub", "Tab 2"]),
+    ]
+    let t = LLMDecisionCodec.observationText(obsWithTree(tree, states: states))
+    #expect(t.contains("* TextEdit: doc.txt"))
+    #expect(t.contains("  Safari: GitHub | Tab 2"))
+}
