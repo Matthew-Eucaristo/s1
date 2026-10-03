@@ -42,6 +42,8 @@ public struct SafetyGate: Sendable {
         (#"(?i)\blaunchctl\s+(bootout|disable|unload)\b"#, "destructive shell"),
         // The fork bomb is punctuation-only — a \b anchor can never match it.
         (#":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"#, "destructive shell"),
+        // Process kill — "kill Finder" mid-task destroys the user's session.
+        (#"(?i)\b(pkill|killall|kill\s+-9|kill\s+-KILL)\b"#, "process kill"),
         // Power/session control — an agent must not log out or power off.
         (#"(?i)\b(shutdown|reboot|halt|poweroff)\b"#, "power/session control"),
         (#"(?i)\bpmset\s+(sleep|restart|shutdown)"#, "power/session control"),
