@@ -188,5 +188,15 @@ this project is pre-1.0 — breaking changes land in minor versions.
 - `.wait` in a dry-run no longer sleeps real seconds — the actuator
   executes nothing, so the recorded 60s wait no longer blocks the
   preview (logged as `[dry-run] wait Ns` in both Loop and Replay).
+- Denylist covers `kill <pid>`/`xkill` (default SIGTERM kills too — was:
+  only `-9`/`-KILL` variants and pkill/killall matched).
+- `openApp` activates explicitly — an app opened in the background never
+  came forward, so the next typeText landed in whatever had focus.
+- Screenshot capture targets the display holding the main screen, not
+  blindly the first enumerated display (multi-monitor).
+- Model replies with empty ref/text/keys/app fields now abstain and
+  escalate (was: became real actions that failed downstream).
+- TTS picks the highest-quality installed voice for the locale
+  (premium/enhanced over the base default).
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
