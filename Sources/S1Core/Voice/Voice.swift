@@ -279,13 +279,16 @@ public struct SpeechToText: Sendable {
                                 using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
         let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * dst.sampleRate / src.sampleRate)) + 64
         guard let out = AVAudioPCMBuffer(pcmFormat: dst, frameCapacity: capacity) else { return nil }
-        var consumed = false
+        // The input block runs synchronously inside convert() — the capture
+        // never actually crosses a concurrency boundary.
+        nonisolated(unsafe) var consumed = false
+        nonisolated(unsafe) let source = buffer
         var error: NSError?
         converter.convert(to: out, error: &error) { _, status in
             if consumed { status.pointee = .endOfStream; return nil }
             consumed = true
             status.pointee = .haveData
-            return buffer
+            return source
         }
         guard error == nil, out.frameLength > 0 else { return nil }
         return out
@@ -371,14 +374,15 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     public func say(_ text: String, language: String = "id-ID", timeout: Double = 30) async {
         // read-modify-write of the tail under the same lock the continuation
         // slot uses — an atomic pair or two concurrent callers both chain nil.
-        lock.lock()
-        let prev = sayTail
-        let t = Task { [weak self] in
-            _ = await prev?.value
-            await self?.speakOnce(text, language: language, timeout: timeout)
+        let t = lock.withLock {
+            let prev = sayTail
+            let t = Task { [weak self] in
+                _ = await prev?.value
+                await self?.speakOnce(text, language: language, timeout: timeout)
+            }
+            sayTail = t
+            return t
         }
-        sayTail = t
-        lock.unlock()
         await t.value
     }
 
