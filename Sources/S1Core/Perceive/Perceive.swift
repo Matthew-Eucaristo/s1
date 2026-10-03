@@ -30,20 +30,39 @@ public struct SystemPerceiver: Perceiver {
     }
 
     public func observe(wantScreenshot: Bool) async throws -> Snapshot {
+        // AX + frontmost reads run on the main actor on purpose: HIServices
+        // asserts ("Block was expected to execute on queue com.apple.main-
+        // thread") when the AX connection's first contact happens on a
+        // cooperative-pool thread — which is exactly where a MenuBarExtra
+        // action's Task resumes. Window-list/SCK don't share that rule.
+        struct OnMain: Sendable {
+            var windows: [WindowInfo]
+            var appName: String?
+            var appPID: pid_t?
+            var secure: Bool
+            var tree: AXNode?
+        }
+        let m = await MainActor.run { () -> OnMain in
+            var o = OnMain(windows: Self.windowList(), appName: nil, appPID: nil,
+                           secure: false, tree: nil)
+            if let app = NSWorkspace.shared.frontmostApplication {
+                o.appName = app.localizedName
+                o.appPID = app.processIdentifier
+                o.secure = AXReader.focusedElementIsSecure(pid: app.processIdentifier)
+                if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
+                    o.tree = tree
+                }
+            }
+            return o
+        }
         var obs = Snapshot(
             timestamp: Date(),
-            frontmostApp: nil, frontmostPID: nil,
-            windows: Self.windowList(),
-            axTree: nil, screenshotPath: nil)
-
-        if let app = NSWorkspace.shared.frontmostApplication {
-            obs.frontmostApp = app.localizedName
-            obs.frontmostPID = app.processIdentifier
-            obs.secureTextFocused = AXReader.focusedElementIsSecure(pid: app.processIdentifier)
-            if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
-                obs.axTree = tree
-                AXReader.noteTree(tree, pid: app.processIdentifier)
-            }
+            frontmostApp: m.appName, frontmostPID: m.appPID,
+            windows: m.windows,
+            axTree: m.tree, screenshotPath: nil)
+        obs.secureTextFocused = m.secure
+        if let tree = m.tree, let pid = m.appPID {
+            AXReader.noteTree(tree, pid: pid)
         }
 
         obs.appStates = Self.appStates(windows: obs.windows, frontmostPID: obs.frontmostPID)
