@@ -14,7 +14,7 @@ struct S1: AsyncParsableCommand {
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
-                      TasksCmd.self])
+                      TasksCmd.self, StatusCmd.self, StopCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -486,6 +486,66 @@ struct MetricsCmd: AsyncParsableCommand {
         print("verified     ok: \(m.verifiedOK) · fail: \(m.verifiedFail)")
         print("screenshots  \(m.screenshots)")
         print(String(format: "duration     %.1fs", m.durationSeconds))
+    }
+}
+
+struct StatusCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "status",
+        abstract: "Is a listener daemon alive, what state is it in, and is a run active?")
+
+    func run() async throws {
+        // Listener daemon — pid file + liveness.
+        let servePid = NSHomeDirectory() + "/.s1/serve.pid"
+        if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
+           let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
+           kill(pid, 0) == 0 {
+            print("listener     running (pid \(pid))")
+        } else {
+            print("listener     not running")
+        }
+        // Last published daemon state.
+        if let data = FileManager.default.contents(atPath: Serve.statePath),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let alive = (obj["pid"] as? Int).map { kill(pid_t($0), 0) == 0 } ?? false
+            if alive {
+                let st = (obj["state"] as? String) ?? "?"
+                let ev = (obj["event"] as? String) ?? "?"
+                let detail = (obj["detail"] as? String) ?? ""
+                print("state        \(st) · \(ev)\(detail.isEmpty ? "" : " · \(detail)")")
+                if let at = obj["updated"] as? String { print("updated      \(at)") }
+            }
+        }
+        // Active agent run (the screen-ownership lock).
+        let runState = S1Runner.anotherRunActive() ? "in progress (other process)" : "none"
+        print("run          \(runState)")
+    }
+}
+
+struct StopCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "stop",
+        abstract: "Stop everything: abort any in-flight run and put the listener to sleep.")
+
+    func run() async throws {
+        var did = false
+        // Land every kill switch — an in-flight run aborts at its next step.
+        for f in ["s1-stop", "s1-serve-stop", "s1-app-stop"] {
+            try? "stop".write(toFile: NSTemporaryDirectory() + f,
+                             atomically: true, encoding: .utf8)
+        }
+        // Ask a live listener daemon to quit entirely.
+        let servePid = NSHomeDirectory() + "/.s1/serve.pid"
+        if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
+           let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
+           kill(pid, 0) == 0 {
+            kill(pid, SIGTERM)
+            print("listener pid \(pid): SIGTERM sent")
+            did = true
+        }
+        if S1Runner.anotherRunActive() {
+            print("run abort queued (kill switch lands at the next step)")
+            did = true
+        }
+        print(did ? "stopped" : "nothing running — kill switches armed anyway")
     }
 }
 

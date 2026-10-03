@@ -82,6 +82,9 @@ public final class Serve: @unchecked Sendable {
     private var hotkey: Hotkey?
     private var listenTask: Task<Void, Never>?
     private let sayLanguage: String
+    /// ~/.s1/serve-state.json — external observability for `s1 status`.
+    /// Best-effort: a daemon should never fail because telemetry can't write.
+    public static let statePath = NSHomeDirectory() + "/.s1/serve-state.json"
 
     public init(config: Config, locale: Locale = Locale(identifier: "id-ID"),
                 hotkeyPatterns: [HotkeyPattern]? = nil,
@@ -274,6 +277,25 @@ public final class Serve: @unchecked Sendable {
     }
 
     private func emit(_ kind: ServeEvent.Kind, _ text: String = "") {
+        writeState(kind, text)
         onEvent(ServeEvent(kind, text))
+    }
+
+    /// Publish state transitions for `s1 status`. Only lifecycle events land
+    /// in the file — per-step noise stays in the event stream.
+    private func writeState(_ kind: ServeEvent.Kind, _ text: String) {
+        switch kind {
+        case .armed, .listening, .runStart, .runDone, .sleeping, .stopped, .idle: break
+        default: return
+        }
+        let escaped = text.replacingOccurrences(of: "\"", with: "'").prefix(120)
+        let iso = ISO8601DateFormatter().string(from: Date())
+        let json = "{\"state\":\"\(state.rawValue)\",\"event\":\"\(kind.rawValue)\","
+            + "\"detail\":\"\(escaped)\",\"pid\":\(ProcessInfo.processInfo.processIdentifier),"
+            + "\"updated\":\"\(iso)\"}"
+        try? FileManager.default.createDirectory(
+            atPath: (Self.statePath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true)
+        try? json.write(toFile: Self.statePath, atomically: true, encoding: .utf8)
     }
 }
