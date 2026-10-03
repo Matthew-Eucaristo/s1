@@ -78,11 +78,9 @@ public struct AXPolicy: Policy {
         return best
     }
 
-    /// Roles that take a press rather than a text set.
-    static let pressableRoles: Set<String> = [
-        "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXLink",
-        "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow",
-    ]
+    /// Roles that take a press rather than a text set — same set the LLM
+    /// prompts advertise as [pressable]; one source of truth.
+    static let pressableRoles: Set<String> = LLMDecisionCodec.pressableRoles
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let intents = AXPolicy.intents(of: goal)
@@ -92,7 +90,9 @@ public struct AXPolicy: Policy {
         }
         // A failed step stops the chain instead of cascading — "buka X lalu
         // ketik Y" must not type into a random app when the open failed.
-        if let last = history.last, last.outcome?.hasPrefix("error:") == true {
+        // "blocked:" counts too (denylist/gate stop), same as VLM's cursor.
+        if let last = history.last,
+           last.outcome?.hasPrefix("error:") == true || last.outcome?.hasPrefix("blocked:") == true {
             return Decision(action: nil, confidence: 0.15,
                             rationale: "previous step failed — abstaining instead of cascading")
         }
@@ -113,6 +113,10 @@ public struct AXPolicy: Policy {
             return Decision(action: .typeText(intent.arg), confidence: 0.95,
                             rationale: "type literal text")
         case "key", "keys", "hotkey":
+            guard !intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs a combo like cmd+s")
+            }
             return Decision(action: .keyCombo(keys: intent.arg.split(separator: "+").map { $0.lowercased() }),
                             confidence: 0.95,
                             rationale: "key combo")
