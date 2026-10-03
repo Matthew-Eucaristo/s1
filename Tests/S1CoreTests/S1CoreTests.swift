@@ -750,3 +750,111 @@ private final class Locked<T>: @unchecked Sendable {
                                               frontmostPID: nil, maxApps: 2, maxTitlesPerApp: 4)
     #expect(capped.count == 2)
 }
+
+// MARK: - Round-3 fixes
+
+@Test func axPolicyAndSplitChainsIntents() async throws {
+    // "open X and type Y" — the natural-language 'and' must split into two
+    // intents, or 'and' glues into the app name / verb garbage.
+    let pol = AXPolicy()
+    let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
+                          windows: [], axTree: nil, screenshotPath: nil)
+    let d1 = try await pol.decide(observation: obs, goal: "open TextEdit and type halo", history: [])
+    if case .openApp(let name)? = d1.action {
+        #expect(name == "TextEdit")   // 'and type halo' must not glue into the app name
+    } else { Issue.record("expected openApp, got \(String(describing: d1.action))") }
+    let fake = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax",
+                          confidence: 1, rationale: "", modelReply: nil,
+                          action: .openApp(name: "TextEdit"),
+                          gate: "allow", outcome: "", verified: nil, escalation: nil)
+    let d2 = try await pol.decide(observation: obs, goal: "open TextEdit and type halo",
+                                  history: [fake])
+    if case .typeText(let t)? = d2.action { #expect(t == "halo") }
+    else { Issue.record("expected typeText halo, got \(String(describing: d2.action))") }
+}
+
+@Test func axPolicySetSplitsFieldFromValue() async throws {
+    let pol = AXPolicy()
+    let field = AXNode(ref: "e9", role: "AXTextField", title: "Name", desc: nil, value: nil,
+                       frame: CGRectCodable(CGRect(x: 0, y: 0, width: 100, height: 20)),
+                       children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", desc: nil, value: nil,
+                      frame: nil, children: [field])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                          windows: [], axTree: tree, screenshotPath: nil)
+    let d = try await pol.decide(observation: obs, goal: "set Name to Budi", history: [])
+    if case .axSetValue(let ref, let value)? = d.action {
+        #expect(ref == "e9")
+        #expect(value == "Budi")      // "Name to Budi" must not land as the value
+    } else { Issue.record("expected axSetValue, got \(String(describing: d.action))") }
+}
+
+@Test func axPolicyFramelessTargetAbstains() async throws {
+    // A matched node with no frame must not produce click(0,0).
+    let pol = AXPolicy()
+    let node = AXNode(ref: "e4", role: "AXGroup", title: "mystery", desc: nil, value: nil,
+                      frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", desc: nil, value: nil,
+                      frame: nil, children: [node])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                          windows: [], axTree: tree, screenshotPath: nil)
+    let d = try await pol.decide(observation: obs, goal: "click mystery", history: [])
+    if case .click(let x, let y)? = d.action {
+        Issue.record("frameless node produced click(\(x),\(y))")
+    }
+    #expect(d.action == nil)
+}
+
+@Test func runLockReleaseOnlyRemovesOurOwn() throws {
+    let path = NSHomeDirectory() + "/.s1/run.pid"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    // A foreign pid's lock survives releaseRunLock — a dry-run (which never
+    // acquires) must not delete a live run's lock file.
+    try "999999".write(toFile: path, atomically: true, encoding: .utf8)
+    S1Runner.releaseRunLock()
+    #expect(FileManager.default.fileExists(atPath: path))
+    // Our own pid's lock is released.
+    try String(ProcessInfo.processInfo.processIdentifier)
+        .write(toFile: path, atomically: true, encoding: .utf8)
+    S1Runner.releaseRunLock()
+    #expect(!FileManager.default.fileExists(atPath: path))
+}
+
+private struct SpyActuator: Actuator {
+    let name = "spy"
+    let calls = Locked(0)
+    func perform(_ action: Action, frontmostPID: pid_t?) async throws -> String {
+        calls.mutate { $0 += 1 }
+        return "did"
+    }
+}
+
+@Test func replayHonorsKillSwitch() async throws {
+    // A leftover kill switch must abort a replay at step 0 — same protection
+    // a live run gets.
+    let src = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1-replay-src-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+    let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+    let rec = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax",
+                         confidence: 1, rationale: "", modelReply: nil,
+                         action: .typeText("secret stuff"),
+                         gate: "allow", outcome: "typed", verified: nil, escalation: nil)
+    try enc.encode(rec).write(to: src.appendingPathComponent("steps.jsonl"))
+
+    let kill = NSTemporaryDirectory() + "s1-replay-kill-\(UUID().uuidString)"
+    try "stop".write(toFile: kill, atomically: true, encoding: .utf8)
+
+    let dst = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1-replay-dst-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "replay", root: dst, config: [:])
+    let spy = SpyActuator()
+    let n = try await RunReader.replay(runDir: src, into: logger,
+                                       actuator: spy, gate: SafetyGate(),
+                                       killSwitchPath: kill)
+    #expect(spy.calls.get() == 0)
+    #expect(n == 0)   // 0 executed steps — the 'aborted' record lands in the log
+    let logged = try RunReader.steps(in: logger.runDir)
+    #expect(logged.last?.outcome == "aborted")
+    #expect(logged.last?.decidedBy == "system")
+}
