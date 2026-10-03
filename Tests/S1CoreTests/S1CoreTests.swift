@@ -1176,3 +1176,39 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     let e = Endpoints.vlm(base: "http://x/v1/", env: [:], config: S1Config())
     #expect(e.baseURL == "http://x/v1")
 }
+
+// MARK: - RunLogger dirs
+
+@Test func runLoggerSlugCleansGoalAndUniquifies() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1test-\(UUID().uuidString)")
+    let l1 = try RunLogger(goal: "Buka TextEdit! 100%", root: root, config: [:])
+    #expect(l1.runDir.lastPathComponent.contains("buka-textedit-100"))
+    #expect(!l1.runDir.lastPathComponent.contains("%"))
+    // A same-second same-goal logger gets a -N suffix, not a collision.
+    let l2 = try RunLogger(goal: "Buka TextEdit! 100%", root: root, config: [:])
+    #expect(l2.runDir.lastPathComponent != l1.runDir.lastPathComponent ||
+            l1.runDir.lastPathComponent != l2.runDir.lastPathComponent)
+    #expect(FileManager.default.fileExists(atPath: l1.runDir.path))
+    #expect(FileManager.default.fileExists(atPath: l2.runDir.path))
+}
+
+@Test func runLoggerWritesMetaAndAppendsJsonl() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1test-\(UUID().uuidString)")
+    let l = try RunLogger(goal: "g", root: root, config: ["k": "v"])
+    let meta = try String(contentsOf: l.runDir.appendingPathComponent("meta.json"), encoding: .utf8)
+    #expect(meta.contains("\"k\" : \"v\"") || meta.contains("\"k\":\"v\""))
+    #expect(meta.contains("\"goal\" : \"g\"") || meta.contains("\"goal\":\"g\""))
+    try await l.log(StepRecord(index: 0, time: Date(), observation: "o",
+                               decidedBy: "s1", confidence: 1, rationale: nil,
+                               modelReply: nil, action: nil, gate: "allow",
+                               outcome: "ok", verified: nil, escalation: nil))
+    try await l.log(StepRecord(index: 1, time: Date(), observation: "o2",
+                               decidedBy: "s1", confidence: 1, rationale: nil,
+                               modelReply: nil, action: nil, gate: "allow",
+                               outcome: "ok2", verified: nil, escalation: nil))
+    let jl = try String(contentsOf: l.runDir.appendingPathComponent("steps.jsonl"),
+                        encoding: .utf8)
+    #expect(jl.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 2)
+}
