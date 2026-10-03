@@ -613,6 +613,40 @@ private final class Locked<T>: @unchecked Sendable {
     serve.sleep()
 }
 
+@Test func wakeSkipsClaimWhenWeHoldLock() {
+    // Startup already claimed serve.pid → wake() must see our own pid and
+    // proceed without throwing busy (the re-entrant path).
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let lock = dir.appendingPathComponent("serve.pid").path
+    try? "\(ProcessInfo.processInfo.processIdentifier)".write(toFile: lock, atomically: true, encoding: .utf8)
+    #expect(S1Runner.holdsPidFile(lock))
+    let serve = Serve(
+        config: .init(speak: false, lockPath: lock, transcribe: { "" }),
+        locale: Locale(identifier: "en-US"), hotkeyPatterns: nil
+    ) { _ in }
+    serve.wake()
+    #expect(serve.state == .listening)
+    serve.sleep()
+}
+
+@Test func wakeReclaimsDeletedLock() {
+    // serve.pid deleted while the daemon slept → wake() re-claims it so the
+    // lock stays authoritative (and so a competitor can't sneak between).
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let lock = dir.appendingPathComponent("serve.pid").path
+    let serve = Serve(
+        config: .init(speak: false, lockPath: lock, transcribe: { "" }),
+        locale: Locale(identifier: "en-US"), hotkeyPatterns: nil
+    ) { _ in }
+    serve.wake()
+    #expect(serve.state == .listening)
+    #expect(S1Runner.holdsPidFile(lock))
+    serve.sleep()
+    #expect(!S1Runner.holdsPidFile("nonexistent-\(UUID().uuidString)"))
+}
+
 @Test func serveAutoSleepsAfterSilentTurns() async throws {
     let events = Locked<[ServeEvent.Kind]>([])
     let serve = Serve(
