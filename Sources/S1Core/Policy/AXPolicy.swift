@@ -38,10 +38,13 @@ public struct AXPolicy: Policy {
                 return n >= 100 && unit.isEmpty ? n / 1000 : n
             }
         }
-        // Attached suffix forms: "500ms", "2s".
+        // Attached suffix forms: "500ms", "2s". Keep the sign — a negative
+        // arg must clamp to 0 downstream, not become a positive wait.
+        let sign: Double = t.hasPrefix("-") ? -1 : 1
         let digits = t.drop(while: { $0 == "-" }).prefix(while: { $0.isNumber || $0 == "." })
         guard let m = Double(digits) else { return 0.5 }
-        return t.hasSuffix("ms") ? m / 1000 : m
+        let v = sign * m
+        return t.hasSuffix("ms") ? v / 1000 : v
     }
 
     /// Split "open TextEdit, type hello, done" into ordered intents.

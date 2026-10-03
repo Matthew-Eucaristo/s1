@@ -863,6 +863,9 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(AXPolicy.parseWaitSeconds("1,5 detik") == 1.5)
     #expect(AXPolicy.parseWaitSeconds("2s") == 2)
     #expect(AXPolicy.parseWaitSeconds("soon") == 0.5)
+    // Sign survives — a negative arg clamps to 0 downstream, not a +5s wait.
+    #expect(AXPolicy.parseWaitSeconds("-5s") == -5)
+    #expect(AXPolicy.parseWaitSeconds("-500ms") == -0.5)
 }
 
 @Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {
