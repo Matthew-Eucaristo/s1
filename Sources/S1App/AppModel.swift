@@ -11,6 +11,11 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class AppModel {
+    /// The one model behind the window, the menu-bar companion, AND App
+    /// Intents — a Siri/Shortcuts invocation drives the same instance the
+    /// user sees, never a parallel agent.
+    static let shared = AppModel()
+
     enum Brain: String, CaseIterable, Identifiable {
         case ax, vlm
         var id: String { rawValue }

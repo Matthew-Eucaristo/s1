@@ -235,9 +235,15 @@ private final class Locked<Value>: @unchecked Sendable {
 }
 
 /// Mutable string shared safely between the results task and the analyzer.
+/// Segments arrive per-utterance — joining without a space welds words
+/// ("buka" + "TextEdit" → "bukaTextEdit") and breaks the intent parser.
 private actor TextCollector {
     var value = ""
-    func append(_ s: String) { value += s }
+    func append(_ s: String) {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        value += (value.isEmpty ? "" : " ") + t
+    }
 }
 
 /// One-bit flag settable from a non-isolated callback.

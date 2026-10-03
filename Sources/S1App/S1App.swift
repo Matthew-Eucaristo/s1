@@ -5,7 +5,8 @@ import S1Core
 @available(macOS 26, *)
 @main
 struct S1App: App {
-    @State private var model = AppModel()
+    // Shared so App Intents and the UI drive the same agent state.
+    @State private var model = AppModel.shared
 
     var body: some Scene {
         WindowGroup("s1", id: "s1") {
