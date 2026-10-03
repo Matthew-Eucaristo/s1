@@ -352,7 +352,8 @@ struct DemoCmd: AsyncParsableCommand {
         let (report, _) = try await S1Runner.run(goal: "p1-demo-textedit", policy: ScriptedPolicy(steps: steps),
                                artifacts: artifacts, maxSteps: 25, threshold: 0.6,
                                dryRun: dryRun, allowIrreversible: false,
-                               killSwitch: kill)
+                               killSwitch: kill,
+                               onStep: { rec in print(stepLine(rec)) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
 }
