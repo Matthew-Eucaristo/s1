@@ -74,7 +74,15 @@ public enum RunReader {
                 var outcome = "blocked"
                 if case .allow = verdict {
                     do {
-                        outcome = try await actuator.perform(action, frontmostPID: nil)
+                        // AX refs are only meaningful inside a fresh tree —
+                        // re-observe so replayed presses land on the live pid
+                        // instead of failing on a nil one.
+                        let pid: pid_t? = switch action {
+                        case .axPress, .axSetValue:
+                            try? await SystemPerceiver().observe(wantScreenshot: false).frontmostPID
+                        default: nil
+                        }
+                        outcome = try await actuator.perform(action, frontmostPID: pid)
                     } catch {
                         outcome = "error: \(error.localizedDescription)"
                     }

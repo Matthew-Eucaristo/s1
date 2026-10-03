@@ -99,9 +99,17 @@ public struct AXPolicy: Policy {
         let intent = intents[history.count]
         switch intent.verb {
         case "open", "buka", "launch":
+            guard !intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs an app name")
+            }
             return Decision(action: .openApp(name: intent.arg), confidence: 0.9,
                             rationale: "open \(intent.arg)")
         case "type", "ketik", "write", "tulis":
+            guard !intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs text")
+            }
             return Decision(action: .typeText(intent.arg), confidence: 0.95,
                             rationale: "type literal text")
         case "key", "keys", "hotkey":
@@ -132,11 +140,19 @@ public struct AXPolicy: Policy {
             return Decision(action: .scroll(dx: d.0, dy: d.1), confidence: 0.9,
                             rationale: "scroll \(intent.arg.isEmpty ? "down" : intent.arg)")
         case "verify", "cek", "check", "pastikan":
+            guard !intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs an expectation")
+            }
             return Decision(action: .verify(expectation: intent.arg), confidence: 0.9,
                             rationale: "verify '\(intent.arg)' on screen")
         case "done", "selesai", "finish":
             return Decision(action: .done(summary: "done"), confidence: 0.95, rationale: "done intent")
         case "click", "press", "klik", "tekan", "set", "isi":
+            guard !intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs a target")
+            }
             guard let tree = observation.axTree else {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "need AX tree to find '\(intent.arg)'")

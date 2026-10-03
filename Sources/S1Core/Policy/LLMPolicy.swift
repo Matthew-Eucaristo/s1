@@ -24,6 +24,7 @@ enum LLMDecisionCodec {
             if pressableRoles.contains(n.role) { s += " [pressable]" }
             if editableRoles.contains(n.role) { s += " [editable]" }
             if scrollableRoles.contains(n.role) { s += " [scrollable]" }
+            if secureRoles.contains(n.role) { s += " [secure]" }
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
             if let d = n.desc, !d.isEmpty, d != n.title { s += " desc=\"\(d.prefix(40))\"" }
             if let v = n.value, !v.isEmpty, v != n.title { s += " value=\"\(v.prefix(60))\"" }
@@ -47,8 +48,12 @@ enum LLMDecisionCodec {
 
     /// Roles that take text via axSetValue (or focus + typeText) — NOT axPress.
     static let editableRoles: Set<String> = [
-        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox", "AXSecureTextField",
+        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox",
     ]
+
+    /// Password boxes — shown so the model knows to leave them alone.
+    /// (The loop-level guard escalates anyway; this keeps it from trying.)
+    static let secureRoles: Set<String> = ["AXSecureTextField"]
 
     /// Compact digest of recent steps so the model can react to failures.
     static func historyText(_ history: [StepRecord]) -> String {
@@ -88,6 +93,7 @@ enum LLMDecisionCodec {
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
         - axPress only on nodes marked [pressable]. e0 is the application ROOT, not a button.
         - To put text in a node marked [editable], use axSetValue (or click it, then typeText). Never axPress it.
+        - NEVER type or write into a [secure] node — that is a password field; tell the user instead.
         - If a step just failed with an "error:" outcome, choose a DIFFERENT action.
         - "expect" is checked by re-observing the screen after the action; omit it unless a check is needed.
         - "keys" is a combo like "cmd+s" or ["cmd","s"].
@@ -253,7 +259,8 @@ public struct VLMPolicy: Policy {
         switch current.verb {
         case "open", "buka", "launch":  hint = "openApp"
         case "type", "ketik", "write", "tulis": hint = "typeText (or axSetValue on an [editable] node)"
-        case "key", "keys", "hotkey", "press": hint = "keyCombo (e.g. \"cmd+f\") — or click/axPress for a UI element"
+        case "key", "keys", "hotkey": hint = "keyCombo (e.g. \"cmd+f\")"
+        case "click", "press", "klik", "tekan": hint = "axPress on a [pressable] node (or click by x/y)"
         case "wait", "tunggu":          hint = "wait"
         case "verify", "cek", "check", "pastikan": hint = "verify"
         case "screenshot", "capture", "screencap", "tangkap", "tangkapan", "foto", "potret", "ambil":
