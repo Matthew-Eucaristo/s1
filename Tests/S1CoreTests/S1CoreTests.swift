@@ -700,6 +700,20 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(Set(lowered).count == lowered.count)
 }
 
+@Test func vocabularyIncludesGrammarWords() {
+    // The command-grammar verbs ride along so dictation spells them right —
+    // custom words still outrank them, app names fill the rest.
+    let apps = { ["Finder", "TextEdit"] }
+    let v = Vocabulary.assemble(custom: ["Warp"], appNames: apps)
+    #expect(v.first == "s1")
+    #expect(v[1] == "Warp")
+    #expect(v.contains("buka"))
+    #expect(v.contains("ketik"))
+    #expect(v.contains("open"))
+    #expect(v.contains("Finder"))
+    #expect(v.firstIndex(of: "buka")! < v.firstIndex(of: "Finder")!)
+}
+
 @Test func configVocabularyRoundTrips() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1cfg-\(UUID().uuidString)")
     let path = dir.appendingPathComponent("config.json").path

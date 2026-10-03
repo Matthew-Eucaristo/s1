@@ -7,12 +7,22 @@ import Foundation
 public enum Vocabulary {
     public static let appleLimit = 100
 
+    /// Command-grammar words — the agent's own domain vocabulary. Without
+    /// these, dictation spells them wrong ("buka"→"Buku", "ketik"→"ketek")
+    /// and a perfectly heard sentence fails to parse.
+    static let grammarWords = [
+        "buka", "ketik", "klik", "tulis", "tunggu", "gulir", "geser",
+        "tangkap", "tangkapan", "cek", "pastikan", "selesai", "tekan", "isi",
+        "lalu", "kemudian", "terus", "open", "type", "click", "write",
+        "wait", "scroll", "screenshot", "verify", "done", "press", "key",
+    ]
+
     /// `custom` entries keep their spelling and rank above auto names.
     /// Case-insensitive dedup preserves the first-seen casing.
     public static func assemble(custom: [String], appNames: () -> [String] = InstalledApps.names) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for w in ["s1"] + custom + appNames() {
+        for w in ["s1"] + custom + grammarWords + appNames() {
             let t = w.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty else { continue }
             guard seen.insert(t.lowercased()).inserted else { continue }
