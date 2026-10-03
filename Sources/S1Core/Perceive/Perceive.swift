@@ -355,7 +355,10 @@ public enum AXReader {
                 if d < 24, d < (best?.1 ?? .infinity) { best = (e.el, d) }
             }
         }
-        return best?.0 ?? candidate?.el   // worst case: trust the index
+        // The recorded node is gone and nothing nearby matches — the element
+        // now sitting at the stale index is a DIFFERENT control. Failing the
+        // action beats pressing a wrong (possibly destructive) target.
+        return best?.0
     }
 
     static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
