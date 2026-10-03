@@ -165,6 +165,9 @@ public struct SpeechToText: Sendable {
         // Give the final result a moment to arrive, then settle.
         for _ in 0 ..< 20 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
         task.finish()
+        // finish() delivers the final result asynchronously — give that
+        // callback a beat too, or the last words get read as silence.
+        for _ in 0 ..< 10 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
         if let error = failure.value { throw error }
         return collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -273,6 +276,9 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     /// Speak and return after the utterance finishes — bounded by `timeout`
     /// so a wedged synthesizer can't pin the caller (UI status, serve loop).
     public func say(_ text: String, language: String = "id-ID", timeout: Double = 30) async {
+        // One utterance at a time: a second say() would overwrite `finished`
+        // and leak the first caller's continuation — settle it first.
+        self.stop()
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
                 let u = AVSpeechUtterance(string: text)
