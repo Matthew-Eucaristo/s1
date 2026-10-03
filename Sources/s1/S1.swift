@@ -117,20 +117,9 @@ struct RunCmd: AsyncParsableCommand {
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2,
-                               onStep: { rec in print(stepLine(rec)) })
+                               onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
-}
-
-/// One-line step digest for CLI feeds — "[3] s1:ax typeText(\"hi\") → typed · conf 0.95".
-func stepLine(_ r: StepRecord) -> String {
-    var s = "[\(r.index)] \(r.decidedBy)"
-    if let c = r.confidence { s += String(format: " %.2f", c) }
-    if let a = r.action { s += " \(a)" }
-    if let o = r.outcome { s += " → \(o)" }
-    if let v = r.verified { s += v ? " ✓" : " ✗verify" }
-    if let e = r.escalation { s += " ⚑→\(e.to)" }
-    return s
 }
 
 struct ConfigCmd: AsyncParsableCommand {
@@ -317,7 +306,7 @@ struct ListenCmd: AsyncParsableCommand {
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: kill, s2: reasoner,
-                               onStep: { rec in print(stepLine(rec)) })
+                               onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak {
             await Speaker().say(locale.hasPrefix("id") ? "Selesai" : "Done", language: locale)
@@ -353,7 +342,7 @@ struct DemoCmd: AsyncParsableCommand {
                                artifacts: artifacts, maxSteps: 25, threshold: 0.6,
                                dryRun: dryRun, allowIrreversible: false,
                                killSwitch: kill,
-                               onStep: { rec in print(stepLine(rec)) })
+                               onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
 }
@@ -681,7 +670,7 @@ struct ReplayCmd: AsyncParsableCommand {
         let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
                                    root: URL(fileURLWithPath: artifacts),
                                    config: ["mode": dryRun ? "dry-run" : "live", "source": runDir],
-                                   onStep: { rec in print(stepLine(rec)) })
+                                   onStep: { rec in print(rec.digest) })
         let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
         let gate = SafetyGate(allowIrreversible: allowIrreversible)
         let n = try await RunReader.replay(runDir: src, into: logger,

@@ -29,6 +29,18 @@ public struct StepRecord: Codable, Sendable {
         let data = try enc.encode(self)
         return String(decoding: data, as: UTF8.self)
     }
+
+    /// One-line human digest shared by the CLI feed, the serve log, and
+    /// anywhere a step needs to read plainly: "[3] s1:ax 0.95 typeText → typed".
+    public var digest: String {
+        var s = "[\(index)] \(decidedBy)"
+        if let c = confidence { s += String(format: " %.2f", c) }
+        if let a = action { s += " \(a)" }
+        if let o = outcome { s += " → \(o)" }
+        if let v = verified { s += v ? " ✓" : " ✗verify" }
+        if let e = escalation { s += " ⚑→\(e.to)" }
+        return s
+    }
 }
 
 /// Per-run artifact writer: <run>/meta.json, <run>/steps.jsonl, <run>/screens/.

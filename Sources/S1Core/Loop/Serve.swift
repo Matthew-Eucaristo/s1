@@ -264,7 +264,9 @@ public final class Serve: @unchecked Sendable {
                 allowIrreversible: false, killSwitch: config.killSwitch,
                 s2: config.s2,
                 onStep: { [onEvent] rec in
-                    onEvent(ServeEvent(.step, "step \(rec.index): \(rec.decidedBy)"))
+                    // The full digest (decider, conf, action → outcome) —
+                    // the daemon's log should tell the whole story per step.
+                    onEvent(ServeEvent(.step, rec.digest))
                 })
             emit(.runDone, report.status.rawValue)
             // A kill file means the user cancelled — sleep must mean silent,
