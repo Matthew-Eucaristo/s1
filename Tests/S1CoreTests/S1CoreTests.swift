@@ -719,6 +719,17 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(AXPolicy.intents(of: "open Notes and type hi and click Save").count == 3)
     // A non-verb "and" before a verb "and" doesn't block the split.
     #expect(AXPolicy.intents(of: "type bread and butter and click Save").count == 2)
+    // Natural wait units: "wait 2 seconds" used to silently fall back to
+    // 0.5s because the suffix-stripper only knew "ms"/"s".
+    #expect(AXPolicy.parseWaitSeconds("2 seconds") == 2)
+    #expect(AXPolicy.parseWaitSeconds("2 detik") == 2)
+    #expect(AXPolicy.parseWaitSeconds("500 ms") == 0.5)
+    #expect(AXPolicy.parseWaitSeconds("500") == 0.5)
+    #expect(AXPolicy.parseWaitSeconds("2000") == 2)
+    #expect(AXPolicy.parseWaitSeconds("1 menit") == 60)
+    #expect(AXPolicy.parseWaitSeconds("1,5 detik") == 1.5)
+    #expect(AXPolicy.parseWaitSeconds("2s") == 2)
+    #expect(AXPolicy.parseWaitSeconds("soon") == 0.5)
 }
 
 @Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {

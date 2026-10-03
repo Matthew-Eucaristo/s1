@@ -20,6 +20,30 @@ public struct AXPolicy: Policy {
         var arg: String
     }
 
+    /// Wait duration from natural text: leading number + optional unit
+    /// ("2", "2s", "2 seconds", "2 detik", "500ms", "1,5 detik", "2 menit").
+    /// Unparseable args fall back to a conservative 0.5s.
+    static func parseWaitSeconds(_ arg: String) -> Double {
+        let t = arg.replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = t.split(separator: " ", maxSplits: 1)
+        if let n = Double(parts.first ?? "") {
+            let unit = parts.count > 1 ? parts[1].lowercased() : ""
+            switch unit {
+            case "ms", "milidetik", "milisekon", "millisecond", "milliseconds":
+                return n / 1000
+            case "menit", "minute", "minutes":
+                return n * 60
+            default:
+                return n >= 100 && unit.isEmpty ? n / 1000 : n
+            }
+        }
+        // Attached suffix forms: "500ms", "2s".
+        let digits = t.drop(while: { $0 == "-" }).prefix(while: { $0.isNumber || $0 == "." })
+        guard let m = Double(digits) else { return 0.5 }
+        return t.hasSuffix("ms") ? m / 1000 : m
+    }
+
     /// Split "open TextEdit, type hello, done" into ordered intents.
     /// Also splits on conjunctions — voice transcriptions rarely use commas:
     /// "buka TextEdit lalu ketik halo" → [buka TextEdit, ketik halo].
@@ -159,11 +183,10 @@ public struct AXPolicy: Policy {
                             rationale: "key combo")
         case "wait", "tunggu":
             // "wait 2" means seconds to a human; "wait 2000" means ms.
-            // Explicit suffixes win; bare numbers >= 100 read as ms.
+            // Explicit suffixes and unit words win ("2 seconds", "2 detik",
+            // "500 ms"); bare numbers >= 100 read as ms.
             let arg = intent.arg.lowercased()
-            let n = Double(arg.replacingOccurrences(of: "ms", with: "")
-                .replacingOccurrences(of: "s", with: "")) ?? 0.5
-            let secs = arg.hasSuffix("ms") ? n / 1000 : (arg.hasSuffix("s") ? n : (n >= 100 ? n / 1000 : n))
+            let secs = Self.parseWaitSeconds(arg)
             return Decision(action: .wait(seconds: secs), confidence: 0.95,
                             rationale: "wait \(secs)s")
         case "screenshot", "capture", "screencap", "tangkap", "tangkapan", "foto", "potret", "ambil":
