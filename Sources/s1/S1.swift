@@ -461,7 +461,15 @@ struct ServeCmd: AsyncParsableCommand {
         DispatchQueue.main.async {
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
-            CFRunLoopRun()
+            // CFRunLoopRun exits when every source is gone — if the tap is
+            // ever invalidated (TCC change, transient failure) the daemon
+            // must not silently die; re-enter (with a beat, so a sourceless
+            // loop doesn't spin) so `s1 stop`/the pid file stay
+            // authoritative.
+            while true {
+                CFRunLoopRun()
+                Thread.sleep(forTimeInterval: 0.5)
+            }
         }
         while true { try await Task.sleep(for: .seconds(3600)) }
     }
