@@ -87,6 +87,7 @@ final class AppModel {
         if let m = cfg.s2?.model { s2Model = m }
         if let s = cfg.speak { speakReply = s }
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
+        if let r = cfg.recent { recentGoals = r }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -157,6 +158,7 @@ final class AppModel {
         cfg.vlm = .init(base: vlmBase, model: vlmModel)
         cfg.s2 = .init(base: s2Base, model: s2Model)
         cfg.vocabulary = parsedVocab
+        cfg.recent = recentGoals
         try? cfg.save()
     }
 
@@ -319,6 +321,7 @@ final class AppModel {
             recentGoals.removeAll { $0 == goalText }
             recentGoals.insert(goalText, at: 0)
             if recentGoals.count > 8 { recentGoals.removeLast() }
+            saveConfig()
             running = false
             if speakReply {
                 let reply = locale.hasPrefix("id") ? "Selesai" : "Done"

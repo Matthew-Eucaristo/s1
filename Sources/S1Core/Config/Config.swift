@@ -33,12 +33,15 @@ public struct S1Config: Codable, Sendable {
     /// Apple's contextual-strings limit is 100 total — s1 prepends installed
     /// app names after these, so user entries always win.
     public var vocabulary: [String]?
+    /// Last-run goals — the app's command field suggests these first.
+    public var recent: [String]?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
-                vocabulary: [String]? = nil) {
+                vocabulary: [String]? = nil, recent: [String]? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
         self.vocabulary = vocabulary
+        self.recent = recent
     }
 
     public static var path: String { NSHomeDirectory() + "/.s1/config.json" }
