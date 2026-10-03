@@ -68,6 +68,10 @@ struct RunCmd: AsyncParsableCommand {
         // --plan is a program to replay: scripted is the only policy that
         // consumes it. Resolve it implicitly so `s1 run --plan` just works.
         let policyName = policy ?? (plan != nil ? "scripted" : "ax")
+        if plan != nil, policyName != "scripted" {
+            FileHandle.standardError.write(
+                "note: --plan given but --policy \(policyName) ignores the file\n".data(using: .utf8)!)
+        }
         let pol: any Policy
         switch policyName {
         case "dummy": pol = DummyPolicy()

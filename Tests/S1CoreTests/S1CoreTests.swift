@@ -160,7 +160,10 @@ private func jsonlDecoder() -> JSONDecoder {
     // `sudo` must escalate even though they'd type freely into TextEdit.
     for t in ["rm dokumen.txt", "sudo echo hi", "ssh admin@prod",
               "git push --force origin main", "defaults write com.apple.finder x",
-              "brew uninstall node", "chmod -R 777 ."] {
+              "brew uninstall node", "chmod -R 777 .",
+              "osascript -e 'tell app \"Finder\" to delete'",
+              "tccutil reset Accessibility", "sqlite3 ~/TCC.db 'grant'",
+              "xattr -d com.apple.quarantine bad.app"] {
         if case .needsHuman(let r) = gate.evaluateTerminalPayload(t) {
             #expect(r.contains("terminal:"), "\(t) should hit the terminal list")
         } else { Issue.record("terminal payload must escalate: \(t)") }

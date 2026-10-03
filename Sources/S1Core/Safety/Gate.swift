@@ -91,6 +91,15 @@ public struct SafetyGate: Sendable {
         (#"(?i)\b(curl|wget|nc|ncat)\b[^|;&]*\|"#, "remote content piped via terminal"),
         (#"(?i)\b(brew|npm|pip\d*|gem|cargo)\s+uninstall\b"#, "package removal via terminal"),
         (#"(?i)\b(chmod|chown|chflags)\s+-R\b"#, "recursive permission change"),
+        // osascript can drive ANY app + inject keystrokes — it is a
+        // full GUI-control side channel around this gate.
+        (#"(?i)\bosascript\b"#, "automation scripting via terminal"),
+        // TCC.db tampering / tccutil = silently granting oneself
+        // Accessibility/Screen Recording — the permission system itself.
+        (#"(?i)\btccutil\b|\bTCC\.db\b"#, "permission database tamper"),
+        // Gatekeeper bypass on downloaded payloads.
+        (#"(?i)\bxattr\b[^|;&]*-d\s+[^|;&]*com\.apple\.(quarantine|FinderInfo)"#,
+         "Gatekeeper flag removal via terminal"),
     ]
 
     /// Extra pass for text destined for a terminal: the payload is a shell
