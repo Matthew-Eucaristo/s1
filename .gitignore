@@ -1,5 +1,8 @@
 .build/
 /artifacts/
-*.png
 .DS_Store
 /dist/
+# Loose captures from `s1 capture --out *.png` in the repo root — committed
+# assets under assets/ are exempt.
+/out.png
+/capture*.png
