@@ -366,11 +366,13 @@ struct CaptureCmd: AsyncParsableCommand {
 
 struct AXCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "ax",
-        abstract: "Dump the frontmost app's accessibility tree.")
+        abstract: "Dump an app's accessibility tree (default: frontmost).")
+    @Argument(help: "App name or pid to inspect (default: frontmost app).")
+    var target: String?
+
     func run() async throws {
-        guard let app = NSWorkspace.shared.frontmostApplication else {
-            print("no frontmost app"); return
-        }
+        let app = resolveTarget(target)
+        guard let app else { print("no such app running"); throw ExitCode(1) }
         print("\(app.localizedName ?? "?") pid \(app.processIdentifier)")
         guard let tree = AXReader.snapshotTree(pid: app.processIdentifier) else {
             print("no AX tree (check Accessibility permission)"); throw ExitCode(1)
@@ -381,6 +383,19 @@ struct AXCmd: AsyncParsableCommand {
             print("  \(n.ref) [\(n.role)] \(label)")
         }
         if flat.count > 250 { print("  … \(flat.count - 250) more nodes") }
+    }
+
+    /// Frontmost by default; else a running app by pid, exact name, or
+    /// case-insensitive substring match (first hit wins).
+    private func resolveTarget(_ target: String?) -> NSRunningApplication? {
+        let ws = NSWorkspace.shared
+        guard let target, !target.isEmpty else { return ws.frontmostApplication }
+        if let pid = pid_t(target),
+           let app = NSRunningApplication(processIdentifier: pid) { return app }
+        let running = ws.runningApplications.filter { $0.localizedName != nil }
+        if let exact = running.first(where: {
+            $0.localizedName?.caseInsensitiveCompare(target) == .orderedSame }) { return exact }
+        return running.first { $0.localizedName?.localizedCaseInsensitiveContains(target) ?? false }
     }
 }
 
