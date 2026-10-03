@@ -34,6 +34,10 @@ public final class Serve: @unchecked Sendable {
         public var stopPhrases: [String]
         /// Injectable transcription — real path is the mic; tests/demos feed files.
         public var transcribe: @Sendable () async throws -> String
+        /// True while another agent run (e.g. the app's Run button) owns the
+        /// screen — heard utterances are skipped rather than starting a second
+        /// concurrent run that would fight it for keyboard focus.
+        public var isBusy: @Sendable () async -> Bool
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -44,7 +48,8 @@ public final class Serve: @unchecked Sendable {
                     artifacts: String = "artifacts",
                     killSwitch: String = NSTemporaryDirectory() + "s1-serve-stop",
                     stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur"],
-                    transcribe: @escaping @Sendable () async throws -> String) {
+                    transcribe: @escaping @Sendable () async throws -> String,
+                    isBusy: @escaping @Sendable () async -> Bool = { false }) {
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -55,6 +60,7 @@ public final class Serve: @unchecked Sendable {
             self.killSwitch = killSwitch
             self.stopPhrases = stopPhrases
             self.transcribe = transcribe
+            self.isBusy = isBusy
         }
     }
 
@@ -184,6 +190,13 @@ public final class Serve: @unchecked Sendable {
                 }
                 silentTurns = 0
                 emit(.heard, trimmed)
+                if await config.isBusy() {
+                    // Another run owns the screen — drop this utterance and
+                    // keep listening instead of starting a competing agent.
+                    emit(.error, "another run is in progress")
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    continue
+                }
                 if await run(goal: trimmed) {
                     errors = 0
                 } else {

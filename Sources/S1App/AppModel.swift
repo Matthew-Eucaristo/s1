@@ -136,7 +136,8 @@ final class AppModel {
                 transcribe: { [weak self] in
                     guard let self else { return "" }
                     return try await self.stt.transcribeMic(maxSeconds: 12)
-                }),
+                },
+            isBusy: { [weak self] in await self?.running ?? false }),
             locale: Locale(identifier: loc),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in

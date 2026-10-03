@@ -549,6 +549,42 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(calls.get() >= 2)
 }
 
+@Test func serveSkipsUtteranceWhileBusy() async throws {
+    // While another run owns the screen, a heard utterance must be dropped —
+    // never a second concurrent agent fighting for keyboard focus.
+    let feed = Locked<[String]>(["buka test, done", "stop"])
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let events = Locked<[ServeEvent.Kind]>([])
+    let busy = Locked(true)
+    let serve = Serve(
+        config: .init(
+            makePolicy: { AXPolicy() },
+            speak: false,
+            artifacts: dir.path,
+            killSwitch: dir.appendingPathComponent("ks").path,
+            transcribe: {
+                var out = "stop"
+                feed.mutate { f in out = f.isEmpty ? "stop" : f.removeFirst() }
+                return out
+            },
+            isBusy: { busy.get() }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { ev in events.mutate { $0.append(ev.kind) } }
+    serve.wake()
+    for _ in 0 ..< 200 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    #expect(serve.state == .idle)
+    let kinds = events.get()
+    #expect(kinds.contains(.heard))
+    #expect(!kinds.contains(.runStart))   // busy → no agent ever started
+    #expect(kinds.contains(.stopped))
+    // No run dir was created for the skipped utterance.
+    let runs = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    #expect(!runs.contains { $0.contains("buka-test-done") })
+}
+
 // MARK: - ax policy command grammar
 
 @Test func axPolicyIndonesianAndEdgeVerbs() async throws {
