@@ -45,9 +45,7 @@ public struct AXPolicy: Policy {
         return g
             .replacingOccurrences(of: " lalu ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " then ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " dan ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " and then ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " and ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " terus ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " trus ", with: ",", options: .caseInsensitive)
             .replacingOccurrences(of: " kemudian ", with: ",", options: .caseInsensitive)
@@ -58,12 +56,45 @@ public struct AXPolicy: Policy {
             .components(separatedBy: CharacterSet(charactersIn: ",;"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+            // "and"/"dan" are ambiguous — real words inside typed text
+            // ("milk and honey") AND conjunctions ("open X and type Y").
+            // Split only when the following word is a grammar verb.
+            .flatMap { splitConjunctions($0) }
             .map { part -> Intent in
                 let words = part.split(separator: " ", maxSplits: 1)
                 let verb = words.first?.lowercased() ?? ""
                 let arg = words.count > 1 ? String(words[1]) : ""
                 return Intent(verb: verb, arg: arg)
             }
+    }
+
+    /// Every verb the grammar (and the model hints) understands — used to
+    /// decide whether "and"/"dan" starts a new command or is literal text.
+    static let verbs: Set<String> = [
+        "open", "buka", "launch", "type", "ketik", "write", "tulis",
+        "key", "keys", "hotkey", "wait", "tunggu",
+        "screenshot", "capture", "screencap", "tangkap", "tangkapan",
+        "foto", "potret", "ambil", "scroll", "gulir", "geser",
+        "verify", "cek", "check", "pastikan", "done", "selesai", "finish",
+        "click", "press", "klik", "tekan", "set", "isi",
+    ]
+
+    /// Split " A and B "/" A dan B " only when B starts with a grammar verb —
+    /// otherwise it's literal text the user wants typed. Recurses so several
+    /// conjunctions chain correctly.
+    static func splitConjunctions(_ s: String) -> [String] {
+        var searchFrom = s.startIndex
+        while let r = s.range(of: " +(and|dan) +", options: [.regularExpression, .caseInsensitive],
+                              range: searchFrom ..< s.endIndex) {
+            let next = s[r.upperBound...]
+                .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
+            if verbs.contains(next) {
+                return splitConjunctions(String(s[..<r.lowerBound])) +
+                       splitConjunctions(String(s[r.upperBound...]))
+            }
+            searchFrom = r.upperBound
+        }
+        return [s]
     }
 
     /// Element match quality 0...1: exact title 1.0, prefix 0.8, contains 0.6.

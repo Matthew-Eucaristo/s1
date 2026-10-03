@@ -667,6 +667,17 @@ private final class Locked<T>: @unchecked Sendable {
     } else { Issue.record("wait 2000 should wait") }
     // Conjunctions: "kemudian" splits intents too.
     #expect(AXPolicy.intents(of: "buka TextEdit kemudian ketik halo").count == 2)
+    // "and"/"dan" only split when the next word is a verb — typed text
+    // with conjunctions must survive intact ("type milk and honey").
+    #expect(AXPolicy.intents(of: "type milk and honey").count == 1)
+    #expect(AXPolicy.intents(of: "type milk and honey").first?.arg == "milk and honey")
+    #expect(AXPolicy.intents(of: "ketik roti dan susu").count == 1)
+    #expect(AXPolicy.intents(of: "open Notes and click Save").count == 2)
+    #expect(AXPolicy.intents(of: "buka Notes dan klik Save").count == 2)
+    // Multiple conjunctions chain.
+    #expect(AXPolicy.intents(of: "open Notes and type hi and click Save").count == 3)
+    // A non-verb "and" before a verb "and" doesn't block the split.
+    #expect(AXPolicy.intents(of: "type bread and butter and click Save").count == 2)
 }
 
 @Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {
