@@ -168,7 +168,9 @@ public final class Serve: @unchecked Sendable {
     /// auto-sleep; a stop phrase ends the session; anything else becomes a goal.
     private func listenLoop() async {
         var silentTurns = 0
-        var errors = 0
+        var errors = 0        // STT/transcribe failures
+        var runErrors = 0     // run failures — separate counter: a working
+                              // microphone must not hide a dead endpoint
         while state == .listening, !Task.isCancelled {
             do {
                 let text = try await config.transcribe()
@@ -198,14 +200,14 @@ public final class Serve: @unchecked Sendable {
                     continue
                 }
                 if await run(goal: trimmed) {
-                    errors = 0
+                    runErrors = 0
                 } else {
                     // A broken endpoint (or a run that keeps failing) must
-                    // not spin forever — count it like an STT error and
-                    // auto-sleep after maxListenErrors.
-                    errors += 1
-                    if errors >= config.maxListenErrors {
-                        sleep("run errors x\(errors)")
+                    // not spin forever — consecutive run failures auto-sleep
+                    // even while the mic keeps transcribing fine.
+                    runErrors += 1
+                    if runErrors >= config.maxListenErrors {
+                        sleep("run errors x\(runErrors)")
                         return
                     }
                 }

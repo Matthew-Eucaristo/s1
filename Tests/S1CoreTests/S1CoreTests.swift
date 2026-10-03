@@ -612,6 +612,35 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(!runs.contains { $0.contains("buka-test-done") })
 }
 
+@Test func serveRunErrorsAutoSleep() async throws {
+    // A run that keeps failing must not spin forever: each run() throws
+    // while the mic keeps transcribing fine. Run failures are a separate
+    // counter — a working transcribe must not reset them (the old shared
+    // counter let a broken setup run hot forever).
+    // (A throwing policy only abstains → the run ends gracefully; the run
+    // truly fails when the artifact dir can't even be created.)
+    let calls = Locked(0)
+    let serve = Serve(
+        config: .init(
+            makePolicy: { AXPolicy() },
+            speak: false,
+            maxListenErrors: 2,
+            artifacts: "/proc/s1-cannot-write-here",
+            killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks4").path,
+            transcribe: { calls.mutate { $0 += 1 }; return "do something" }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { _ in }
+    serve.wake()
+    for _ in 0 ..< 100 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 30_000_000)
+    }
+    #expect(serve.state == .idle)
+    // ≥2 failed runs → auto-sleep (each transcribe succeeded between them,
+    // which is exactly what must NOT keep it alive).
+    #expect(calls.get() >= 2)
+}
+
 // MARK: - ax policy command grammar
 
 @Test func axPolicyIndonesianAndEdgeVerbs() async throws {
