@@ -37,7 +37,6 @@ public actor RunLogger {
     public nonisolated let goal: String
     /// Optional live observer for each logged step (e.g. a UI feed).
     private let onStep: (@Sendable (StepRecord) -> Void)?
-    private var stepCount = 0
     private let enc: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; e.outputFormatting = [.prettyPrinted, .sortedKeys]; return e
     }()
@@ -73,12 +72,16 @@ public actor RunLogger {
     public func log(_ record: StepRecord) throws {
         let line = try record.jsonLine()
         let url = runDir.appendingPathComponent("steps.jsonl")
-        if let h = try? FileHandle(forWritingTo: url) {
-            h.seekToEndOfFile(); h.write(Data((line + "\n").utf8)); try h.close()
-        } else {
-            try (line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        // Always append — never the atomic-write path: `write(to:atomically:)`
+        // REPLACES the file, so a failed handle would silently truncate the
+        // whole evidence trail to this one line.
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
         }
-        stepCount += 1
+        let h = try FileHandle(forWritingTo: url)
+        h.seekToEndOfFile()
+        h.write(Data((line + "\n").utf8))
+        try h.close()
         onStep?(record)
     }
 
