@@ -10,7 +10,8 @@ import Foundation
 ///   "s2":    { "base": "http://localhost:11434/v1", "model": "gemma3:4b" },
 ///   "locale": "id-ID",
 ///   "speak":  true,
-///   "vocabulary": ["s1", "Warp", "Linear"]
+///   "vocabulary": ["s1", "Warp", "Linear"],
+///   "vlmScreenshot": true
 /// }
 /// ```
 public struct S1Config: Codable, Sendable {
@@ -35,13 +36,17 @@ public struct S1Config: Codable, Sendable {
     public var vocabulary: [String]?
     /// Last-run goals — the app's command field suggests these first.
     public var recent: [String]?
+    /// Whether the VLM brain attaches a screenshot per step (app toggle).
+    public var vlmScreenshot: Bool?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
-                vocabulary: [String]? = nil, recent: [String]? = nil) {
+                vocabulary: [String]? = nil, recent: [String]? = nil,
+                vlmScreenshot: Bool? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
         self.vocabulary = vocabulary
         self.recent = recent
+        self.vlmScreenshot = vlmScreenshot
     }
 
     public static var path: String { NSHomeDirectory() + "/.s1/config.json" }

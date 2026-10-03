@@ -36,6 +36,9 @@ final class AppModel {
     /// model than S1's, or a cloud one behind an API key.
     var s2Base = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
     var s2Model = "gemma3:4b" { didSet { scheduleRearm() } }
+    /// VLM brains see a screenshot every step when on (richer grounding,
+    /// more tokens + Screen Recording needed); off = AX-tree-only prompts.
+    var vlmScreenshot = true { didSet { scheduleRearm() } }
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
@@ -88,6 +91,7 @@ final class AppModel {
         if let s = cfg.speak { speakReply = s }
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
         if let r = cfg.recent { recentGoals = r }
+        if let vs = cfg.vlmScreenshot { vlmScreenshot = vs }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -105,11 +109,13 @@ final class AppModel {
         let model = vlmModel
         let s2BaseV = s2Base
         let s2ModelV = s2Model
+        let shot = vlmScreenshot
         let s = Serve(
             config: .init(
                 makePolicy: {
                     if brainKind == .vlm {
-                        return VLMPolicy(endpoint: Endpoint(baseURL: base, model: model))
+                        return VLMPolicy(endpoint: Endpoint(baseURL: base, model: model),
+                                         useScreenshot: shot)
                     }
                     return AXPolicy()
                 },
@@ -159,6 +165,7 @@ final class AppModel {
         cfg.s2 = .init(base: s2Base, model: s2Model)
         cfg.vocabulary = parsedVocab
         cfg.recent = recentGoals
+        cfg.vlmScreenshot = vlmScreenshot
         try? cfg.save()
     }
 
@@ -302,7 +309,8 @@ final class AppModel {
         status = "running"
 
         let pol: any Policy = brain == .vlm
-            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
+            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                        useScreenshot: vlmScreenshot)
             : AXPolicy()
         let reasoner: (any Reasoner)? = useS2
             ? LLMReasoner(endpoint: Endpoint(baseURL: s2Base, model: s2Model))

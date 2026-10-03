@@ -216,7 +216,8 @@ struct ListenCmd: AsyncParsableCommand {
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
         let pol: any Policy = try validatedSTTPolicy(policy) == "vlm"
-            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
+            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                        useScreenshot: S1Config.load().vlmScreenshot ?? true)
             : AXPolicy()
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
         // A fresh listen clears a stale kill switch — the user just asked for
@@ -295,10 +296,12 @@ struct AXCmd: AsyncParsableCommand {
         guard let tree = AXReader.snapshotTree(pid: app.processIdentifier) else {
             print("no AX tree (check Accessibility permission)"); throw ExitCode(1)
         }
-        for n in tree.flattened {
+        let flat = tree.flattened
+        for n in flat.prefix(250) {
             let label = n.title ?? n.desc ?? n.value ?? ""
             print("  \(n.ref) [\(n.role)] \(label)")
         }
+        if flat.count > 250 { print("  … \(flat.count - 250) more nodes") }
     }
 }
 
@@ -340,7 +343,8 @@ struct ServeCmd: AsyncParsableCommand {
 
         let makePol: @Sendable () -> any Policy = {
             guard policy == "vlm" else { return AXPolicy() }
-            return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel))
+            return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                             useScreenshot: S1Config.load().vlmScreenshot ?? true)
         }
 
         // --file: one utterance through the same pipeline, then exit.

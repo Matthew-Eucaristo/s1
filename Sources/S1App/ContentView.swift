@@ -37,6 +37,7 @@ struct ContentView: View {
                     Section("Model endpoint — S1") {
                         TextField("Base URL", text: $model.vlmBase)
                         TextField("Model", text: $model.vlmModel)
+                        Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
                     }
                     .font(.callout)
                 }
