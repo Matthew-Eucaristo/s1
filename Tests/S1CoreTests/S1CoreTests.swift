@@ -1294,3 +1294,27 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
         _ = try ScriptedPolicy(planJSON: Data(#"{"oops":1}"#.utf8))
     }
 }
+
+@Test func serveStateJSONEscapesHostileDetail() throws {
+    // `s1 status` parses this file with JSONSerialization — a backslash or
+    // newline in the detail used to corrupt the whole read.
+    let hostile = "path C:\\oops\\here\nnext \"quoted\" line\rthird"
+    let json = Serve.stateJSON(state: "idle", event: "armed", detail: hostile, pid: 42)
+    let obj = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    #expect(obj["state"] as? String == "idle")
+    #expect(obj["event"] as? String == "armed")
+    #expect(obj["pid"] as? Int == 42)
+    let detail = try #require(obj["detail"] as? String)
+    #expect(detail.contains("C:\\oops"))             // backslash survived the round-trip
+    #expect(!detail.contains("\n") && !detail.contains("\r"))  // newlines collapsed
+    #expect(detail.contains("'quoted'"))             // quotes squashed, not escaped
+}
+
+@Test func serveStateJSONTruncationCantSplitEscape() throws {
+    // A detail whose 120-char cut lands inside a "\\" pair used to leave a
+    // dangling backslash that escaped the closing quote.
+    let detail = String(repeating: "x", count: 119) + "\\tail"
+    let json = Serve.stateJSON(state: "idle", event: "e", detail: detail, pid: 1)
+    let obj = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    #expect(obj["detail"] is String)
+}

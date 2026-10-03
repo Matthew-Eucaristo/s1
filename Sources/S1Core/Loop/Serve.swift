@@ -330,9 +330,19 @@ public final class Serve: @unchecked Sendable {
         case .armed, .listening, .runStart, .runDone, .sleeping, .stopped, .idle: break
         default: return
         }
-        // Hand-rolled JSON: backslash must go first or it double-escapes;
-        // without it a "C:\foo"-style detail makes the state file unparseable.
-        var e = text.replacingOccurrences(of: "\\", with: "\\\\")
+        let json = Self.stateJSON(state: state.rawValue, event: kind.rawValue,
+                                  detail: text, pid: ProcessInfo.processInfo.processIdentifier)
+        try? FileManager.default.createDirectory(
+            atPath: (Self.statePath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true)
+        try? json.write(toFile: Self.statePath, atomically: true, encoding: .utf8)
+    }
+
+    /// Builds the state-file JSON — static so tests can verify escaping.
+    /// Hand-rolled: backslash must escape first or it double-escapes; without
+    /// it a "C:\foo"-style detail makes the file unparseable for `s1 status`.
+    static func stateJSON(state: String, event: String, detail: String, pid: Int32) -> String {
+        var e = detail.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "'")
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
@@ -341,14 +351,8 @@ public final class Serve: @unchecked Sendable {
         // Truncation can slice a "\\" pair in half — a trailing lone
         // backslash would escape the closing quote and corrupt the file.
         while e.hasSuffix("\\") { e.removeLast() }
-        let escaped = e
         let iso = ISO8601DateFormatter().string(from: Date())
-        let json = "{\"state\":\"\(state.rawValue)\",\"event\":\"\(kind.rawValue)\","
-            + "\"detail\":\"\(escaped)\",\"pid\":\(ProcessInfo.processInfo.processIdentifier),"
-            + "\"updated\":\"\(iso)\"}"
-        try? FileManager.default.createDirectory(
-            atPath: (Self.statePath as NSString).deletingLastPathComponent,
-            withIntermediateDirectories: true)
-        try? json.write(toFile: Self.statePath, atomically: true, encoding: .utf8)
+        return "{\"state\":\"\(state)\",\"event\":\"\(event)\","
+            + "\"detail\":\"\(e)\",\"pid\":\(pid),\"updated\":\"\(iso)\"}"
     }
 }
