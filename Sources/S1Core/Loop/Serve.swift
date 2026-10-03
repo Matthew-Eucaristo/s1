@@ -182,7 +182,18 @@ public final class Serve: @unchecked Sendable {
                 }
                 silentTurns = 0
                 emit(.heard, trimmed)
-                await run(goal: trimmed)
+                if await run(goal: trimmed) {
+                    errors = 0
+                } else {
+                    // A broken endpoint (or a run that keeps failing) must
+                    // not spin forever — count it like an STT error and
+                    // auto-sleep after maxListenErrors.
+                    errors += 1
+                    if errors >= config.maxListenErrors {
+                        sleep("run errors x\(errors)")
+                        return
+                    }
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -198,9 +209,12 @@ public final class Serve: @unchecked Sendable {
     }
 
     /// Run one goal through the full agent loop and speak the outcome.
-    private func run(goal: String) async {
+    /// Returns false when the run itself errored — the caller counts those
+    /// toward auto-sleep, same as STT failures.
+    private func run(goal: String) async -> Bool {
         setState(.running)
         emit(.runStart, goal)
+        var ok = true
         do {
             let (report, _) = try await S1Runner.run(
                 goal: goal, policy: config.makePolicy(), artifacts: config.artifacts,
@@ -212,13 +226,22 @@ public final class Serve: @unchecked Sendable {
                 })
             emit(.runDone, report.status.rawValue)
             if config.speak {
-                let reply = sayLanguage.hasPrefix("id") ? "Selesai" : "Done"
-                await speaker.say("\(reply): \(goal)", language: sayLanguage)
+                // Speak the truth: "done" is only said when it actually is.
+                let id = sayLanguage.hasPrefix("id")
+                let reply: String = switch report.status {
+                case .done: id ? "Selesai: \(goal)" : "Done: \(goal)"
+                case .needsHuman, .escalatedToS2:
+                    id ? "Butuh kamu" : "Needs you"
+                default: id ? "Berhenti" : "Stopped"
+                }
+                await speaker.say(reply, language: sayLanguage)
             }
         } catch {
+            ok = false
             emit(.error, error.localizedDescription)
         }
         if state == .running { setState(.listening) }
+        return ok
     }
 
     /// True when the utterance is a "go to sleep" phrase (case/locale-insensitive,
