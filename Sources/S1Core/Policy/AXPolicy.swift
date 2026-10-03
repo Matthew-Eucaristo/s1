@@ -104,6 +104,7 @@ public struct AXPolicy: Policy {
         "foto", "potret", "ambil", "scroll", "gulir", "geser",
         "verify", "cek", "check", "pastikan", "done", "selesai", "finish",
         "click", "press", "klik", "tekan", "set", "isi",
+        "take", "grab", "snap",
     ]
 
     /// Split " A and B "/" A dan B " only when B starts with a grammar verb —
@@ -193,6 +194,18 @@ public struct AXPolicy: Policy {
             return Decision(action: .wait(seconds: secs), confidence: 0.95,
                             rationale: "wait \(secs)s")
         case "screenshot", "capture", "screencap", "tangkap", "tangkapan", "foto", "potret", "ambil":
+            return Decision(action: .captureScreenshot(reason: "requested in goal"), confidence: 0.95,
+                            rationale: "screenshot requested")
+        case "take", "grab", "snap":
+            // EN wraps the noun after a generic verb: "take a screenshot",
+            // "grab the screen". Anything else these verbs could take
+            // (a note, a break) is not a screenshot — abstain instead.
+            let a = intent.arg.lowercased()
+            guard a.contains("screenshot") || a.contains("screen")
+                    || a.contains("picture") || a.contains("photo") else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "'\(intent.verb)' needs a screenshot-like noun")
+            }
             return Decision(action: .captureScreenshot(reason: "requested in goal"), confidence: 0.95,
                             rationale: "screenshot requested")
         case "scroll", "gulir", "geser":

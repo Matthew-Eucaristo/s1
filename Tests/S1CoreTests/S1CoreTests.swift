@@ -866,6 +866,21 @@ private final class Locked<T>: @unchecked Sendable {
     // Sign survives — a negative arg clamps to 0 downstream, not a +5s wait.
     #expect(AXPolicy.parseWaitSeconds("-5s") == -5)
     #expect(AXPolicy.parseWaitSeconds("-500ms") == -0.5)
+    // EN wraps the noun in a generic verb — "take a screenshot" was an
+    // abstain→S2 escalation before take/grab/snap joined the grammar.
+    if case .captureScreenshot? = try await pol.decide(
+        observation: obs, goal: "take a screenshot", history: []).action {} else {
+        Issue.record("take a screenshot should capture")
+    }
+    if case .captureScreenshot? = try await pol.decide(
+        observation: obs, goal: "grab the screen", history: []).action {} else {
+        Issue.record("grab the screen should capture")
+    }
+    // "take" alone is not a screenshot — honest abstain, not a wrong capture.
+    let takeBreak = try await pol.decide(observation: obs, goal: "take a break", history: [])
+    #expect(takeBreak.action == nil && takeBreak.confidence < 0.6)
+    // "and take" is a verb boundary for conjunction splits.
+    #expect(AXPolicy.intents(of: "open Notes and take a screenshot").count == 2)
 }
 
 @Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {
