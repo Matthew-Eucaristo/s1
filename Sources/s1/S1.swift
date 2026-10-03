@@ -269,6 +269,18 @@ struct ListenCmd: AsyncParsableCommand {
             }
             goal = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
+            // A live LISTENING daemon owns the mic — two audio engines
+            // grabbing it at once fails cryptically. Refuse only when the
+            // daemon is actually listening (idle = mic free).
+            if let data = FileManager.default.contents(atPath: Serve.statePath),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (obj["state"] as? String) == "listening",
+               let pid = (obj["pid"] as? Int).map(pid_t.init),
+               S1Runner.pidLooksLikeS1(pid) {
+                throw ValidationError(
+                    "the s1 listener is actively listening (pid \(pid)) — it owns the mic; " +
+                    "say your command to it, or `s1 stop` first")
+            }
             print("listening... (speak a command)")
             goal = try await stt.transcribeMic(maxSeconds: 20)
         }
