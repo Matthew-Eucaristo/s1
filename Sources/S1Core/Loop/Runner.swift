@@ -86,8 +86,15 @@ public enum S1Runner {
         return pid
     }
 
-    /// Removes the lock only when WE hold it — a dry-run (which never
-    /// acquires) must not delete a live run's lock file.
+    /// Removes a pid file only when it holds OUR pid — the pid-checked
+    /// counterpart of claimPidFile for graceful shutdown paths.
+    public static func releasePidFile(_ path: String) {
+        guard let txt = try? String(contentsOfFile: path, encoding: .utf8),
+              pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines))
+                == ProcessInfo.processInfo.processIdentifier else { return }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
     /// Sleep in ≤0.5s slices so a kill-switch file written mid-wait lands
     /// within half a second instead of after the full duration. Returns
     /// false when interrupted (file present or task cancelled).
@@ -104,12 +111,9 @@ public enum S1Runner {
         return true
     }
 
-    public static func releaseRunLock() {
-        guard let txt = try? String(contentsOfFile: lockPath, encoding: .utf8),
-              pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines))
-                == ProcessInfo.processInfo.processIdentifier else { return }
-        try? FileManager.default.removeItem(atPath: lockPath)
-    }
+    /// Removes the lock only when WE hold it — a dry-run (which never
+    /// acquires) must not delete a live run's lock file.
+    public static func releaseRunLock() { releasePidFile(lockPath) }
 
     @discardableResult
     public static func run(goal: String, policy: any Policy, artifacts: String,

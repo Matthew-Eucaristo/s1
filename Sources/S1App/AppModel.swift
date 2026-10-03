@@ -204,8 +204,12 @@ final class AppModel {
         var cfg = S1Config.load()
         cfg.locale = locale
         cfg.speak = speakReply
-        cfg.vlm = .init(base: vlmBase, model: vlmModel)
-        cfg.s2 = .init(base: s2Base, model: s2Model)
+        // Keep key/numCtx from the file — the app owns base/model, not the
+        // credentials: wiping them on every save would break the CLI's auth.
+        cfg.vlm = .init(base: vlmBase, model: vlmModel,
+                        key: cfg.vlm?.key, numCtx: cfg.vlm?.numCtx)
+        cfg.s2 = .init(base: s2Base, model: s2Model,
+                       key: cfg.s2?.key, numCtx: cfg.s2?.numCtx)
         cfg.vocabulary = parsedVocab
         cfg.recent = recentGoals
         cfg.vlmScreenshot = vlmScreenshot
@@ -254,8 +258,9 @@ final class AppModel {
     func shutdown() {
         serve?.disarm()
         speaker.stop()
-        try? FileManager.default.removeItem(
-            atPath: NSHomeDirectory() + "/.s1/serve.pid")
+        // Pid-checked release — if a CLI `s1 serve` daemon holds the lock
+        // (our companion was refused), its file must survive our quit.
+        S1Runner.releasePidFile(NSHomeDirectory() + "/.s1/serve.pid")
         NSApp.terminate(nil)
     }
 
