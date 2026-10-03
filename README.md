@@ -175,6 +175,15 @@ entry; on repeat runs Safari renames to `test-1.zip` — download fresh or
 adjust the `verify` token). `read-screen` verifies text an earlier task
 typed into TextEdit.
 
+## Developer commands
+
+```bash
+swift run s1 ax                 # dump the frontmost app's AX tree (debug perceive)
+swift run s1 capture --out out.png # one screenshot (checks Screen Recording grant)
+swift run s1 say "halo" --language id-ID # TTS only
+swift run s1 transcribe --file audio.aiff # STT only
+```
+
 ## Permissions (macOS TCC)
 
 `s1 preflight` reports what's missing and prints exact instructions.
