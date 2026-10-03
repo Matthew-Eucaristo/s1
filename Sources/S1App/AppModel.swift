@@ -161,6 +161,13 @@ final class AppModel {
         }
         s.armHotkey()
         serve = s
+        // Advertise as the live listener — `s1 serve` refuses to double up
+        // while this pid file names a running process.
+        let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
+        try? FileManager.default.createDirectory(
+            atPath: NSHomeDirectory() + "/.s1", withIntermediateDirectories: true)
+        try? String(ProcessInfo.processInfo.processIdentifier).write(
+            toFile: pidPath, atomically: true, encoding: .utf8)
     }
 
     /// Rebuild the serve config when brain/locale/s2/speak settings change —
@@ -223,6 +230,8 @@ final class AppModel {
     func shutdown() {
         serve?.disarm()
         speaker.stop()
+        try? FileManager.default.removeItem(
+            atPath: NSHomeDirectory() + "/.s1/serve.pid")
         NSApp.terminate(nil)
     }
 
