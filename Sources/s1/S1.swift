@@ -343,6 +343,9 @@ struct ServeCmd: AsyncParsableCommand {
         let stt = SpeechToText(locale: Locale(identifier: locale),
                                vocabulary: sttVocabulary(vocabulary))
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        // Warm the speech model in the background — the first hotkey press
+        // shouldn't pay the cold-load cost mid-conversation.
+        Task { await stt.warmup() }
 
         let makePol: @Sendable () -> any Policy = {
             guard policy == "vlm" else { return AXPolicy() }

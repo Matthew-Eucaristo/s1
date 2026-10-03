@@ -66,6 +66,21 @@ public struct SpeechToText: Sendable {
         }
     }
 
+    /// Pre-warm the speech model so the first utterance isn't cold-slow —
+    /// Apple's `SpeechAnalyzer.prepareToAnalyze` exists for exactly this.
+    /// Best-effort: every failure is swallowed (the real path retries).
+    public func warmup() async {
+        guard SpeechTranscriber.isAvailable else { return }
+        let t = SpeechTranscriber(locale: locale, transcriptionOptions: [],
+                                  reportingOptions: [], attributeOptions: [])
+        if let req = try? await AssetInventory.assetInstallationRequest(supporting: [t]) {
+            try? await req.downloadAndInstall()
+        }
+        let analyzer = SpeechAnalyzer(modules: [t])
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [t]) else { return }
+        try? await analyzer.prepareToAnalyze(in: format)
+    }
+
     /// SpeechAnalyzer/SpeechTranscriber path (macOS 26 assets required).
     private func transcribeAnalyzer(file url: URL) async throws -> String {
         let transcriber = SpeechTranscriber(locale: locale,

@@ -72,6 +72,8 @@ final class AppModel {
         let s = SpeechToText(locale: Locale(identifier: locale),
                              vocabulary: Vocabulary.assemble(custom: parsedVocab))
         _stt = s
+        // Pre-warm the model assets so the first listen isn't cold-slow.
+        Task { await s.warmup() }
         return s
     }
     private func invalidateStt() { _stt = nil }
