@@ -229,6 +229,27 @@ private func jsonlDecoder() -> JSONDecoder {
     #expect(lines[0].contains("\"escalation\""))
 }
 
+@Test func lowConfidenceActionSuppressedWithoutS2() async throws {
+    // A below-threshold ACTION must not touch the screen when there's no
+    // S2 to escalate to — executing it first would defeat the gate.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    var cfg = LoopConfig(); cfg.confidenceThreshold = 0.6
+    let loop = AgentLoop(config: cfg, perceiver: NullPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate())
+    let plan = ScriptedPolicy(steps: [
+        .init(action: .typeText("risky"), confidence: 0.3),
+        .init(action: .done(summary: "fin")),
+    ])
+    let report = try await loop.run(goal: "g", policy: plan, logger: logger)
+    #expect(report.status == .escalatedToS2)
+    let rec = (try? RunReader.steps(in: logger.runDir)) ?? []
+    #expect(rec.count == 1)
+    #expect(rec[0].action == nil, "suppressed step must carry no action")
+    #expect(rec[0].outcome?.contains("suppressed") == true)
+    #expect(rec[0].escalation?.to == "s2:none")
+}
+
 @Test func scriptedRunCompletesAndLogsEveryStep() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
     let logger = try RunLogger(goal: "test", root: dir, config: [:])

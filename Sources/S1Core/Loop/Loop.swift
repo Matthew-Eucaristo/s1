@@ -173,6 +173,16 @@ public struct AgentLoop {
                 decidedBy = "s2:\(s2.name)"
             } else {
                 esc = StepRecord.Escalation(to: "s2:none", reason: "no S2 configured; conf \(decision.confidence)")
+                // Below threshold with nowhere to escalate: suppress the
+                // action instead of executing it. "Below threshold → S2"
+                // means the uncertain step must NOT touch the screen —
+                // acting first and stopping after would defeat the gate.
+                let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
+                               rat: decision.rationale, action: nil,
+                               gate: "-", out: "suppressed: below threshold, no S2",
+                               ver: nil, esc: esc, reply: decision.rawReply)
+                try await logger.log(r)
+                return r
             }
         }
 
