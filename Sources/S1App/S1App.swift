@@ -14,6 +14,26 @@ struct S1App: App {
         }
         .windowStyle(.automatic)
         .defaultSize(width: 880, height: 620)
+        .commands {
+            CommandMenu("Agent") {
+                Button("Run") { Task { await model.run() } }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(model.running || model.goal.isEmpty)
+                Button("Stop") { model.stop() }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .disabled(!model.running)
+                Divider()
+                Button(model.serveState == .idle ? "Wake (start listening)" : "Sleep (stop listening)") {
+                    model.toggleServe()
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            }
+            CommandGroup(replacing: .help) {
+                Button("s1 on GitHub") {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/Matthew-Eucaristo/s1")!)
+                }
+            }
+        }
 
         // The always-on companion lives here: menu bar presence, global
         // hotkey armed, listening/running state at a glance. Label uses the
@@ -43,7 +63,7 @@ struct S1App: App {
 
 @available(macOS 26, *)
 private struct MenuBarView: View {
-    let model: AppModel
+    @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -62,6 +82,29 @@ private struct MenuBarView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
+            }
+            // Quick-goal: run a command without opening the window at all.
+            HStack(spacing: 6) {
+                TextField("Goal…", text: $model.goal)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout)
+                    .onSubmit { Task { await model.run() } }
+                Button {
+                    Task { await model.run() }
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.small)
+                .disabled(model.running || model.goal.isEmpty)
+            }
+            if !model.recentGoals.isEmpty {
+                Menu("Recent goals") {
+                    ForEach(model.recentGoals.prefix(5), id: \.self) { g in
+                        Button(g) { model.goal = g; Task { await model.run() } }
+                    }
+                }
+                .controlSize(.small)
             }
             Divider()
             Button {

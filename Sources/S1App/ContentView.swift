@@ -180,6 +180,7 @@ struct ContentView: View {
                     Label("Run", systemImage: "play.fill")
                 }
                 .buttonStyle(.glassProminent)
+                .keyboardShortcut(.return, modifiers: .command)
                 .disabled(model.running || model.goal.isEmpty)
 
                 if model.running {
@@ -190,6 +191,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.glass)
                     .tint(.red)
+                    .keyboardShortcut(".", modifiers: .command)
                 }
                 Spacer()
             }
