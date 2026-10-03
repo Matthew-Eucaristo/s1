@@ -95,5 +95,20 @@ this project is pre-1.0 — breaking changes land in minor versions.
   scrollY semantics) and is documented in the decision prompt.
 - Process-kill commands (`pkill`/`killall`/`kill -9`) are denylisted —
   the agent can't destroy the session it runs in.
+- `serve-state.json` publishes the `running → listening` transition after
+  each run (was: stale "running" until the next lifecycle event).
+- `steps.jsonl` is append-only — a failed handle can no longer truncate
+  the whole evidence trail to one line (was: atomic-write fallback).
+- VLM intent cursor counts *consumed* intents, not history length — a
+  failed step no longer skips the next goal part (`blocked:` still
+  consumes: a deny is final, not transient).
+- Pid-file claims (`run.pid`, `serve.pid`) are atomic `O_EXCL` creates —
+  two concurrent claims can't both win (was: check-then-create TOCTOU).
+- Chat client keeps Ollama-only keys (`think`/`options`/`num_ctx`) on
+  local endpoints — strict OpenAI-spec APIs (OpenAI, OpenRouter, Groq)
+  400 on unknown params; remote requests use `max_completion_tokens`
+  for reasoning models.
+- S1.app `run()` refuses politely while a CLI agent owns the screen
+  (was: raw busy error surfaced in the status bar).
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
