@@ -68,6 +68,16 @@ this project is pre-1.0 — breaking changes land in minor versions.
   com.apple.main-thread"): `observe()`'s AX reads now run on the main
   actor, since HIServices asserts when the first `AXUIElement` contact
   lands on a cooperative-pool thread. Verified end-to-end.
+- `serve-state.json` is now valid JSON for any detail text — backslashes
+  are escaped and the 120-char truncation can't slice a `\\` pair (was:
+  `s1 status` could fail to parse the whole file on a `C:\…`-style detail).
+- `RunGoalIntent` (Siri/Shortcuts/Spotlight) refuses with "grant
+  Accessibility first" instead of announcing a run that would die.
+- `parseWaitSeconds` keeps the sign — "tunggu -5s" clamps to 0 rather
+  than becoming a positive 5s wait.
+- The VLM hint switch covers `set`/`isi`/`fill` → `axSetValue` guidance.
+- App onboarding banner names only the grants actually missing (was:
+  always claimed both AX + Screen Recording).
 - **Phantom typing closed** — `s1 run`, `s1 demo`, serve runs, and live
   replay now fail fast on missing Accessibility (`requireAccessibility`)
   instead of posting CGEvents that silently drop while the log claims
