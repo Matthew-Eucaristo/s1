@@ -860,3 +860,34 @@ private struct SpyActuator: Actuator {
     #expect(logged.last?.outcome == "aborted")
     #expect(logged.last?.decidedBy == "system")
 }
+
+// MARK: - VLM intent cursor
+
+private func rec(action: Action?, outcome: String?) -> StepRecord {
+    StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:vlm",
+               confidence: nil, rationale: nil, modelReply: nil,
+               action: action, gate: "allow", outcome: outcome,
+               verified: nil, escalation: nil)
+}
+
+@Test func vlmCursorCountsConsumedNotHistory() {
+    // [open, type, done] where "type" errored once then succeeded — raw
+    // history.count would land on 3 and declare the plan finished while
+    // "done" was never grounded. Consumed-count puts the cursor on intent 2.
+    let h = [
+        rec(action: .openApp(name: "TextEdit"), outcome: "opened TextEdit"),
+        rec(action: .typeText("hi"), outcome: "error: no editable field"),
+        rec(action: .typeText("hi"), outcome: "typed"),
+    ]
+    #expect(VLMPolicy.cursorIndex(history: h, intentCount: 3) == 2)
+    // An abstain (nil action) also doesn't consume — intent retries.
+    let a = [rec(action: nil, outcome: nil)]
+    #expect(VLMPolicy.cursorIndex(history: a, intentCount: 3) == 0)
+    // A blocked step DOES consume — a deny is final, not transient.
+    let b = [rec(action: .typeText("x"), outcome: "blocked: denylist")]
+    #expect(VLMPolicy.cursorIndex(history: b, intentCount: 3) == 1)
+    // All consumed → cursor pins at intentCount (decide returns .done).
+    let c = [rec(action: .wait(seconds: 1), outcome: "waited"),
+             rec(action: .done(summary: "x"), outcome: nil)]
+    #expect(VLMPolicy.cursorIndex(history: c, intentCount: 2) == 2)
+}

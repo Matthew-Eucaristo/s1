@@ -240,17 +240,12 @@ public struct VLMPolicy: Policy {
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         // Deterministic decomposition (shared with AXPolicy): the model grounds
         // ONE intent per step — small local models can't track a whole plan.
-        // A step that failed (error/blocked outcome) does NOT consume its
-        // intent — the cursor stays so the model retries it differently.
+        // The cursor is the count of intents CONSUMED, not history.count —
+        // a failed record would otherwise offset every later step, skipping
+        // an intent permanently after any retry. Errors retry (transient);
+        // "blocked:" consumes (the deny is final — retrying just spins).
         let intents = AXPolicy.intents(of: goal)
-        let cursor: Int = if let last = history.last,
-                             last.action != nil,
-                             let o = last.outcome,
-                             o.hasPrefix("error:") || o.hasPrefix("blocked:") {
-            history.count - 1
-        } else {
-            history.count
-        }
+        let cursor = Self.cursorIndex(history: history, intentCount: intents.count)
         guard cursor < intents.count else {
             return Decision(action: .done(summary: "goal completed"), confidence: 0.9,
                             rationale: "all \(intents.count) intents consumed")
@@ -309,6 +304,21 @@ public struct VLMPolicy: Policy {
         }
         d?.rawReply = String(reply.prefix(800))
         return d!
+    }
+
+    /// Which intent to ground next: the count of consumed intents, capped.
+    /// history.count would be wrong — failed records offset every later step.
+    static func cursorIndex(history: [StepRecord], intentCount: Int) -> Int {
+        min(history.reduce(0) { $0 + (consumed($1) ? 1 : 0) }, intentCount)
+    }
+
+    /// Did this step consume its intent? A real action that didn't end in
+    /// "error:" — abstains (nil action) and error outcomes both retry.
+    /// "blocked:" counts as consumed: a deny is final, not transient.
+    static func consumed(_ r: StepRecord) -> Bool {
+        guard r.action != nil else { return false }
+        guard let o = r.outcome else { return true }
+        return !o.hasPrefix("error:")
     }
 
     /// VLMs don't need retina pixels — a ~1024px-wide PNG keeps the prompt
