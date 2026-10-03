@@ -180,6 +180,7 @@ typed into TextEdit.
 
 ```bash
 swift run s1 ax                 # dump the frontmost app's AX tree (debug perceive)
+swift run s1 ax Notes           # …or any running app by name / pid
 swift run s1 capture --out out.png # one screenshot (checks Screen Recording grant)
 swift run s1 say "halo" --language id-ID # TTS only
 swift run s1 transcribe --file audio.aiff # STT only

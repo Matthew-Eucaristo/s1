@@ -31,6 +31,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `s1 replay`.
 - **Config file** — `~/.s1/config.json` swaps brains/locale/vocabulary
   without a rebuild; precedence flag > env > file > default.
+- **Live step feed** — `s1 run`/`demo`/`listen`/`replay` print each step
+  as it happens (`[i] decider conf action → outcome`); the serve daemon
+  logs the same digest per step.
+- **`s1 ax <app|pid>`** — inspect any running app's tree, not just the
+  frontmost one.
 - OSS essentials — MIT license, ATTRIBUTIONS, CONTRIBUTING, SECURITY,
   CI (macOS 26 build+test), release workflow, Homebrew formula template.
 
@@ -180,5 +185,8 @@ this project is pre-1.0 — breaking changes land in minor versions.
 - `.gitignore` no longer drops every PNG — `assets/app.png` (README
   hero, broken on GitHub) and the menubar glyph PNGs (CI builds would
   have silently lost them) are now tracked.
+- `.wait` in a dry-run no longer sleeps real seconds — the actuator
+  executes nothing, so the recorded 60s wait no longer blocks the
+  preview (logged as `[dry-run] wait Ns` in both Loop and Replay).
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
