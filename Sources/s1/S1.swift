@@ -380,7 +380,7 @@ struct AXCmd: AsyncParsableCommand {
         let flat = tree.flattened
         for n in flat.prefix(250) {
             let label = n.title ?? n.desc ?? n.help ?? n.value ?? ""
-            print("  \(n.ref) [\(n.role)] \(label)")
+            print("  \(n.ref) [\(n.role)]\(AXSemantics.markers(for: n.role)) \(label)")
         }
         if flat.count > 250 { print("  … \(flat.count - 250) more nodes") }
     }

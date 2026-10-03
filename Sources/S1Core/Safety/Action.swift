@@ -84,6 +84,44 @@ public struct CGRectCodable: Codable, Sendable {
     public init(_ r: CGRect) { x = r.origin.x; y = r.origin.y; w = r.size.width; h = r.size.height }
 }
 
+/// Which AX roles accept which verbs — the single source of truth behind
+/// the observation markers ([pressable]/[editable]/[scrollable]/
+/// [adjustable]/[secure]) the model sees, and the `s1 ax` dump.
+public enum AXSemantics {
+    /// Roles axPress can meaningfully trigger.
+    public static let pressable: Set<String> = [
+        "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXLink",
+        "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow", "AXCell",
+        "AXMenuBarItem", "AXDisclosureTriangle",
+    ]
+    /// Scroll containers — where the scroll verb makes sense.
+    public static let scrollable: Set<String> = [
+        "AXScrollArea", "AXTable", "AXOutline", "AXList", "AXWebArea",
+    ]
+    /// Roles that take text via axSetValue (or focus + typeText).
+    public static let editable: Set<String> = [
+        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox",
+    ]
+    /// Adjustable controls — nudge with axAction AXIncrement/AXDecrement.
+    public static let adjustable: Set<String> = [
+        "AXSlider", "AXStepper", "AXIncrementor", "AXValueIndicator",
+        "AXRatingIndicator",
+    ]
+    /// Password boxes — never typed into; never read for a value.
+    public static let secure: Set<String> = ["AXSecureTextField"]
+
+    /// Marker annotations for one node, e.g. "[pressable][secure]".
+    public static func markers(for role: String) -> String {
+        var s = ""
+        if pressable.contains(role) { s += " [pressable]" }
+        if editable.contains(role) { s += " [editable]" }
+        if scrollable.contains(role) { s += " [scrollable]" }
+        if adjustable.contains(role) { s += " [adjustable]" }
+        if secure.contains(role) { s += " [secure]" }
+        return s
+    }
+}
+
 /// Condensed accessibility-tree node. `ref` is stable within one snapshot
 /// (`e0`, `e1`, ... in walk order) — refs must be re-resolved after mutation.
 public struct AXNode: Codable, Sendable {

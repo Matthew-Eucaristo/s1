@@ -21,11 +21,7 @@ enum LLMDecisionCodec {
         lines += obs.windows.prefix(8).map { "win \($0.pid): \($0.title ?? "")" }
         for n in obs.axTree?.flattened.prefix(60) ?? [] {
             var s = "\(n.ref) \(n.role)"
-            if pressableRoles.contains(n.role) { s += " [pressable]" }
-            if editableRoles.contains(n.role) { s += " [editable]" }
-            if scrollableRoles.contains(n.role) { s += " [scrollable]" }
-            if adjustableRoles.contains(n.role) { s += " [adjustable]" }
-            if secureRoles.contains(n.role) { s += " [secure]" }
+            s += AXSemantics.markers(for: n.role)
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
             if let d = n.desc, !d.isEmpty, d != n.title { s += " desc=\"\(d.prefix(40))\"" }
             if let h = n.help, !h.isEmpty, h != n.title, h != n.desc { s += " help=\"\(h.prefix(40))\"" }
@@ -34,35 +30,6 @@ enum LLMDecisionCodec {
         }
         return lines.joined(separator: "\n")
     }
-
-    /// Roles an axPress can meaningfully trigger — mirrored in the
-    /// observation dump as [pressable] so models stop pressing roots/groups.
-    static let pressableRoles: Set<String> = [
-        "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXLink",
-        "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow", "AXCell",
-        "AXMenuBarItem", "AXDisclosureTriangle",
-    ]
-
-    /// Adjustable controls — nudge with axAction AXIncrement/AXDecrement
-    /// instead of guessing a pixel drag on a 6pt thumb.
-    static let adjustableRoles: Set<String> = [
-        "AXSlider", "AXStepper", "AXIncrementor", "AXValueIndicator",
-        "AXRatingIndicator",
-    ]
-
-    /// Scroll containers — hints the model where `scroll` makes sense.
-    static let scrollableRoles: Set<String> = [
-        "AXScrollArea", "AXTable", "AXOutline", "AXList", "AXWebArea",
-    ]
-
-    /// Roles that take text via axSetValue (or focus + typeText) — NOT axPress.
-    static let editableRoles: Set<String> = [
-        "AXTextField", "AXTextArea", "AXSearchField", "AXComboBox",
-    ]
-
-    /// Password boxes — shown so the model knows to leave them alone.
-    /// (The loop-level guard escalates anyway; this keeps it from trying.)
-    static let secureRoles: Set<String> = ["AXSecureTextField"]
 
     /// Compact digest of recent steps so the model can react to failures.
     static func historyText(_ history: [StepRecord]) -> String {

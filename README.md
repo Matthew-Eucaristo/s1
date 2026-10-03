@@ -28,10 +28,11 @@ brew install --cask s1      # the S1 menu-bar app
 s1 preflight                # shows which macOS permissions are missing
 ```
 
-Remove it cleanly any time:
+Remove it cleanly any time (the `--formula`/`--cask` flags disambiguate
+the shared name — bare `brew uninstall s1` can complain about both):
 
 ```bash
-brew uninstall s1
+brew uninstall --formula s1
 brew uninstall --cask s1            # quits the app + removes /Applications/S1.app
 brew uninstall --cask s1 --zap      # + wipes ~/.s1 state and Library traces
 ```

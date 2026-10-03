@@ -9,12 +9,11 @@
 # and `brew uninstall` leaves zero residue. (homebrew-core would require
 # a source build; our own tap gets to choose the friendlier option.)
 class S1 < Formula
-  desc "Voice-first macOS agent — fast System 1 + LLM System 2, accessibility-driven"
+  desc "Voice-first agent — fast System 1 + LLM System 2, accessibility-driven"
   homepage "https://github.com/Matthew-Eucaristo/s1"
-  license "MIT"
-  version "0.2.0"
-  url "https://github.com/Matthew-Eucaristo/s1/releases/download/v#{version}/s1-#{version}-macos.tar.gz"
+  url "https://github.com/Matthew-Eucaristo/s1/releases/download/v0.2.0/s1-0.2.0-macos.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # filled at release
+  license "MIT"
 
   # The binary is signed (stable TCC identity); Gatekeeper may still want a
   # one-time `xattr -dr com.apple.quarantine` until we ship Developer ID.

@@ -140,7 +140,7 @@ public struct AXPolicy: Policy {
 
     /// Roles that take a press rather than a text set — same set the LLM
     /// prompts advertise as [pressable]; one source of truth.
-    static let pressableRoles: Set<String> = LLMDecisionCodec.pressableRoles
+    static let pressableRoles: Set<String> = AXSemantics.pressable
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let intents = AXPolicy.intents(of: goal)

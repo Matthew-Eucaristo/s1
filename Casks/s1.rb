@@ -9,11 +9,11 @@ cask "s1" do
 
   url "https://github.com/Matthew-Eucaristo/s1/releases/download/v#{version}/S1-#{version}-app.zip"
   name "S1"
-  desc "Voice-first macOS agent — menu-bar companion (System 1 + System 2)"
+  desc "Voice-first agent — menu-bar companion (System 1 + System 2)"
   homepage "https://github.com/Matthew-Eucaristo/s1"
 
   # ScreenCaptureKit/AX/CGEvent need macOS 15+; on-device STT wants 26.
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "S1.app"
 
@@ -21,8 +21,9 @@ cask "s1" do
   # `brew uninstall --cask s1 --zap`  -> also removes every trace below
   uninstall quit: "com.matthew.s1.app"
 
+  # config, pid locks, run artifacts, screenshots
   zap trash: [
-    "~/.s1",                                                   # config, pid locks, run artifacts, screenshots
+    "~/.s1",
     "~/Library/Application Scripts/com.matthew.s1.app",
     "~/Library/Containers/com.matthew.s1.app",
     "~/Library/HTTPStorages/com.matthew.s1.app",
