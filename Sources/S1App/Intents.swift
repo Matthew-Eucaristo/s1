@@ -19,7 +19,10 @@ struct RunGoalIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let busy = await MainActor.run { () -> Bool in
-            if AppModel.shared.running || AppModel.shared.serveState == .running {
+            // Also refuse when a CLI agent owns the screen — otherwise the
+            // dialog would announce a run that run() then refuses.
+            if AppModel.shared.running || AppModel.shared.serveState == .running
+                || S1Runner.anotherRunActive() {
                 return true
             }
             AppModel.shared.goal = goal
