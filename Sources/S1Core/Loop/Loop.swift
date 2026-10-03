@@ -187,9 +187,11 @@ public struct AgentLoop {
             esc = esc ?? StepRecord.Escalation(to: "human", reason: r)
         }
 
-        if case .verify(let expectation) = action {
+        // A blocked verify can never become visible — skip the 2s re-observe
+        // poll on deny/needsHuman instead of stalling on a known no.
+        if case .verify(let expectation) = action, case .allow = verdict {
             verified = await verify(expectation)
-            outcome += verified! ? " | verified" : " | NOT verified"
+            outcome += verified == true ? " | verified" : " | NOT verified"
         }
 
         let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,

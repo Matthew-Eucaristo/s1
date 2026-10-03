@@ -806,7 +806,9 @@ private final class Locked<T>: @unchecked Sendable {
 }
 
 @Test func runLockReleaseOnlyRemovesOurOwn() throws {
-    let path = NSHomeDirectory() + "/.s1/run.pid"
+    let dir = NSHomeDirectory() + "/.s1"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let path = dir + "/run.pid"
     defer { try? FileManager.default.removeItem(atPath: path) }
     // A foreign pid's lock survives releaseRunLock — a dry-run (which never
     // acquires) must not delete a live run's lock file.
