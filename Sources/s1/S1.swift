@@ -124,6 +124,13 @@ struct ConfigCmd: AsyncParsableCommand {
         let vlm = Endpoints.vlm()
         let s2 = Endpoints.s2()
         print("config file: \(S1Config.path)\(exists ? "" : " (not found — defaults in use)")")
+        if exists {
+            let malformed = (try? Data(contentsOf: URL(fileURLWithPath: S1Config.path)))
+                .flatMap { try? JSONDecoder().decode(S1Config.self, from: $0) } == nil
+            if malformed {
+                print("  ⚠ malformed JSON — falling back to defaults; fix or delete the file")
+            }
+        }
         print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
         print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
         print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")

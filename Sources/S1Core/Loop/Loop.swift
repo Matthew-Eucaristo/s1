@@ -212,8 +212,11 @@ public struct AgentLoop {
             if case .wait(let s) = action {
                 // Wait in the loop, not the actuator: a 60s `wait` must hear
                 // the kill switch within ~0.5s, not when it finally ends.
-                outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: config.killSwitchPath)
-                    ? "waited \(s)s" : "interrupted (kill switch)"
+                // Clamp too — a model saying "wait an hour" shouldn't park a
+                // run for an hour; 5 min bounds any legitimate settle-wait.
+                let capped = s.isFinite ? min(max(s, 0), 300) : 0
+                outcome = await S1Runner.sleepInterruptibly(capped, killSwitchPath: config.killSwitchPath)
+                    ? "waited \(capped)s" : "interrupted (kill switch)"
             } else {
                 do {
                     outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
