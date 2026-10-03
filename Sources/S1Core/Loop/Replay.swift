@@ -56,11 +56,22 @@ public enum RunReader {
 
     /// Re-execute the recorded actions through the real actuator + gate.
     /// Read-only steps are logged and skipped. Returns the new run dir.
+    /// The kill switch and task cancellation are honored per step — a
+    /// replayed run must be as interruptible as a live one.
     public static func replay(runDir: URL, into logger: RunLogger,
-                              actuator: any Actuator, gate: SafetyGate) async throws -> Int {
+                              actuator: any Actuator, gate: SafetyGate,
+                              killSwitchPath: String? = nil) async throws -> Int {
         let recs = try steps(in: runDir)
         var i = 0
         for rec in recs {
+            if Task.isCancelled || (killSwitchPath.map { FileManager.default.fileExists(atPath: $0) } ?? false) {
+                try await logger.log(StepRecord(index: i, time: Date(),
+                    observation: "replay", decidedBy: "system",
+                    confidence: nil, rationale: Task.isCancelled ? "task cancelled" : "kill switch",
+                    modelReply: nil, action: nil, gate: "-", outcome: "aborted",
+                    verified: nil, escalation: nil))
+                break
+            }
             guard let action = rec.action else { continue }
             switch action {
             case .done, .verify, .captureScreenshot:

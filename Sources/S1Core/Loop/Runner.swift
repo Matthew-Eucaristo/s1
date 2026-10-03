@@ -31,8 +31,31 @@ public enum S1Runner {
         guard procPidPath(pid, &buf, UInt32(buf.count)) > 0 else { return true }
         // Couldn't read the path (foreign process, permission) — liveness
         // was proven, so assume busy rather than racing a real agent.
-        let path = String(cString: buf).lowercased()
+        let bytes = buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        let path = String(decoding: bytes, as: UTF8.self).lowercased()
         return path.hasSuffix("/s1") || path.contains("/s1.app/") || path.contains("/s1-cli")
+    }
+
+    /// Take the run lock, or throw `.busy` if a live s1 process holds it.
+    /// Pair every successful call with `releaseRunLock()` (defer).
+    public static func acquireRunLock() throws {
+        if anotherRunActive() {
+            let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
+            throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
+        }
+        try? FileManager.default.createDirectory(
+            atPath: (lockPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? String(ProcessInfo.processInfo.processIdentifier).write(
+            toFile: lockPath, atomically: true, encoding: .utf8)
+    }
+
+    /// Removes the lock only when WE hold it — a dry-run (which never
+    /// acquires) must not delete a live run's lock file.
+    public static func releaseRunLock() {
+        guard let txt = try? String(contentsOfFile: lockPath, encoding: .utf8),
+              pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines))
+                == ProcessInfo.processInfo.processIdentifier else { return }
+        try? FileManager.default.removeItem(atPath: lockPath)
     }
 
     @discardableResult
@@ -41,17 +64,8 @@ public enum S1Runner {
                            allowIrreversible: Bool, killSwitch: String?,
                            s2: (any Reasoner)? = nil,
                            onStep: (@Sendable (StepRecord) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
-        if !dryRun {
-            if anotherRunActive() {
-                let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
-                throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
-            }
-            try? FileManager.default.createDirectory(
-                atPath: (lockPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try? String(ProcessInfo.processInfo.processIdentifier).write(
-                toFile: lockPath, atomically: true, encoding: .utf8)
-        }
-        defer { try? FileManager.default.removeItem(atPath: lockPath) }
+        if !dryRun { try acquireRunLock() }
+        defer { if !dryRun { releaseRunLock() } }
         var config = LoopConfig()
         config.maxSteps = maxSteps
         config.confidenceThreshold = threshold

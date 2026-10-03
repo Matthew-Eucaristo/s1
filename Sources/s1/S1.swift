@@ -563,13 +563,20 @@ struct ReplayCmd: AsyncParsableCommand {
 
     func run() async throws {
         let src = URL(fileURLWithPath: runDir)
+        let kill = NSTemporaryDirectory() + "s1-stop"
+        if !dryRun {
+            try? FileManager.default.removeItem(atPath: kill)  // don't inherit a stale stop
+            try S1Runner.acquireRunLock()   // live replay types/clicks — same lock as a run
+        }
+        defer { if !dryRun { S1Runner.releaseRunLock() } }
         let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
                                    root: URL(fileURLWithPath: artifacts),
                                    config: ["mode": dryRun ? "dry-run" : "live", "source": runDir])
         let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
         let gate = SafetyGate(allowIrreversible: allowIrreversible)
         let n = try await RunReader.replay(runDir: src, into: logger,
-                                           actuator: actuator, gate: gate)
+                                           actuator: actuator, gate: gate,
+                                           killSwitchPath: dryRun ? nil : kill)
         print("replay run dir: \(logger.runDir.path)")
         print("replayed \(n) steps")
     }
