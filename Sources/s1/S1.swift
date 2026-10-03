@@ -411,17 +411,10 @@ struct ServeCmd: AsyncParsableCommand {
 
         // One listener per machine: a second daemon would double-trigger on
         // the same hotkey and compete for the mic. The app writes the same
-        // pid file, so `s1 serve` next to S1.app is refused too.
+        // pid file, so `s1 serve` next to S1.app is refused too. Atomic
+        // (O_EXCL): two serves launched at the same instant can't both win.
         let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
-        if let txt = try? String(contentsOfFile: pidPath, encoding: .utf8),
-           let other = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
-           S1Runner.pidLooksLikeS1(other) {
-            throw ValidationError("another s1 listener is already running (pid \(other)) — quit it or use its hotkey")
-        }
-        try? FileManager.default.createDirectory(
-            atPath: NSHomeDirectory() + "/.s1", withIntermediateDirectories: true)
-        try? String(ProcessInfo.processInfo.processIdentifier).write(
-            toFile: pidPath, atomically: true, encoding: .utf8)
+        try S1Runner.claimPidFile(pidPath, what: "s1 listener")
         defer { try? FileManager.default.removeItem(atPath: pidPath) }
 
         // `s1 stop` sends SIGTERM and Ctrl-C sends SIGINT — neither runs

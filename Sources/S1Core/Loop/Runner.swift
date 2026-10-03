@@ -38,38 +38,52 @@ public enum S1Runner {
 
     /// Take the run lock, or throw `.busy` if a live s1 process holds it.
     /// Pair every successful call with `releaseRunLock()` (defer).
-    /// The claim is atomic (O_EXCL): check-then-create would let two
-    /// processes both grab the lock in the same instant.
     public static func acquireRunLock() throws {
+        try claimPidFile(lockPath, what: "s1 run")
+    }
+
+    /// Atomically claim a pid file with this process's pid — O_EXCL create
+    /// closes the check-then-write window where two processes could both
+    /// claim it. A live s1 process holding the file throws `.busy`; a
+    /// provably-stale file (dead pid, foreign executable, empty) is removed
+    /// and retried once. Pair with removing the file at exit.
+    public static func claimPidFile(_ path: String, what: String) throws {
         try? FileManager.default.createDirectory(
-            atPath: (lockPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         for _ in 0..<2 {
-            let fd = open(lockPath, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            let fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0o644)
             if fd >= 0 {
                 let pid = String(ProcessInfo.processInfo.processIdentifier)
                 _ = pid.withCString { write(fd, $0, strlen($0)) }
                 close(fd)
                 return
             }
-            // Exists already: a live run holds it, or a crash left a stale
+            // Exists already: a live s1 holds it, or a crash left a stale
             // file. Only ever remove a provably-stale lock — a competitor
-            // who won the O_EXCL race wrote a live pid, which
-            // anotherRunActive sees and reports as busy.
-            if anotherRunActive() {
-                let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
-                throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
+            // who won the O_EXCL race wrote a live pid, which this check
+            // sees and reports as busy.
+            if let live = livePidHolder(of: path) {
+                throw S1Error.busy("another \(what) is already running (pid \(live)) — wait for it or stop it first")
             }
             // An empty/unreadable file might be a winner mid-write between
-            // create and pid-write — give the pid a beat to land before
-            // calling it stale, then check liveness once more.
+            // create and pid-write — give the pid a beat to land, then
+            // check liveness once more before calling it stale.
             usleep(50_000)
-            if anotherRunActive() {
-                let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
-                throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
+            if let live = livePidHolder(of: path) {
+                throw S1Error.busy("another \(what) is already running (pid \(live)) — wait for it or stop it first")
             }
-            try? FileManager.default.removeItem(atPath: lockPath)
+            try? FileManager.default.removeItem(atPath: path)
         }
-        throw S1Error.busy("run lock contention — try again")
+        throw S1Error.busy("\(what) lock contention — try again")
+    }
+
+    /// The pid a live s1 process wrote to `path`, or nil for missing/stale.
+    private static func livePidHolder(of path: String) -> pid_t? {
+        guard let txt = try? String(contentsOfFile: path, encoding: .utf8),
+              let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid != ProcessInfo.processInfo.processIdentifier,
+              pidLooksLikeS1(pid) else { return nil }
+        return pid
     }
 
     /// Removes the lock only when WE hold it — a dry-run (which never

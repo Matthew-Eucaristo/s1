@@ -174,15 +174,22 @@ final class AppModel {
                 }
             }
         }
+        // Claim the listener slot BEFORE arming the hotkey: a `s1 serve`
+        // CLI daemon holding serve.pid must not be stomped — `s1 stop`
+        // would then kill the wrong process and two hotkey listeners would
+        // double-trigger on every press. When it's taken, the window still
+        // does one-shot runs; only the companion stays off.
+        let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
+        do {
+            try S1Runner.claimPidFile(pidPath, what: "s1 listener")
+        } catch {
+            s.disarm()
+            serve = nil
+            serveStatus = "a listener is already running — companion off"
+            return
+        }
         s.armHotkey()
         serve = s
-        // Advertise as the live listener — `s1 serve` refuses to double up
-        // while this pid file names a running process.
-        let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
-        try? FileManager.default.createDirectory(
-            atPath: NSHomeDirectory() + "/.s1", withIntermediateDirectories: true)
-        try? String(ProcessInfo.processInfo.processIdentifier).write(
-            toFile: pidPath, atomically: true, encoding: .utf8)
     }
 
     /// Rebuild the serve config when brain/locale/s2/speak settings change —
