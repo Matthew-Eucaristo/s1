@@ -115,6 +115,35 @@ struct ConfigCmd: AsyncParsableCommand {
         let assembled = Vocabulary.assemble(custom: vocab)
         print("  resolved: \(assembled.prefix(10).joined(separator: ", "))\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
         print("edit the JSON file to swap brains permanently — no rebuild needed")
+        // Reachability: a misconfigured brain is the #1 user-facing failure —
+        // say it plainly instead of failing mid-run.
+        print("endpoints:")
+        for (label, ep) in [("vlm", vlm), ("s2", s2)] {
+            print("  \(label) \(await endpointStatus(ep))")
+        }
+    }
+
+    /// Ping an OpenAI-compatible endpoint: /models (OpenAI) then /api/tags
+    /// (Ollama) — 3s budget each, answer is human-readable either way.
+    private func endpointStatus(_ ep: Endpoint) async -> String {
+        for path in ["/models", "/api/tags"] {
+            guard let url = URL(string: ep.baseURL + path) else { break }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 3
+            if let key = ep.apiKey {
+                req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  let http = resp as? HTTPURLResponse else { continue }
+            if http.statusCode == 200 {
+                let body = String(decoding: data, as: UTF8.self)
+                let hasModel = (try? JSONSerialization.jsonObject(with: data)) != nil
+                    && body.contains(ep.model)
+                return "\(ep.baseURL) reachable ✓\(hasModel ? " · \(ep.model) present" : " · WARNING: '\(ep.model)' not listed")"
+            }
+            if http.statusCode != 404 { return "\(ep.baseURL) → HTTP \(http.statusCode)" }
+        }
+        return "\(ep.baseURL) unreachable — start the server (e.g. `ollama serve`)"
     }
 }
 
