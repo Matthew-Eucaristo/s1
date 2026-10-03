@@ -110,5 +110,18 @@ this project is pre-1.0 — breaking changes land in minor versions.
   for reasoning models.
 - S1.app `run()` refuses politely while a CLI agent owns the screen
   (was: raw busy error surfaced in the status bar).
+- `s1 stop` now aborts a bare `s1 run` too — the run watches the shared
+  `s1-stop` file by default and clears a stale switch at start.
+- `.wait` actions honour the kill switch mid-wait (checked every 0.5s —
+  a 60s wait aborts in half a second, not after the full duration);
+  same in replay.
+- AX attribute re-resolve batches like the tree walk (shared `nodeAttrs`
+  — was ~6 IPC calls per node on every `axPress`).
+- S1.app config save preserves `vlm/s2` `key`+`numCtx` (was: every save
+  wiped stored credentials).
+- Quitting S1.app no longer deletes a CLI daemon's `serve.pid` — the
+  release is pid-checked (`releasePidFile`).
+- `AXValueGetValue` result honoured — a wrong-typed AXValue vendored by
+  a foreign app yields nil instead of a zero-size frame.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
