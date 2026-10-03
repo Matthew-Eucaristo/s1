@@ -6,3 +6,5 @@
 # assets under assets/ are exempt.
 /out.png
 /capture*.png
+
+.env
