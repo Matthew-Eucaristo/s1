@@ -164,3 +164,19 @@ Deps SwiftPM (kept minimal): `swift-argument-parser` (CLI), `FluidAudio` (opsion
 1. Mulai **P0+P1 sekarang** di sesi ini? (Kode + uji nyata di VM ini.)
 2. Default driver: `cua-driver` dijadikan adapter opsional sejak P2, atau tunda sampai core stabil?
 3. App bundle menubar (P4) — cukup `package-app.sh`, atau mau XcodeGen dari awal?
+
+---
+
+## 7. Cakupan platform (diputuskan 2026-10-03)
+
+**Target: macOS penuh, Apple-stack dulu.** Semua fitur memakai API resmi Apple
+(ScreenCaptureKit, AXUIElement, CGEvent, SpeechAnalyzer, App Intents,
+SMAppService) — tanpa shim pihak ketiga di jalur utama.
+
+**iPhone/iOS: bukan target kontrol-penuh** — Apple tidak memberi app pihak
+ketiga Accessibility API lintas-app, injeksi event (CGEvent), atau AX tree
+app lain di iOS; model "operasikan semua hal visual" memang tidak mungkin
+secara platform (kontrol penuh di iOS hanya milik Siri/Shortcuts). Yang
+bisa dibawa ke iOS suatu hari: SpeechAnalyzer STT, App Intents, dan
+protokol S1/S2 — misalnya app iPhone *remote* yang meneruskan goal ke
+daemon s1 di Mac. Dicatat sebagai ide roadmap, bukan scope sekarang.
