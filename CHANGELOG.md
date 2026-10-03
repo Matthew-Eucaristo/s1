@@ -36,8 +36,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 ### Safety
 - Deny-list always routes to a human (credentials, purchases, destructive
-  shell incl. fork bomb and rm/dd/diskutil variants); irreversible actions
-  queue for confirmation; kill switch checked every step; cascade-failure
-  guard stops AX chains after a failed step.
+  shell incl. fork bomb and rm/dd/diskutil/power-session variants);
+  irreversible actions queue for confirmation; kill switch checked every
+  step; cascade-failure guard stops AX chains after a failed step.
+- **Secure-field guard** — typing while an `AXSecureTextField` has focus, or
+  `axSetValue` targeting one, routes to `needsHuman`. Models see `[secure]`
+  markers and an explicit never-type rule in the decision format.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD

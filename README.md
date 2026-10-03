@@ -189,7 +189,8 @@ Sources/S1Core/
 ## Safety
 
 - Action classes: `read` always allowed · `reversible` logged · `irreversible` needs human.
-- Hard deny-list: credentials/OTP/card data, purchases, destructive shell — never executed, escalated to a human.
+- Hard deny-list: credentials/OTP/card data, purchases, destructive shell, power/session commands — never executed, escalated to a human.
+- Secure-field guard: typing into a focused `AXSecureTextField` (or `axSetValue` on one) routes to `needsHuman` — the agent never fills a password box. Models see `[secure]` markers and a never-type rule.
 - Kill-switch file checked every step (default path set per run).
 - Stuck-loop guard: the same action three times in a row aborts the run (`stuckLoop`).
 - Every run writes `artifacts/<ts>-<goal>/` with `steps.jsonl` — decided-by (`s1:`/`s2:`), confidence, gate verdict, verification result, escalation reason, and `modelReply` (the raw model output).
