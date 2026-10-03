@@ -11,6 +11,8 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 
 **Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)**, **always-on companion (global hotkey → continuous listening)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
 
+<p align="center"><img src="assets/app.png" width="720" alt="S1.app — a real run: 'buka Notes' opened Notes and logged both steps"></p>
+
 - Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
 - MIT licensed. OSS components used are credited in `ATTRIBUTIONS.md`.
