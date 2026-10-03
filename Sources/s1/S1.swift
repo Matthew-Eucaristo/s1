@@ -341,7 +341,7 @@ struct ServeCmd: AsyncParsableCommand {
         _ = try validatedSTTPolicy(policy)
         let stt = SpeechToText(locale: Locale(identifier: locale),
                                vocabulary: sttVocabulary(vocabulary))
-        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: .s2Default()) : nil
+        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
 
         let makePol: @Sendable () -> any Policy = {
             guard policy == "vlm" else { return AXPolicy() }
