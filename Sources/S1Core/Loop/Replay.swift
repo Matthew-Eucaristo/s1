@@ -108,8 +108,12 @@ public enum RunReader {
                             // — burning a real 60s recorded wait defeats that.
                             outcome = "[dry-run] wait \(s)s"
                         } else {
-                            outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: killSwitchPath)
-                                ? "waited \(s)s" : "interrupted (kill switch)"
+                            // Same guard rail as the live loop: replaying a
+                            // run that recorded wait(3600) must not sit for
+                            // an hour with no cap.
+                            let capped = s.isFinite ? min(max(s, 0), 300) : 0
+                            outcome = await S1Runner.sleepInterruptibly(capped, killSwitchPath: killSwitchPath)
+                                ? "waited \(capped)s" : "interrupted (kill switch)"
                         }
                     } else {
                         do {
