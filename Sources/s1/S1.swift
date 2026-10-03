@@ -680,7 +680,8 @@ struct ReplayCmd: AsyncParsableCommand {
         defer { if !dryRun { S1Runner.releaseRunLock() } }
         let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
                                    root: URL(fileURLWithPath: artifacts),
-                                   config: ["mode": dryRun ? "dry-run" : "live", "source": runDir])
+                                   config: ["mode": dryRun ? "dry-run" : "live", "source": runDir],
+                                   onStep: { rec in print(stepLine(rec)) })
         let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
         let gate = SafetyGate(allowIrreversible: allowIrreversible)
         let n = try await RunReader.replay(runDir: src, into: logger,

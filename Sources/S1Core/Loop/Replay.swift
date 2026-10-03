@@ -103,8 +103,14 @@ public enum RunReader {
                 var outcome = "blocked"
                 if case .allow = verdict {
                     if case .wait(let s) = action {
-                        outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: killSwitchPath)
-                            ? "waited \(s)s" : "interrupted (kill switch)"
+                        if actuator is DryRunActuator {
+                            // A dry-run previews without touching the machine
+                            // — burning a real 60s recorded wait defeats that.
+                            outcome = "[dry-run] wait \(s)s"
+                        } else {
+                            outcome = await S1Runner.sleepInterruptibly(s, killSwitchPath: killSwitchPath)
+                                ? "waited \(s)s" : "interrupted (kill switch)"
+                        }
                     } else {
                         do {
                             outcome = try await actuator.perform(action, frontmostPID: liveObs?.frontmostPID)

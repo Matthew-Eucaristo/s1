@@ -214,9 +214,14 @@ public struct AgentLoop {
                 // the kill switch within ~0.5s, not when it finally ends.
                 // Clamp too — a model saying "wait an hour" shouldn't park a
                 // run for an hour; 5 min bounds any legitimate settle-wait.
-                let capped = s.isFinite ? min(max(s, 0), 300) : 0
-                outcome = await S1Runner.sleepInterruptibly(capped, killSwitchPath: config.killSwitchPath)
-                    ? "waited \(capped)s" : "interrupted (kill switch)"
+                // Dry-run executes nothing, so it doesn't burn the wait either.
+                if actuator is DryRunActuator {
+                    outcome = "[dry-run] wait \(s)s"
+                } else {
+                    let capped = s.isFinite ? min(max(s, 0), 300) : 0
+                    outcome = await S1Runner.sleepInterruptibly(capped, killSwitchPath: config.killSwitchPath)
+                        ? "waited \(capped)s" : "interrupted (kill switch)"
+                }
             } else {
                 do {
                     outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
