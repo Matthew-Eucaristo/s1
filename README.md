@@ -87,7 +87,19 @@ after `--idle-turns` silent turns or repeated STT errors — and after
 repeated run failures (a dead endpoint can't spin hot). Idle uses no mic
 and no model — flat battery. One listener per machine: `~/.s1/serve.pid`
 is the lock, so `s1 serve` alongside S1.app is refused instead of
-double-triggering on the same hotkey.
+double-triggering on the same hotkey. Typing fast capital letters does
+NOT fire ⇧⇧ — any key between the taps resets the gesture.
+
+```bash
+s1 status      # daemon alive? state? is a run in progress?
+s1 stop        # abort any in-flight run + quit the listener
+```
+
+`~/.s1/run.pid` marks screen ownership — a second agent run refuses while
+one is live (two agents typing at once is the failure this prevents).
+Stale pid files self-heal: liveness + executable identity are checked,
+so a recycled pid never blocks you — and `s1 stop` can't kill the wrong
+process. `~/.s1/serve-state.json` is the daemon's last state (for scripts).
 
 The S1 app is the same daemon with a menu-bar face (`MenuBarExtra`): the
 waveform icon shows idle/listening/running, toggles listening, and offers
@@ -153,6 +165,7 @@ conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 swift run s1 run --task open-app --policy ax        # goals live in tasks/*.txt
 swift run s1 metrics artifacts/<run-dir>            # decisions/escalations/errors/verify stats
 swift run s1 replay artifacts/<run-dir> --dry-run   # re-execute a recorded run
+swift run s1 tasks                                # list what's in the library
 ```
 
 ## Permissions (macOS TCC)
