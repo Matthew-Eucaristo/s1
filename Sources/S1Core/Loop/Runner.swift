@@ -38,15 +38,38 @@ public enum S1Runner {
 
     /// Take the run lock, or throw `.busy` if a live s1 process holds it.
     /// Pair every successful call with `releaseRunLock()` (defer).
+    /// The claim is atomic (O_EXCL): check-then-create would let two
+    /// processes both grab the lock in the same instant.
     public static func acquireRunLock() throws {
-        if anotherRunActive() {
-            let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
-            throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
-        }
         try? FileManager.default.createDirectory(
             atPath: (lockPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try? String(ProcessInfo.processInfo.processIdentifier).write(
-            toFile: lockPath, atomically: true, encoding: .utf8)
+        for _ in 0..<2 {
+            let fd = open(lockPath, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+            if fd >= 0 {
+                let pid = String(ProcessInfo.processInfo.processIdentifier)
+                _ = pid.withCString { write(fd, $0, strlen($0)) }
+                close(fd)
+                return
+            }
+            // Exists already: a live run holds it, or a crash left a stale
+            // file. Only ever remove a provably-stale lock — a competitor
+            // who won the O_EXCL race wrote a live pid, which
+            // anotherRunActive sees and reports as busy.
+            if anotherRunActive() {
+                let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
+                throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
+            }
+            // An empty/unreadable file might be a winner mid-write between
+            // create and pid-write — give the pid a beat to land before
+            // calling it stale, then check liveness once more.
+            usleep(50_000)
+            if anotherRunActive() {
+                let txt = (try? String(contentsOfFile: lockPath, encoding: .utf8)) ?? "?"
+                throw S1Error.busy("another s1 run is in progress (pid \(txt.trimmingCharacters(in: .whitespacesAndNewlines))) — wait for it or stop it first")
+            }
+            try? FileManager.default.removeItem(atPath: lockPath)
+        }
+        throw S1Error.busy("run lock contention — try again")
     }
 
     /// Removes the lock only when WE hold it — a dry-run (which never
