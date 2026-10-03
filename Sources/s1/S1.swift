@@ -592,27 +592,39 @@ struct StatusCmd: AsyncParsableCommand {
         abstract: "Is a listener daemon alive, what state is it in, and is a run active?")
 
     func run() async throws {
-        // Listener daemon — pid file + liveness.
+        // Listener daemon — pid file + liveness. The daemon's published
+        // state tells the richer story (armed-idle vs listening vs working).
+        var daemonState: String?
+        var daemonAlive = false
+        if let data = FileManager.default.contents(atPath: Serve.statePath),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let pid = (obj["pid"] as? Int).map({ pid_t($0) }),
+           S1Runner.pidLooksLikeS1(pid) {
+            daemonAlive = true
+            daemonState = obj["state"] as? String
+            let ev = (obj["event"] as? String) ?? "?"
+            let detail = (obj["detail"] as? String) ?? ""
+            let st = daemonState ?? "?"
+            print("state        \(st) · \(ev)\(detail.isEmpty ? "" : " · \(detail)")")
+            if let at = obj["updated"] as? String { print("updated      \(at)") }
+        }
         let servePid = NSHomeDirectory() + "/.s1/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
            S1Runner.pidLooksLikeS1(pid) {
-            print("listener     running (pid \(pid))")
+            // `s1 stop` lands the kill file but an active listener only sees
+            // it at the next turn — "stopping" until then. An idle companion
+            // ignores the file entirely (wake() clears it), so don't claim
+            // it's about to stop.
+            let stopPending = (daemonState == "listening" || daemonState == "running")
+                && (FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-serve-stop")
+                    || FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-app-stop"))
+            let mode = stopPending ? "stopping"
+                : daemonAlive && daemonState != nil ? "\(daemonState!)"
+                : "running"
+            print("listener     \(mode) (pid \(pid))")
         } else {
             print("listener     not running")
-        }
-        // Last published daemon state.
-        if let data = FileManager.default.contents(atPath: Serve.statePath),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            // Identity, not just liveness — a recycled pid isn't the daemon.
-            let alive = (obj["pid"] as? Int).map { S1Runner.pidLooksLikeS1(pid_t($0)) } ?? false
-            if alive {
-                let st = (obj["state"] as? String) ?? "?"
-                let ev = (obj["event"] as? String) ?? "?"
-                let detail = (obj["detail"] as? String) ?? ""
-                print("state        \(st) · \(ev)\(detail.isEmpty ? "" : " · \(detail)")")
-                if let at = obj["updated"] as? String { print("updated      \(at)") }
-            }
         }
         // Active agent run (the screen-ownership lock).
         let runState = S1Runner.anotherRunActive() ? "in progress (other process)" : "none"
