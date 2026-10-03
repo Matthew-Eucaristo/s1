@@ -30,6 +30,23 @@ Then verify with:
 ./.build/debug/s1 demo                 # real 12-step run in TextEdit
 ```
 
+### TCC gotcha: rebuilds invalidate grants
+
+TCC binds a grant to the binary's code identity. Local builds are ad-hoc
+signed, so **every rebuild produces a new cdhash and silently breaks your
+existing grants** — the System Settings toggle still shows ON while
+`AXIsProcessTrustedWithOptions` returns false. When a freshly rebuilt app
+reports ⚠ despite a green toggle:
+
+```sh
+tccutil reset Accessibility com.matthew.s1.app   # drop the stale entry
+# relaunch, then re-grant in System Settings
+```
+
+`s1 run` and the app both **fail fast** on missing Accessibility rather than
+typing into the void — an old version logging "typed N chars" that never
+landed was a grant that silently stopped applying after a rebuild.
+
 ## Testing
 
 `swift test` is the gate — it must stay runnable with **zero macOS

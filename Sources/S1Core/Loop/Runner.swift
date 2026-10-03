@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 
 /// libproc isn't in Swift's Darwin module — declare it directly. Links from
 /// libsystem_kernel like the standard tooling (ps, lsof) uses.
@@ -162,7 +163,18 @@ public enum S1Runner {
                            allowIrreversible: Bool, killSwitch: String?,
                            s2: (any Reasoner)? = nil,
                            onStep: (@Sendable (StepRecord) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
-        if !dryRun { try acquireRunLock() }
+        if !dryRun {
+            // Without AX trust the AX tree reads empty and CGEvent posts
+            // silently drop — a run would "type" into the void while its
+            // log claims success. Fail fast instead, pointing at the fix.
+            let axPrompt = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
+            guard AXIsProcessTrustedWithOptions(axPrompt) else {
+                throw S1Error.aborted(
+                    "Accessibility not granted — enable this app in " +
+                    "System Settings → Privacy & Security → Accessibility, then retry")
+            }
+            try acquireRunLock()
+        }
         defer { if !dryRun { releaseRunLock() } }
         var config = LoopConfig()
         config.maxSteps = maxSteps
