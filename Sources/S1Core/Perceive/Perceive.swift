@@ -138,19 +138,44 @@ public enum AXReader {
         return walk(app, depth: 0, counter: &counter)
     }
 
+    /// All scalar attributes fetched in ONE IPC round-trip per node via
+    /// AXUIElementCopyMultipleAttributeValues — ~7 separate AX calls become 2
+    /// (attrs + children), cutting observe latency roughly in half on wide trees.
+    private static func scalarAttrs() -> CFArray {
+        [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+         kAXHelpAttribute, kAXValueAttribute, kAXPositionAttribute, kAXSizeAttribute] as CFArray
+    }
+
     static func walk(_ el: AXUIElement, depth: Int, counter: inout Int) -> AXNode? {
         guard depth < maxDepth, counter < maxNodes else { return nil }
         let ref = "e\(counter)"; counter += 1
 
-        var node = AXNode(
-            ref: ref,
-            role: attr(el, kAXRoleAttribute) ?? "unknown",
-            title: attr(el, kAXTitleAttribute),
-            desc: attr(el, kAXDescriptionAttribute),
-            help: attr(el, kAXHelpAttribute),
-            value: stringValue(el),
-            frame: frame(of: el),
-            children: [])
+        var role = "unknown", title: String?, desc: String?, help: String?,
+            value: String?, frame: CGRectCodable? = nil
+        var vals: CFArray?
+        if AXUIElementCopyMultipleAttributeValues(el, scalarAttrs(),
+                                                  AXCopyMultipleAttributeOptions(rawValue: 0),
+                                                  &vals) == .success,
+           let arr = vals as? [Any], arr.count == 7 {
+            role = arr[0] as? String ?? role
+            title = arr[1] as? String
+            desc = arr[2] as? String
+            help = arr[3] as? String
+            value = stringifyValue(arr[4])
+            frame = extractFrame(pos: arr[5], size: arr[6]).map(CGRectCodable.init)
+        } else {
+            // Older apps can fail the multi-copy — per-attr fallback keeps
+            // them observable rather than invisible.
+            role = attr(el, kAXRoleAttribute) ?? role
+            title = attr(el, kAXTitleAttribute)
+            desc = attr(el, kAXDescriptionAttribute)
+            help = attr(el, kAXHelpAttribute)
+            value = stringValue(el)
+            frame = Self.frame(of: el)
+        }
+
+        var node = AXNode(ref: ref, role: role, title: title, desc: desc,
+                          help: help, value: value, frame: frame, children: [])
 
         var kids: CFTypeRef?
         if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
@@ -158,6 +183,26 @@ public enum AXReader {
             node.children = arr.compactMap { walk($0, depth: depth + 1, counter: &counter) }
         }
         return node
+    }
+
+    /// kAXValueAttribute can be a String, NSNumber, AXValue, or garbage —
+    /// render the common cases, nil the rest (never force-cast).
+    static func stringifyValue(_ v: Any) -> String? {
+        if let s = v as? String { return String(s.prefix(200)) }
+        if let n = v as? NSNumber { return n.stringValue }
+        return nil
+    }
+
+    /// Position+size arrive as AXValue wrappers (or missing markers on
+    /// elements that vend neither) — decode only the real thing.
+    static func extractFrame(pos: Any, size: Any) -> CGRect? {
+        guard let p = pos as CFTypeRef?, CFGetTypeID(p) == AXValueGetTypeID(),
+              let s = size as CFTypeRef?, CFGetTypeID(s) == AXValueGetTypeID()
+        else { return nil }
+        var point = CGPoint.zero, sz = CGSize.zero
+        AXValueGetValue((p as! AXValue), .cgPoint, &point)
+        AXValueGetValue((s as! AXValue), .cgSize, &sz)
+        return CGRect(origin: point, size: sz)
     }
 
     static func attr(_ el: AXUIElement, _ name: String) -> String? {
