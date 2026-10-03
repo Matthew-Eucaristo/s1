@@ -349,6 +349,12 @@ final class AppModel {
         }
         let goalText = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goalText.isEmpty else { status = "nothing to run"; return }
+        // A CLI `s1 run`/`s1 serve` owns the screen — same agent-one-at-a-
+        // time rule as the companion guards above.
+        guard !S1Runner.anotherRunActive() else {
+            status = "another s1 run is in progress (CLI) — wait or run `s1 stop`"
+            return
+        }
         try? FileManager.default.removeItem(atPath: killPath)
         running = true
         steps = []
