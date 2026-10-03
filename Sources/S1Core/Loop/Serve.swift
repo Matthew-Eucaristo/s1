@@ -264,7 +264,12 @@ public final class Serve: @unchecked Sendable {
             ok = false
             emit(.error, error.localizedDescription)
         }
-        if state == .running { setState(.listening) }
+        if state == .running {
+            setState(.listening)
+            // Publish the transition — otherwise serve-state.json keeps
+            // saying "running" until the next lifecycle event lands.
+            writeState(.listening, "")
+        }
         return ok
     }
 
