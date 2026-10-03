@@ -130,6 +130,9 @@ public struct AgentLoop {
         }
 
         // Screenshot on demand: the reason comes from the decision payload.
+        // The re-observe lands the image via the sink before the actuator's
+        // no-op outcome is recorded, so the record reads "captured", not
+        // "we did something unspecified".
         if case .captureScreenshot = action {
             obs = try await perceiver.observe(wantScreenshot: true)
         }
@@ -206,6 +209,7 @@ public struct AgentLoop {
         for node in tree.flattened {
             if let v = node.value?.lowercased(), v.contains(needle) { return true }
             if let t = node.title?.lowercased(), t.contains(needle) { return true }
+            if let d = node.desc?.lowercased(), d.contains(needle) { return true }
         }
         return false
     }

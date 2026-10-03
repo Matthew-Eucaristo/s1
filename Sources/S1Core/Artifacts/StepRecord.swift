@@ -58,7 +58,8 @@ public actor RunLogger {
         var meta = config
         meta["goal"] = goal
         meta["started"] = ISO8601DateFormatter().string(from: Date())
-        try enc.encode(meta).write(to: runDir.appendingPathComponent("meta.json"))
+        try enc.encode(meta).write(
+            to: runDir.appendingPathComponent("meta.json"), options: .atomic)
     }
 
     public func log(_ record: StepRecord) throws {

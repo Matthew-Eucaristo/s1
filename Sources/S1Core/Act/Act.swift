@@ -105,7 +105,9 @@ public struct CGEventActuator: Actuator {
             try await Task.sleep(for: .seconds(s))
             return "waited \(s)s"
 
-        case .captureScreenshot, .verify, .done:
+        case .captureScreenshot(let r):
+            return "captured screenshot (\(r))"
+        case .verify, .done:
             return "no-op (handled by loop)"
 
         case .shell(let cmd):

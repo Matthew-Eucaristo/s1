@@ -22,10 +22,19 @@ struct S1App: App {
         MenuBarExtra {
             MenuBarView(model: model)
         } label: {
-            if let glyph = NSImage(named: "s1-menubar") {
-                Image(nsImage: { glyph.isTemplate = true; return glyph }())
-            } else {
+            // State at a glance: the s1 glyph while idle, animated waveform
+            // while listening, a badge while a run is in flight.
+            switch model.serveState {
+            case .idle:
+                if let glyph = NSImage(named: "s1-menubar") {
+                    Image(nsImage: { glyph.isTemplate = true; return glyph }())
+                } else {
+                    Image(systemName: "waveform")
+                }
+            case .listening:
                 Image(systemName: "waveform")
+            case .running:
+                Image(systemName: "brain")
             }
         }
         .menuBarExtraStyle(.window)
