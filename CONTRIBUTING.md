@@ -54,6 +54,10 @@ permissions** (unit tests use `NullPerceiver` + `DryRunActuator`, never the
 real OS). If your test needs a real screen, it's an integration test — gate it
 behind an env var so CI stays clean.
 
+`./scripts/smoke.sh` exercises the whole CLI surface in one go — build,
+version, preflight, tasks, config, status, then dry-run demo + a scripted
+run (touches nothing). Run it after a fresh clone to sanity-check a machine.
+
 Real-world checks that can't run in CI (they need TCC grants):
 
 ```sh
