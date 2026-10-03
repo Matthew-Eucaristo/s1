@@ -146,7 +146,7 @@ struct ContentView: View {
     private var examples: [String] {
         model.locale.hasPrefix("id")
             ? ["buka TextEdit lalu ketik halo", "buka Notes", "tangkap layar"]
-            : ["open TextEdit then type hello", "open Notes", "take a screenshot"]
+            : ["open TextEdit then type hello", "open Notes", "screenshot"]
     }
 
     private var controlRow: some View {
