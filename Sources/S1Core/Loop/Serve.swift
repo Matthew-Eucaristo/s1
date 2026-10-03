@@ -266,9 +266,10 @@ public final class Serve: @unchecked Sendable {
         }
         if state == .running {
             setState(.listening)
-            // Publish the transition — otherwise serve-state.json keeps
-            // saying "running" until the next lifecycle event lands.
-            writeState(.listening, "")
+            // Publish the transition — the app's badge tracks events, so a
+            // run that finishes must announce "listening again" or the badge
+            // keeps showing "running" until the next utterance lands.
+            emit(.listening, "")
         }
         return ok
     }
