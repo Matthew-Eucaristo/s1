@@ -110,12 +110,14 @@ enum LLMDecisionCodec {
             let type: String; let x: Double?; let y: Double?; let ref: String?
             let text: String?; let value: String?; let app: String?
             let dx: Double?; let dy: Double?; let ms: Double?; let expect: String?
+            /// Models that ignore the "ms" instruction and write "seconds".
+            let seconds: Double?
             /// Small models sometimes nest these inside the action — capture both.
             let confidence: Double?; let rationale: String?
             /// Models send either "cmd+s" or ["cmd","s"] — take both.
             let keys: [String]
             enum CodingKeys: String, CodingKey {
-                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, confidence, rationale
+                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, seconds, confidence, rationale
             }
             init(from d: Decoder) throws {
                 let c = try d.container(keyedBy: CodingKeys.self)
@@ -130,6 +132,7 @@ enum LLMDecisionCodec {
                 dy = try c.decodeIfPresent(Double.self, forKey: .dy)
                 ms = try c.decodeIfPresent(Double.self, forKey: .ms)
                 expect = try c.decodeIfPresent(String.self, forKey: .expect)
+                seconds = try c.decodeIfPresent(Double.self, forKey: .seconds)
                 if let arr = try? c.decode([String].self, forKey: .keys) {
                     keys = arr
                 } else if let s = try? c.decode(String.self, forKey: .keys) {
@@ -184,7 +187,7 @@ enum LLMDecisionCodec {
         case "openApp":   a = (field("app") ?? field("text")).map { .openApp(name: $0) }
         case "click":     a = .click(x: num("x") ?? 0, y: num("y") ?? 0)
         case "keyCombo":  a = field("keys").map { .keyCombo(keys: $0.split(separator: "+").map { $0.lowercased() }) }
-        case "wait":      a = .wait(seconds: (num("ms") ?? 500) / 1000)
+        case "wait":      a = .wait(seconds: num("ms").map { $0 / 1000 } ?? num("seconds") ?? 0.5)
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
         case "moveMouse": a = .moveMouse(x: num("x") ?? 0, y: num("y") ?? 0)
         case "verify":    a = field("expect").map { .verify(expectation: $0) }
@@ -212,7 +215,7 @@ enum LLMDecisionCodec {
         case "keyCombo":  return .keyCombo(keys: a.keys.map { $0.lowercased() })
         case "scroll":    return .scroll(dx: a.dx ?? 0, dy: a.dy ?? 0)
         case "openApp":   return .openApp(name: a.app ?? a.text ?? "")
-        case "wait":      return .wait(seconds: (a.ms ?? 500) / 1000)
+        case "wait":      return .wait(seconds: a.ms.map { $0 / 1000 } ?? a.seconds ?? 0.5)
         case "captureScreenshot": return .captureScreenshot(reason: a.expect ?? "requested by model")
         case "verify":    return .verify(expectation: a.expect ?? "")
         case "done":      return .done(summary: a.expect ?? a.text ?? "done")
