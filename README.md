@@ -20,10 +20,25 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 ## Install
 
 ```bash
-# Homebrew (once the tap is published):
-brew tap Matthew-Eucaristo/tap && brew install s1
+# Homebrew — the recommended way (both from our tap):
+brew tap Matthew-Eucaristo/tap
+brew install s1             # the s1 CLI
+brew install --cask s1      # the S1 menu-bar app
 
-# From source — release build, installs to ~/.local/bin:
+s1 preflight                # shows which macOS permissions are missing
+```
+
+Remove it cleanly any time:
+
+```bash
+brew uninstall s1
+brew uninstall --cask s1            # quits the app + removes /Applications/S1.app
+brew uninstall --cask s1 --zap      # + wipes ~/.s1 state and Library traces
+```
+
+<details><summary>From source instead</summary>
+
+```bash
 git clone https://github.com/Matthew-Eucaristo/s1.git && cd s1
 ./scripts/install-local.sh            # or: swift build -c release && cp .build/release/s1 /usr/local/bin/
 
@@ -38,6 +53,8 @@ open dist/S1.app                      # or copy it to /Applications
 > Without `dev-cert.sh`, make-app.sh falls back to ad-hoc signing — which
 > resets your TCC grants (Accessibility, Screen Recording, Input Monitoring)
 > on every rebuild. dev-cert.sh is a one-time setup that makes grants stick.
+
+</details>
 
 ## Try it (3 steps)
 

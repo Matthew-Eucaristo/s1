@@ -86,7 +86,8 @@ public enum RunReader {
                 // on a nil one. The same observation feeds the secure-field
                 // guards, replaying the loop's password-box protection.
                 let needsObs: Bool = switch action {
-                case .axPress, .axSetValue, .typeText, .keyCombo: true
+                case .axPress, .axSetValue, .axAction, .axSetAttribute,
+                     .typeText, .keyCombo: true
                 default: false
                 }
                 let liveObs = needsObs

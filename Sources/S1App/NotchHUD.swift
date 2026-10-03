@@ -118,10 +118,15 @@ struct NotchHUDView: View {
             .buttonStyle(.glassProminent)
             .controlSize(.mini)
             .help(phase == .listening ? "Sleep the listener" : "Abort the run")
+            .accessibilityLabel(phase == .listening ? "Sleep" : "Stop")
         }
         .padding(.leading, 14).padding(.trailing, 8)
         .padding(.vertical, 7)
         .fixedSize()
         .glassEffect(.regular, in: .capsule)
+        // The pill speaks its own state — VoiceOver users get the same
+        // "s1 is listening / working on step N" the sighted UI shows.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("s1 \(phase == .listening ? "listening" : "working")\(detail.isEmpty ? "" : ", \(detail)")")
     }
 }

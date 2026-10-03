@@ -33,6 +33,27 @@ this project is pre-1.0 — breaking changes land in minor versions.
   race.
 
 ### Added
+- **Full pointer + AX verb coverage** — `rightClick`, `doubleClick` (real
+  clickState=2 second press), `drag` (interpolated path so drop targets
+  see real movement), `axAction` (named AX verbs: AXShowMenu for popups/
+  dropdowns, AXIncrement/AXDecrement for sliders and steppers, AXConfirm/
+  AXCancel, AXPick, AXRaise/AXOpen), and `axSetAttribute` (AXSelected/
+  AXFocused/AXExpanded/AXMain/AXMinimized). Both are whitelisted at the
+  actuator and deny-list-scanned; observation marks `[adjustable]` and
+  `[pressable]` roles so models pick the right verb. Live-verified:
+  double-click selects, right-click opens the context menu.
+- **Homebrew tap support** — `Casks/s1.rb` (menu-bar app; `uninstall`
+  quits it, `--zap` wipes `~/.s1` + Library traces), binary
+  `Formula/s1.rb` (no Xcode needed at install), and
+  `scripts/publish-tap.sh` — one command: build artifacts → GitHub
+  Release → regenerate tap files → push.
+- **App VoiceOver pass** — mic button labeled + ⌘L shortcut, step rows
+  speak a single composed line (action, outcome, brain, escalation,
+  verify), permission rows announce granted/missing, HUD pill and
+  menu-bar glyphs announce state, decorative dots hidden from the
+  accessibility tree.
+- **Key aliases** — `esc`, `backspace`, `del`, `spacebar`, `pgup`/`pgdn`,
+  `leftarrow`/`rightarrow`/`uparrow`/`downarrow`, `fwddelete` all resolve.
 - **Notch HUD** — floating status pill under the camera notch while s1
   listens or works (boring.notch-style `NSPanel`, positioned via
   `NSScreen.auxiliaryTopLeftArea/RightArea`); flashes the final status,

@@ -24,6 +24,7 @@ enum LLMDecisionCodec {
             if pressableRoles.contains(n.role) { s += " [pressable]" }
             if editableRoles.contains(n.role) { s += " [editable]" }
             if scrollableRoles.contains(n.role) { s += " [scrollable]" }
+            if adjustableRoles.contains(n.role) { s += " [adjustable]" }
             if secureRoles.contains(n.role) { s += " [secure]" }
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
             if let d = n.desc, !d.isEmpty, d != n.title { s += " desc=\"\(d.prefix(40))\"" }
@@ -39,7 +40,14 @@ enum LLMDecisionCodec {
     static let pressableRoles: Set<String> = [
         "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXLink",
         "AXTab", "AXMenuButton", "AXPopUpButton", "AXRow", "AXCell",
-        "AXMenuBarItem",
+        "AXMenuBarItem", "AXDisclosureTriangle",
+    ]
+
+    /// Adjustable controls — nudge with axAction AXIncrement/AXDecrement
+    /// instead of guessing a pixel drag on a 6pt thumb.
+    static let adjustableRoles: Set<String> = [
+        "AXSlider", "AXStepper", "AXIncrementor", "AXValueIndicator",
+        "AXRatingIndicator",
     ]
 
     /// Scroll containers — hints the model where `scroll` makes sense.
@@ -72,6 +80,12 @@ enum LLMDecisionCodec {
         case .axPress(let r): return "axPress(\(r))"
         case .axSetValue(let r, let v): return "axSet(\(r),\(v.prefix(15)))"
         case .click(let x, let y): return "click(\(Int(x)),\(Int(y)))"
+        case .rightClick(let x, let y): return "rightClick(\(Int(x)),\(Int(y)))"
+        case .doubleClick(let x, let y): return "doubleClick(\(Int(x)),\(Int(y)))"
+        case .drag(let fx, let fy, let tx, let ty):
+            return "drag(\(Int(fx)),\(Int(fy))->\(Int(tx)),\(Int(ty)))"
+        case .axAction(let r, let n): return "axAction(\(r),\(n))"
+        case .axSetAttribute(let r, let a, let v): return "axSet(\(r),\(a)=\(v))"
         case .keyCombo(let k): return "key(\(k.joined(separator: "+")))"
         case .wait(let s): return "wait(\(s))"
         case .captureScreenshot: return "screenshot"
@@ -88,12 +102,16 @@ enum LLMDecisionCodec {
         Reply with ONLY one JSON object — no prose, no fences, no examples:
         {"action":{"type":"<TYPE>","<FIELD>":"<VALUE>"},"confidence":<0.0 to 1.0>,"rationale":"<why this action, in this screen>"}
         - The goal may list several steps separated by commas — do them left to right; a "done" step means the task is finished.
-        - "type" is exactly ONE of: click, moveMouse, axPress, axSetValue, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, done. Never write more than one.
-        - Fields by type: click/moveMouse take "x","y"; axPress/axSetValue take "ref"; axSetValue also "value"; typeText takes "text"; keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
+        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, done. Never write more than one.
+        - Fields by type: click/rightClick/doubleClick/moveMouse take "x","y"; drag takes "x","y" (start) and "toX","toY" (end); axPress/axSetValue/axAction/axSetAttribute take "ref"; axSetValue also "value"; axAction also "name" (AXShowMenu, AXIncrement, AXDecrement, AXConfirm, AXCancel, AXPick, AXRaise, AXOpen); axSetAttribute also "attr" (AXSelected, AXFocused, AXExpanded, AXMain, AXMinimized) and "value" ("true"/"false"); typeText takes "text"; keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
         - Use "ref" (an AX element id like e3) whenever the target is in the AX tree — prefer axPress over click.
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
         - axPress only on nodes marked [pressable]. e0 is the application ROOT, not a button.
         - To put text in a node marked [editable], use axSetValue (or click it, then typeText). Never axPress it.
+        - rightClick opens a context menu; doubleClick opens files / selects words; drag moves or reorders.
+        - On a node marked [adjustable], use axAction "AXIncrement"/"AXDecrement" — never pixel-drag a slider.
+        - To open a popup/dropdown: axPress or axAction "AXShowMenu" on it, then pick an AXMenuItem. AXMenuItem picks also accept axAction "AXPick".
+        - To select a table row or expand a disclosure: axSetAttribute "AXSelected"/"AXExpanded" = "true"; AXRaise brings a window forward.
         - NEVER type or write into a [secure] node — that is a password field; tell the user instead.
         - If a step just failed with an "error:" outcome, choose a DIFFERENT action.
         - "expect" is checked by re-observing the screen after the action; omit it unless a check is needed.
@@ -110,6 +128,9 @@ enum LLMDecisionCodec {
             let type: String; let x: Double?; let y: Double?; let ref: String?
             let text: String?; let value: String?; let app: String?
             let dx: Double?; let dy: Double?; let ms: Double?; let expect: String?
+            /// axAction's action name, axSetAttribute's attribute name,
+            /// drag's destination.
+            let name: String?; let attr: String?; let toX: Double?; let toY: Double?
             /// Models that ignore the "ms" instruction and write "seconds".
             let seconds: Double?
             /// Small models sometimes nest these inside the action — capture both.
@@ -117,7 +138,7 @@ enum LLMDecisionCodec {
             /// Models send either "cmd+s" or ["cmd","s"] — take both.
             let keys: [String]
             enum CodingKeys: String, CodingKey {
-                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, seconds, confidence, rationale
+                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, seconds, confidence, rationale, name, attr, toX, toY
             }
             init(from d: Decoder) throws {
                 let c = try d.container(keyedBy: CodingKeys.self)
@@ -140,6 +161,10 @@ enum LLMDecisionCodec {
                 } else { keys = [] }
                 confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
                 rationale = try c.decodeIfPresent(String.self, forKey: .rationale)
+                name = try c.decodeIfPresent(String.self, forKey: .name)
+                attr = try c.decodeIfPresent(String.self, forKey: .attr)
+                toX = try c.decodeIfPresent(Double.self, forKey: .toX)
+                toY = try c.decodeIfPresent(Double.self, forKey: .toY)
             }
         }
         let action: A?; let confidence: Double?; let rationale: String?
@@ -186,6 +211,15 @@ enum LLMDecisionCodec {
         case "typeText":  a = field("text").map { .typeText($0) }
         case "openApp":   a = (field("app") ?? field("text")).map { .openApp(name: $0) }
         case "click":     a = .click(x: num("x") ?? 0, y: num("y") ?? 0)
+        case "rightClick": a = .rightClick(x: num("x") ?? 0, y: num("y") ?? 0)
+        case "doubleClick": a = .doubleClick(x: num("x") ?? 0, y: num("y") ?? 0)
+        case "drag":      a = .drag(fromX: num("x") ?? 0, fromY: num("y") ?? 0,
+                                    toX: num("toX") ?? 0, toY: num("toY") ?? 0)
+        case "axAction":  a = field("ref").map { .axAction(ref: $0, name: field("name") ?? "AXPress") }
+        case "axSetAttribute": a = field("ref").map {
+            .axSetAttribute(ref: $0, attr: field("attr") ?? "AXSelected",
+                            value: ["true", "1", "yes"].contains((field("value") ?? "true").lowercased()))
+        }
         case "keyCombo":  a = field("keys").map { .keyCombo(keys: $0.split(separator: "+").map { $0.lowercased() }) }
         case "wait":      a = .wait(seconds: num("ms").map { $0 / 1000 } ?? num("seconds") ?? 0.5)
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
@@ -209,6 +243,18 @@ enum LLMDecisionCodec {
         switch a.type {
         case "moveMouse": return .moveMouse(x: a.x ?? 0, y: a.y ?? 0)
         case "click":     return .click(x: a.x ?? 0, y: a.y ?? 0)
+        case "rightClick": return .rightClick(x: a.x ?? 0, y: a.y ?? 0)
+        case "doubleClick": return .doubleClick(x: a.x ?? 0, y: a.y ?? 0)
+        case "drag":      return .drag(fromX: a.x ?? 0, fromY: a.y ?? 0,
+                                       toX: a.toX ?? 0, toY: a.toY ?? 0)
+        case "axAction":  guard let ref = a.ref, !ref.isEmpty else { return nil }
+                          let n = a.name ?? "AXPress"
+                          return .axAction(ref: ref, name: n)
+        case "axSetAttribute": guard let ref = a.ref, !ref.isEmpty else { return nil }
+                          guard let attr = a.attr, !attr.isEmpty else { return nil }
+                          let v = (a.value ?? "true").lowercased()
+                          return .axSetAttribute(ref: ref, attr: attr,
+                                                 value: ["true", "1", "yes"].contains(v))
         // A missing/empty ref can't act meaningfully — abstain (nil) so the
         // step escalates instead of erroring against a blank element id.
         case "axPress":   guard let ref = a.ref, !ref.isEmpty else { return nil }

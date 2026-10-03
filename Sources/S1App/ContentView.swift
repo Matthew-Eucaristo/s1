@@ -179,6 +179,9 @@ struct ContentView: View {
                     model.listening ? .red.opacity(0.55) : .accentColor.opacity(0.55)),
                     in: .circle)
                 .help("Listen (20s), transcribe on-device, run")
+                .accessibilityLabel(model.listening ? "Stop listening" : "Listen")
+                .accessibilityHint("Records a voice command, transcribes on-device, runs it")
+                .keyboardShortcut("l", modifiers: .command)
 
                 Button {
                     model.pickAudioAndTranscribe()
@@ -220,6 +223,7 @@ struct ContentView: View {
                     .fill(model.serveState == .idle ? Color.secondary
                           : model.serveState == .listening ? .green : .orange)
                     .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)   // decorative; the text beside it carries state
                 Text(model.serveStatus)
                     .font(.callout)
                     .lineLimit(1)
@@ -303,6 +307,10 @@ struct ContentView: View {
         return Button { model.revealRunDir() } label: { row }
             .buttonStyle(.plain)
             .help("Reveal this run's artifacts")
+            // One spoken line per step instead of every child announced raw.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(stepSummary(rec))
+            .accessibilityHint("Reveal run artifacts")
     }
 
     private var statusBar: some View {
@@ -310,6 +318,7 @@ struct ContentView: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+                .accessibilityHidden(true)   // decorative; status text follows
             Text(model.status)
                 .font(.callout)
             if let runDir = model.runDir {
@@ -332,6 +341,7 @@ struct ContentView: View {
         HStack {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(ok ? .green : .orange)
+                .accessibilityLabel(ok ? "granted" : "missing")
             Text(label).font(.callout)
             if !ok {
                 Spacer()
@@ -366,6 +376,16 @@ struct ContentView: View {
         }
     }
 
+    /// VoiceOver line for one step — action, outcome, brain, verification.
+    private func stepSummary(_ rec: StepRecord) -> String {
+        var s = "step \(rec.index): \(actionLabel(rec.action))"
+        if let out = rec.outcome { s += ", \(out)" }
+        s += ", \(rec.decidedBy.hasPrefix("s2") ? "system 2" : rec.decidedBy.hasPrefix("s1") ? "system 1" : "system")"
+        if let esc = rec.escalation { s += ", escalated to \(esc.to)" }
+        if let v = rec.verified { s += v ? ", verified" : ", verification failed" }
+        return s
+    }
+
     private func actionLabel(_ action: Action?) -> String {
         guard let action else { return "no action" }
         switch action {
@@ -374,11 +394,17 @@ struct ContentView: View {
         case .done(let s): return "done — \(s)"
         case .moveMouse(let x, let y): return "move mouse (\(Int(x)), \(Int(y)))"
         case .click(let x, let y): return "click (\(Int(x)), \(Int(y)))"
+        case .rightClick(let x, let y): return "right-click (\(Int(x)), \(Int(y)))"
+        case .doubleClick(let x, let y): return "double-click (\(Int(x)), \(Int(y)))"
+        case .drag(let fx, let fy, let tx, let ty):
+            return "drag (\(Int(fx)), \(Int(fy))) → (\(Int(tx)), \(Int(ty)))"
         case .typeText(let t): return "type \"\(t)\""
         case .keyCombo(let k): return "keys \(k.joined(separator: "+"))"
         case .scroll(let dx, let dy): return "scroll (\(Int(dx)), \(Int(dy)))"
         case .axPress(let r): return "ax press \(r)"
         case .axSetValue(let r, let v): return "ax set \(r) = \"\(v)\""
+        case .axAction(let r, let n): return "\(n) \(r)"
+        case .axSetAttribute(let r, let a, let v): return "\(a)=\(v) \(r)"
         case .openApp(let n): return "open \(n)"
         case .wait(let s): return "wait \(s)s"
         case .shell(let c): return "shell: \(c)"

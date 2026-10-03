@@ -49,13 +49,17 @@ struct S1App: App {
             case .idle:
                 if let glyph = NSImage(named: "s1-menubar") {
                     Image(nsImage: { glyph.isTemplate = true; return glyph }())
+                        .accessibilityLabel("s1, idle")
                 } else {
                     Image(systemName: "waveform")
+                        .accessibilityLabel("s1, idle")
                 }
             case .listening:
                 Image(systemName: "waveform")
+                    .accessibilityLabel("s1, listening")
             case .running:
                 Image(systemName: "brain")
+                    .accessibilityLabel("s1, running")
             }
         }
         .menuBarExtraStyle(.window)

@@ -1,19 +1,40 @@
 #!/bin/zsh
-# Build a universal (arm64 + x86_64) release tarball for GitHub Releases.
-# Usage: ./scripts/release.sh 0.2.0   ->  s1-0.2.0-macos.tar.gz + sha256
+# Build the release artifacts for GitHub Releases:
+#   s1-<version>-macos.tar.gz   universal CLI (arm64 + x86_64)
+#   S1-<version>-app.zip        universal signed S1.app bundle
+# Prints the sha256 of each — paste them into the tap's Formula/Cask,
+# or let scripts/publish-tap.sh do the whole dance.
+#
+# Usage: ./scripts/release.sh 0.2.0
 set -euo pipefail
 VERSION="${1:?usage: ./scripts/release.sh <version>  e.g. 0.2.0}"
 cd "$(dirname "$0")/.."
 
-swift build -c release --arch arm64 --arch x86_64
+echo "=== building universal CLI ==="
+swift build -c release --arch arm64 --arch x86_64 --product s1
 
 BIN_DIR=".build/apple/Products/Release"
 [[ -f "$BIN_DIR/s1" ]] || { echo "universal binary not found at $BIN_DIR/s1" >&2; exit 1; }
 lipo -info "$BIN_DIR/s1"
 
-OUT="s1-${VERSION}-macos.tar.gz"
-tar -czf "$OUT" -C "$BIN_DIR" s1
-SHA=$(shasum -a 256 "$OUT" | awk '{print $1}')
-echo "wrote $OUT"
-echo "sha256: $SHA"
-echo "upload it to GitHub Releases, then update Formula/s1.rb (url + sha256)"
+TAR="s1-${VERSION}-macos.tar.gz"
+tar -czf "$TAR" -C "$BIN_DIR" s1
+echo "wrote $TAR"
+echo "sha256: $(shasum -a 256 "$TAR" | awk '{print $1}')"
+
+echo "=== building universal S1.app ==="
+./scripts/make-app.sh release >/dev/null
+[[ -d dist/S1.app ]] || { echo "dist/S1.app missing" >&2; exit 1; }
+lipo -info "dist/S1.app/Contents/MacOS/S1"
+
+ZIP="S1-${VERSION}-app.zip"
+rm -f "$ZIP"
+# ditto, not zip -r: preserves Finder metadata + a layout unzip sees as a
+# plain .app bundle (what `brew install --cask` expects).
+ditto -c -k --sequesterRsrc --keepParent dist/S1.app "$ZIP"
+echo "wrote $ZIP"
+echo "sha256: $(shasum -a 256 "$ZIP" | awk '{print $1}')"
+
+echo
+echo "next: ./scripts/publish-tap.sh $VERSION   # or attach both files to the"
+echo "      GitHub Release manually + fill Formula/s1.rb and Casks/s1.rb"

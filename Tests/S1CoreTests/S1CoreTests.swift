@@ -172,6 +172,50 @@ private func jsonlDecoder() -> JSONDecoder {
     }
 }
 
+// MARK: - pointer + AX verb coverage
+
+@Test func newPointerActionsDecode() {
+    // Every new verb must round-trip the wire format; missing fields abstain.
+    let cases: [(String, Action)] = [
+        (#"{"action":{"type":"rightClick","x":10,"y":20}}"#,
+         .rightClick(x: 10, y: 20)),
+        (#"{"action":{"type":"doubleClick","x":5,"y":6}}"#,
+         .doubleClick(x: 5, y: 6)),
+        (#"{"action":{"type":"drag","x":1,"y":2,"toX":300,"toY":400}}"#,
+         .drag(fromX: 1, fromY: 2, toX: 300, toY: 400)),
+        (#"{"action":{"type":"axAction","ref":"e7","name":"AXShowMenu"}}"#,
+         .axAction(ref: "e7", name: "AXShowMenu")),
+        (#"{"action":{"type":"axSetAttribute","ref":"e9","attr":"AXSelected","value":"true"}}"#,
+         .axSetAttribute(ref: "e9", attr: "AXSelected", value: true)),
+    ]
+    for (json, want) in cases {
+        let d = LLMDecisionCodec.parse(json)
+        #expect(d?.action == want, "decode failed for \(json)")
+    }
+    // ref-less ref actions abstain rather than acting on a blank target.
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"axAction","ref":""}}"#)?.action == nil)
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"axSetAttribute","ref":"e1","attr":""}}"#)?.action == nil)
+}
+
+@Test func axActionAndAttributeWhitelists() {
+    // The actuator whitelist is the enforcement point — menus, nudges,
+    // dialog verbs, window verbs in; anything else never reaches AX.
+    for ok in ["AXShowMenu", "AXIncrement", "AXDecrement", "AXConfirm",
+               "AXCancel", "AXPick", "AXRaise", "AXOpen", "AXPress"] {
+        #expect(CGEventActuator.allowedAXActions.contains(ok), "\(ok) must be allowed")
+    }
+    #expect(!CGEventActuator.allowedAXActions.contains("AXDestroyElement"))
+    #expect(!CGEventActuator.allowedAXActions.contains("AXPostNotification"))
+    for ok in ["AXSelected", "AXFocused", "AXExpanded", "AXMain", "AXMinimized"] {
+        #expect(CGEventActuator.allowedAXAttributes.contains(ok), "\(ok) must be allowed")
+    }
+    // AXValue stays out — text writes go through axSetValue (deny-listed).
+    #expect(!CGEventActuator.allowedAXAttributes.contains("AXValue"))
+    // Action/attr names are model-controlled → deny-list scanned.
+    #expect(!Action.axAction(ref: "e1", name: "rm -rf").textPayloads.isEmpty)
+    #expect(!Action.axSetAttribute(ref: "e1", attr: "AXValue", value: true).textPayloads.isEmpty)
+}
+
 // MARK: - secure text fields
 
 @Test func secureFieldEscalatesTyping() async throws {

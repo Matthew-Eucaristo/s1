@@ -20,11 +20,21 @@ public enum Action: Codable, Sendable, Equatable {
     // reversible
     case moveMouse(x: Double, y: Double)
     case click(x: Double, y: Double)
+    case rightClick(x: Double, y: Double)
+    case doubleClick(x: Double, y: Double)
+    case drag(fromX: Double, fromY: Double, toX: Double, toY: Double)
     case typeText(String)
     case keyCombo(keys: [String])
     case scroll(dx: Double, dy: Double)
     case axPress(ref: String)
     case axSetValue(ref: String, value: String)
+    /// Named accessibility action on a node — AXShowMenu (popups/context
+    /// menus), AXIncrement/AXDecrement (sliders, steppers), AXConfirm/
+    /// AXCancel (dialogs), AXPick (menu items), AXRaise/AXOpen (windows).
+    case axAction(ref: String, name: String)
+    /// Boolean AX attribute write — AXSelected (rows), AXFocused,
+    /// AXExpanded (disclosures), AXMain/AXMinimized (windows).
+    case axSetAttribute(ref: String, attr: String, value: Bool)
     case openApp(name: String)
     case wait(seconds: Double)
     // irreversible
@@ -53,6 +63,9 @@ public enum Action: Codable, Sendable, Equatable {
         // The app being opened matters too — "Passwords"/"Keychain" is a
         // credential surface, not just a launch.
         case .openApp(let n): return [n]
+        // Model-controlled AX action/attribute names get scanned too.
+        case .axAction(_, let name): return [name]
+        case .axSetAttribute(_, let attr, _): return [attr]
         default: return []
         }
     }

@@ -1,42 +1,36 @@
-# Homebrew formula for s1.
+# Homebrew formula for the s1 CLI — installs the prebuilt universal binary.
 #
-# Two ways to ship:
-#   1. Personal tap (recommended to start): create repo `Matthew-Eucaristo/homebrew-tap`,
-#      copy this file to `Formula/s1.rb` there. Users then run
-#        brew tap Matthew-Eucaristo/tap
-#        brew install s1
-#   2. homebrew-core: submit this file upstream once the project is notable.
+# Lives in the tap repo Matthew-Eucaristo/homebrew-tap as Formula/s1.rb.
+# scripts/publish-tap.sh regenerates it with real version + sha256 on
+# every release — do not hand-edit values here.
 #
-# Release flow: `git tag vX.Y.Z && git push --tags`, build the binary with
-# `scripts/release.sh X.Y.Z`, attach the tarball to the GitHub Release, then
-# update `url` + `sha256` below.
+# A binary formula, deliberately: `brew install s1` drops the signed
+# arm64+x86_64 binary into brew's bin — no Xcode/Swift toolchain needed
+# and `brew uninstall` leaves zero residue. (homebrew-core would require
+# a source build; our own tap gets to choose the friendlier option.)
 class S1 < Formula
   desc "Voice-first macOS agent — fast System 1 + LLM System 2, accessibility-driven"
   homepage "https://github.com/Matthew-Eucaristo/s1"
   license "MIT"
-  url "https://github.com/Matthew-Eucaristo/s1/archive/refs/tags/v0.1.0.tar.gz"
+  version "0.2.0"
+  url "https://github.com/Matthew-Eucaristo/s1/releases/download/v#{version}/s1-#{version}-macos.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # filled at release
 
-  # Builds from source — needs a recent Xcode toolchain (Swift 6 / macOS 26 SDK).
-  depends_on xcode: ["26.0", :build]
-  # ScreenCaptureKit/AX/CGEvent parts run on macOS 15+; on-device STT
-  # (SpeechAnalyzer) requires macOS 26 (Tahoe) at runtime.
+  # The binary is signed (stable TCC identity); Gatekeeper may still want a
+  # one-time `xattr -dr com.apple.quarantine` until we ship Developer ID.
   depends_on macos: :sequoia
 
   def install
-    # Build only the CLI product — the package also contains the S1.app
-    # target, and a GUI-target failure must never break `brew install s1`.
-    system "swift", "build", "--disable-sandbox", "-c", "release", "--product", "s1"
-    bin.install ".build/release/s1"
+    bin.install "s1"
   end
 
   def caveats
     <<~EOS
       s1 drives your Mac via Accessibility, Screen Recording, and Speech —
-      macOS will prompt your terminal app for those permissions on first use.
-      Run `s1 preflight` to see which grants are still missing.
-      For the VLM/LLM policies you need an OpenAI-compatible endpoint,
-      e.g. `brew install ollama && ollama pull gemma3:4b`.
+      macOS prompts your terminal app on first use; `s1 preflight` lists
+      what's still missing.
+      Menu-bar companion:  brew install --cask s1
+      Local model brain:   brew install ollama && ollama pull gemma3:4b
     EOS
   end
 

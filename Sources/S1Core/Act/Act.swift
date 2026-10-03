@@ -50,6 +50,67 @@ public struct CGEventActuator: Actuator {
             up.post(tap: .cghidEventTap)
             return "click (\(x), \(y))"
 
+        case .rightClick(let x, let y):
+            let p = CGPoint(x: x, y: y)
+            let src = CGEventSource(stateID: .hidSystemState)
+            guard let down = CGEvent(mouseEventSource: src, mouseType: .rightMouseDown,
+                    mouseCursorPosition: p, mouseButton: .right),
+                  let up = CGEvent(mouseEventSource: src, mouseType: .rightMouseUp,
+                    mouseCursorPosition: p, mouseButton: .right) else {
+                throw S1Error.aborted("cannot create right-click events")
+            }
+            down.post(tap: .cghidEventTap)
+            usleep(60_000)
+            up.post(tap: .cghidEventTap)
+            return "rightClick (\(x), \(y))"
+
+        case .doubleClick(let x, let y):
+            let p = CGPoint(x: x, y: y)
+            let src = CGEventSource(stateID: .hidSystemState)
+            // Click state 1 then 2 — without the second press carrying
+            // clickState=2, apps see two singles (Finder won't "open").
+            for state: Int64 in [1, 2] {
+                guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                        mouseCursorPosition: p, mouseButton: .left),
+                      let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                        mouseCursorPosition: p, mouseButton: .left) else {
+                    throw S1Error.aborted("cannot create double-click events")
+                }
+                down.setIntegerValueField(.mouseEventClickState, value: state)
+                up.setIntegerValueField(.mouseEventClickState, value: state)
+                down.post(tap: .cghidEventTap)
+                usleep(60_000)
+                up.post(tap: .cghidEventTap)
+                usleep(60_000)
+            }
+            return "doubleClick (\(x), \(y))"
+
+        case .drag(let fx, let fy, let tx, let ty):
+            let from = CGPoint(x: fx, y: fy), to = CGPoint(x: tx, y: ty)
+            let src = CGEventSource(stateID: .hidSystemState)
+            guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                    mouseCursorPosition: from, mouseButton: .left) else {
+                throw S1Error.aborted("cannot create drag events")
+            }
+            down.post(tap: .cghidEventTap)
+            usleep(80_000)
+            // Interpolated drag points — drop targets that watch the
+            // trajectory (reordering, Dock) need real movement, not a
+            // teleport from press to release.
+            let steps = 8
+            for i in 1...steps {
+                let t = Double(i) / Double(steps)
+                let mid = CGPoint(x: fx + (tx - fx) * t, y: fy + (ty - fy) * t)
+                CGEvent(mouseEventSource: src, mouseType: .leftMouseDragged,
+                        mouseCursorPosition: mid, mouseButton: .left)?
+                    .post(tap: .cghidEventTap)
+                usleep(20_000)
+            }
+            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: to, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+            return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
+
         case .typeText(let text):
             try postUnicode(text)
             return "typed \(text.count) chars"
@@ -109,6 +170,27 @@ public struct CGEventActuator: Actuator {
             try postUnicode(value)
             return "focused+typed \(value.count) chars (AXSetValue refused)"
 
+        case .axAction(let ref, let name):
+            guard let pid = frontmostPID else { throw S1Error.axFailed("no frontmost pid") }
+            guard CGEventActuator.allowedAXActions.contains(name) else {
+                throw S1Error.axFailed("AX action '\(name)' is not allowed")
+            }
+            guard AXReader.performAXAction(pid: pid, ref: ref, action: name) else {
+                throw S1Error.axFailed("\(name) failed on \(ref)")
+            }
+            return "\(name) \(ref)"
+
+        case .axSetAttribute(let ref, let attr, let value):
+            guard let pid = frontmostPID else { throw S1Error.axFailed("no frontmost pid") }
+            guard CGEventActuator.allowedAXAttributes.contains(attr) else {
+                throw S1Error.axFailed("AX attribute '\(attr)' is not allowed")
+            }
+            let cf: CFTypeRef = value ? kCFBooleanTrue : kCFBooleanFalse
+            guard AXReader.setAttribute(pid: pid, ref: ref, attr: attr, value: cf) else {
+                throw S1Error.axFailed("set \(attr) failed on \(ref)")
+            }
+            return "\(attr)=\(value) \(ref)"
+
         case .openApp(let name):
             try await openApp(named: name)
             return "opened \(name)"
@@ -141,6 +223,24 @@ public struct CGEventActuator: Actuator {
             throw S1Error.aborted("custom action '\(n)' has no actuator implementation")
         }
     }
+
+    /// AX actions the model may fire by name. Whitelisted so a crafted
+    /// reply can't reach arbitrary AX actions — these are all standard
+    /// user-facing verbs (menu open, slider nudge, dialog confirm/cancel,
+    /// row pick, window raise).
+    static let allowedAXActions: Set<String> = [
+        "AXPress", "AXShowMenu", "AXIncrement", "AXDecrement",
+        "AXConfirm", "AXCancel", "AXPick", "AXRaise", "AXOpen",
+        "AXShowAlternateUI", "AXShowDefaultUI",
+    ]
+
+    /// Boolean AX attributes the model may write — selection, focus,
+    /// disclosure state, window state. Never AXValue (that path is
+    /// axSetValue, which carries a deny-listed text payload).
+    static let allowedAXAttributes: Set<String> = [
+        "AXSelected", "AXFocused", "AXExpanded", "AXMain",
+        "AXMinimized", "AXFrontmost",
+    ]
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).
     /// One CGEvent carries a bounded unicode string — longer text is chunked
@@ -199,13 +299,16 @@ public struct CGEventActuator: Actuator {
         "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
         "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
         "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25, "0": 29,
-        "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51, "escape": 53,
+        "return": 36, "enter": 36, "tab": 48, "space": 49, "spacebar": 49,
+        "delete": 51, "backspace": 51, "del": 51, "escape": 53, "esc": 53,
         "minus": 27, "equal": 24, "leftbracket": 33, "rightbracket": 30, "backslash": 42,
         "semicolon": 41, "quote": 39, "comma": 43, "period": 47, "slash": 44, "grave": 50,
         "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97, "f7": 98,
         "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
-        "home": 115, "end": 119, "pageup": 116, "pagedown": 121, "forwarddelete": 117,
-        "left": 123, "right": 124, "down": 125, "up": 126,
+        "home": 115, "end": 119, "pageup": 116, "pgup": 116,
+        "pagedown": 121, "pgdn": 121, "forwarddelete": 117, "fwddelete": 117,
+        "left": 123, "leftarrow": 123, "right": 124, "rightarrow": 124,
+        "down": 125, "downarrow": 125, "up": 126, "uparrow": 126,
     ]
 
     func openApp(named name: String) async throws {
