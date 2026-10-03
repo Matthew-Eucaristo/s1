@@ -137,5 +137,15 @@ this project is pre-1.0 — breaking changes land in minor versions.
 - The serve daemon's run loop re-enters `CFRunLoopRun` when its last
   source drops — a dropped event tap used to exit main silently and
   kill the whole listener.
+- `wait`/`tunggu` honours unit words — "wait 2 seconds" and "tunggu 2
+  detik" used to fall back to 0.5s (the parser only knew `ms`/`s`
+  suffixes); `menit`/`minute(s)` and decimal commas work too.
+- `s1 replay`/`s1 metrics` on a bad path say "not a run directory"
+  instead of Foundation's raw steps.jsonl error.
+- Stop semantics unified: the app's Stop (⌘.) couldn't abort
+  serve-driven runs (serve watched `s1-serve-stop` while Stop wrote
+  `s1-app-stop` — now one file); the serve loop also sleeps on seeing
+  its stop file; `s1 stop` no longer SIGTERMs the GUI app — it sends
+  the file so the listener sleeps gracefully and the window survives.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
