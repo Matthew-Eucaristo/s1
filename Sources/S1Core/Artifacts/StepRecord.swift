@@ -64,12 +64,16 @@ public actor RunLogger {
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
             .prefix(40)
+        // An emoji/CJK-only goal slugs to "" — name the dir "run" instead of
+        // leaving a trailing dash. Also re-trim: prefix(40) can end mid-dash.
+        let slugBase = String(slug).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let slugName = slugBase.isEmpty ? "run" : slugBase
         // Same goal in the same second (e.g. app + serve firing together)
         // would share one dir and interleave its steps.jsonl — uniquify.
-        var candidate = root.appendingPathComponent("\(stamp)-\(slug)")
+        var candidate = root.appendingPathComponent("\(stamp)-\(slugName)")
         var n = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = root.appendingPathComponent("\(stamp)-\(slug)-\(n)")
+            candidate = root.appendingPathComponent("\(stamp)-\(slugName)-\(n)")
             n += 1
         }
         runDir = candidate
