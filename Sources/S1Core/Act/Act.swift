@@ -201,8 +201,9 @@ enum AppResolver {
             return url
         }
         var best: (URL, Double)? = nil
-        for dir in ["/System/Applications", "/Applications", "/Applications/Utilities",
-                    NSHomeDirectory() + "/Applications"] {
+        // Same directory set the STT vocabulary learns from — resolve and
+        // recognition must agree on what "installed" means.
+        for dir in InstalledApps.appDirs {
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { continue }
             for n in names where n.hasSuffix(".app") {
                 let stem = String(n.dropLast(4))
@@ -258,7 +259,18 @@ enum AppResolver {
         }
         let (ga, gb) = (grams(a), grams(b))
         guard !ga.isEmpty, !gb.isEmpty else { return 0 }
-        return 2.0 * Double(ga.intersection(gb).count) / Double(ga.count + gb.count)
+        let dice = 2.0 * Double(ga.intersection(gb).count) / Double(ga.count + gb.count)
+        // Containment beats bigrams for short names: "word" ⊂ "microsoft
+        // word" should still resolve, "edit" ⊂ "textedit" likewise.
+        let (na, nb) = (normalized(a), normalized(b))
+        if na.count >= 3, nb.count >= 3, nb.contains(na) || na.contains(nb) {
+            return max(dice, 0.75)
+        }
+        return dice
+    }
+
+    private static func normalized(_ s: String) -> String {
+        s.lowercased().components(separatedBy: .alphanumerics.inverted).joined()
     }
 }
 

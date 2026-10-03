@@ -296,7 +296,8 @@ struct AXCmd: AsyncParsableCommand {
             print("no AX tree (check Accessibility permission)"); throw ExitCode(1)
         }
         for n in tree.flattened {
-            print("  \(n.ref) [\(n.role)] \(n.title ?? n.value ?? "")")
+            let label = n.title ?? n.desc ?? n.value ?? ""
+            print("  \(n.ref) [\(n.role)] \(label)")
         }
     }
 }
@@ -359,7 +360,10 @@ struct ServeCmd: AsyncParsableCommand {
                 allowIrreversible: false, killSwitch: kill,
                 s2: reasoner)
             if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
-            if speak { await Speaker().say("Selesai", language: locale) }
+            if speak {
+                let done = locale.hasPrefix("id") ? "Selesai" : "Done"
+                await Speaker().say(done, language: locale)
+            }
             return
         }
 
