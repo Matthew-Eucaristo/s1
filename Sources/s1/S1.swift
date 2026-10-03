@@ -10,7 +10,7 @@ struct S1: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "s1",
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
-        version: "0.2.0",
+        version: S1Info.version,
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,

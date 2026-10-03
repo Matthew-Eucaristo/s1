@@ -194,6 +194,7 @@ public enum S1Runner {
         let logger = try RunLogger(
             goal: goal, root: root,
             config: [
+                "s1": S1Info.version,
                 "policy": policy.name,
                 "actuator": actuator.name,
                 "threshold": String(threshold),
