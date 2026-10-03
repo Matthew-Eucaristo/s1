@@ -24,9 +24,12 @@ public protocol Reasoner: Sendable {        // System 2 — slow, on escalation
 `decide` returns a `Decision`: an optional `Action`, a `confidence` in 0…1,
 and a `rationale` (logged verbatim — empty string is fine, silence is not).
 
-Below `Runner.threshold` the step escalates: S2 gets the same observation
-plus S1's rationale, its decision is logged as `s2:<name>`, and the reason
-is preserved in `steps.jsonl`.
+Below the run's confidence threshold (the `threshold` argument to
+`S1Runner.run`, `confidenceThreshold` on the loop config) the step
+escalates: S2 gets the same observation plus S1's rationale, its decision
+is logged as `s2:<name>`, and the reason is preserved in `steps.jsonl`.
+Below threshold with NO S2 configured, the action is suppressed and
+recorded — nothing runs on your screen that a brain wasn't sure about.
 
 ## Swapping without code
 
