@@ -174,5 +174,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `s1-app-stop` — now one file); the serve loop also sleeps on seeing
   its stop file; `s1 stop` no longer SIGTERMs the GUI app — it sends
   the file so the listener sleeps gracefully and the window survives.
+- `s1 serve`'s `defer` and SIGTERM/SIGINT handler now release
+  `serve.pid` pid-checked (was unconditional `removeItem` — a stolen
+  and re-claimed lock file would have been deleted on our exit).
+- `.gitignore` no longer drops every PNG — `assets/app.png` (README
+  hero, broken on GitHub) and the menubar glyph PNGs (CI builds would
+  have silently lost them) are now tracked.
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
