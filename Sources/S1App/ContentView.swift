@@ -117,6 +117,14 @@ struct ContentView: View {
         }
     }
 
+    /// Names the grants still missing — the banner claims exactly what
+    /// isn't granted yet rather than a hardcoded pair.
+    private var missingPermissions: String {
+        [model.permissions.accessibility ? nil : "Accessibility",
+         model.permissions.screenRecording ? nil : "Screen Recording"]
+            .compactMap { $0 }.joined(separator: " + ")
+    }
+
     /// First-run guidance: without AX + Screen Recording nothing works,
     /// so the biggest surface in the window points straight at the fix.
     private var onboardingBanner: some View {
@@ -126,7 +134,7 @@ struct ContentView: View {
                     .font(.title2)
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Grant Accessibility + Screen Recording to begin")
+                    Text("Grant \(missingPermissions) to begin")
                         .font(.callout.weight(.semibold))
                     Text("Each row in the sidebar has an Open Settings shortcut. Relaunch after granting Screen Recording.")
                         .font(.caption)
