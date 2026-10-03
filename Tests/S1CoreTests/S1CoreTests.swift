@@ -30,6 +30,21 @@ private func jsonlDecoder() -> JSONDecoder {
     }
 }
 
+@Test func destructiveShellVariantsRouteToHuman() {
+    let gate = SafetyGate(allowReversible: true, allowIrreversible: true)
+    for cmd in ["rm -rf /tmp/x", "rm -fr .", "rm -r -f /var/junk", "rm -rfv /",
+                "mkfs.ext4 /dev/disk0", "dd of=/dev/disk1 if=/tmp/img", "dd if=/dev/zero of=/dev/disk2",
+                "diskutil eraseDisk APFS X /dev/disk0", ":(){ :|:& };:"] {
+        let v = gate.evaluate(.shell(command: cmd))
+        #expect(v != .allow, "should not allow: \(cmd)")
+    }
+    // Non-destructive rm doesn't trip the denylist (shell stays a normal
+    // irreversible step — needsHuman for confirmation, not denylisted).
+    if case .needsHuman(let r) = gate.evaluate(.shell(command: "rm -v /tmp/old.log")) {
+        #expect(!r.contains("denylist"))
+    } else { Issue.record("shell should queue for human") }
+}
+
 @Test func gateDenyListAlwaysWins() {
     // Credentials never execute, even with --allow-irreversible.
     for g in [SafetyGate(), SafetyGate(allowIrreversible: true)] {

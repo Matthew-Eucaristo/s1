@@ -28,8 +28,12 @@ public struct SafetyGate: Sendable {
          "credential-like content"),
         (#"(?i)\b(buy now|purchase|checkout|place order|konfirmasi pembayaran|bayar sekarang)\b"#,
          "possible purchase"),
-        (#"(?i)\b(rm\s+-rf|mkfs|dd\s+if=|:(){ :\|:& };:)\b"#,
-         "destructive shell"),
+        // Destructive shell variants — any rm flag bundle containing r or f
+        // (-rf, -fr, -r -f, -vrf) routes to a human; plain rm -i stays free.
+        (#"(?i)\brm\s+(-\w*\s+)*-\w*[rf]"#, "destructive shell"),
+        (#"(?i)\b(mkfs|diskutil\s+erase|dd\s+(if|of)=)"#, "destructive shell"),
+        // The fork bomb is punctuation-only — a \b anchor can never match it.
+        (#":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"#, "destructive shell"),
     ]
 
     public init(allowReversible: Bool = true, allowIrreversible: Bool = false) {

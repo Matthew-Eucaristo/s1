@@ -1,5 +1,6 @@
 import Foundation
 import ApplicationServices
+import AVFoundation
 import CoreGraphics
 import IOKit.hid
 
@@ -73,8 +74,6 @@ public enum Preflight {
         """
     }
 }
-
-import AVFoundation
 
 func AVCaptureDeviceAuthStatus() -> AVAuthorizationStatus {
     AVCaptureDevice.authorizationStatus(for: .audio)
