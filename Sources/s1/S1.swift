@@ -524,6 +524,10 @@ struct MetricsCmd: AsyncParsableCommand {
     var runDir: String
 
     func run() async throws {
+        guard FileManager.default.fileExists(
+            atPath: runDir + "/steps.jsonl") else {
+            throw ValidationError("not a run directory (no steps.jsonl): \(runDir)")
+        }
         let m = try RunReader.metrics(in: URL(fileURLWithPath: runDir))
         print("steps        \(m.steps)")
         print("decidedBy    s1: \(m.s1Decisions) · s2: \(m.s2Decisions)")
@@ -611,6 +615,10 @@ struct ReplayCmd: AsyncParsableCommand {
     var allowIrreversible = false
 
     func run() async throws {
+        guard FileManager.default.fileExists(
+            atPath: runDir + "/steps.jsonl") else {
+            throw ValidationError("not a run directory (no steps.jsonl): \(runDir)")
+        }
         let src = URL(fileURLWithPath: runDir)
         let kill = NSTemporaryDirectory() + "s1-stop"
         if !dryRun {
