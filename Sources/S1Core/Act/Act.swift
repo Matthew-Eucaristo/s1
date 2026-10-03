@@ -201,7 +201,13 @@ public struct CGEventActuator: Actuator {
     func openApp(named name: String) async throws {
         let ws = NSWorkspace.shared
         if let url = AppResolver.resolve(name) {
-            try await ws.openApplication(at: url, configuration: .init())
+            // "open X" means "use X" — an app opened in the background never
+            // comes forward, and the next typeText lands in whatever had
+            // focus. Activate explicitly; it also covers the already-running
+            // relaunch path.
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            try await ws.openApplication(at: url, configuration: cfg)
         } else {
             throw S1Error.aborted("app not found: \(name)")
         }
