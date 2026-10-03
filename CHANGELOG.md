@@ -56,6 +56,13 @@ this project is pre-1.0 — breaking changes land in minor versions.
   markers and an explicit never-type rule in the decision format.
 
 ### Fixed
+- **Menu-bar goal field ate first keystrokes** — the `.window` popover now
+  autofocuses the field ~250ms after appearing (typing during the appear
+  animation dropped characters).
+- EN screenshot phrasings through generic verbs — "take a screenshot",
+  "grab the screen", "snap the screen" now resolve to capture in the AX
+  grammar (was: unknown-verb abstain → pointless S2 escalation); "take a
+  break" still abstains instead of grabbing pixels.
 - **Phantom click/typing outcomes** — `CGEvent`/`CGEventSource` creation
   failures (nil events) now throw `S1Error.aborted` instead of logging a
   fake success; `keyCombo` keeps modifier flags on the key-up event so the
@@ -227,5 +234,8 @@ this project is pre-1.0 — breaking changes land in minor versions.
   escalate (was: became real actions that failed downstream).
 - TTS picks the highest-quality installed voice for the locale
   (premium/enhanced over the base default).
+- `make-app.sh` no longer passes `--deep` to codesign — deprecated and
+  wrong for a single-binary bundle (it re-signs nested code with the
+  app's entitlements).
 
 [Unreleased]: https://github.com/Matthew-Eucaristo/s1/compare/main...HEAD
