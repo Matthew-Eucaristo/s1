@@ -131,16 +131,30 @@ public struct CGEventActuator: Actuator {
     }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).
+    /// One CGEvent carries a bounded unicode string — longer text is chunked
+    /// so paragraphs aren't silently truncated mid-glyph.
     func postUnicode(_ text: String) throws {
         let src = CGEventSource(stateID: .hidSystemState)
-        let utf16 = Array(text.utf16)
-        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) else {
-            throw S1Error.aborted("cannot create keyboard events")
+        var buf = ""
+        var chunks: [String] = []
+        for c in text {   // Character-wise: surrogate pairs never get split
+            if buf.utf16.count + String(c).utf16.count > 200 {
+                chunks.append(buf); buf = ""
+            }
+            buf.append(c)
         }
-        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        if !buf.isEmpty { chunks.append(buf) }
+        for chunk in chunks {
+            let utf16 = Array(chunk.utf16)
+            guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) else {
+                throw S1Error.aborted("cannot create keyboard events")
+            }
+            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            usleep(10_000)
+        }
     }
 
     func postKeyCombo(_ keys: [String]) throws {

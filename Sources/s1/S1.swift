@@ -34,7 +34,7 @@ struct RunCmd: AsyncParsableCommand {
         abstract: "Run the agent loop on a goal or a scripted plan.")
 
     @Option(help: "Goal text (logged; policies see it).")
-    var goal: String = "demo"
+    var goal: String?
     @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
     var task: String?
     @Option(help: "Policy: scripted | dummy | ax | vlm")
@@ -83,7 +83,9 @@ struct RunCmd: AsyncParsableCommand {
                 throw ValidationError("task file not found or empty: \(p)")
             }
             goalText = g
-        } else { goalText = goal }
+        } else if let goal { goalText = goal } else {
+            throw ValidationError("pass --goal or --task")
+        }
         guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ValidationError("empty goal — pass --goal or --task")
         }

@@ -104,7 +104,7 @@ public final class Serve: @unchecked Sendable {
         hotkey?.start()
         emit(.armed)
         if let h = hotkey, !h.isArmed {
-            emit(.error, "hotkey monitor not installed — grant Accessibility + run in a GUI session")
+            emit(.error, "hotkey monitor not installed — grant Input Monitoring + run in a GUI session")
         }
     }
 
