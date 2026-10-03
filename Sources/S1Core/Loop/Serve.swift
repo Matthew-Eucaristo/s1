@@ -330,8 +330,18 @@ public final class Serve: @unchecked Sendable {
         case .armed, .listening, .runStart, .runDone, .sleeping, .stopped, .idle: break
         default: return
         }
-        let escaped = text.replacingOccurrences(of: "\"", with: "'")
-            .replacingOccurrences(of: "\n", with: " ").prefix(120)
+        // Hand-rolled JSON: backslash must go first or it double-escapes;
+        // without it a "C:\foo"-style detail makes the state file unparseable.
+        var e = text.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        e = String(e.prefix(120))
+        // Truncation can slice a "\\" pair in half — a trailing lone
+        // backslash would escape the closing quote and corrupt the file.
+        while e.hasSuffix("\\") { e.removeLast() }
+        let escaped = e
         let iso = ISO8601DateFormatter().string(from: Date())
         let json = "{\"state\":\"\(state.rawValue)\",\"event\":\"\(kind.rawValue)\","
             + "\"detail\":\"\(escaped)\",\"pid\":\(ProcessInfo.processInfo.processIdentifier),"
