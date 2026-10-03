@@ -53,15 +53,14 @@ public struct SpeechToText: Sendable {
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         return try await withCheckedThrowingContinuation { (c: CheckedContinuation<String, Error>) in
-            var resumed = false
+            // The callback isn't serialized — resume-at-most-once needs a
+            // lock, or a final+error pair on two queues double-resumes (fatal).
+            let once = OnceFlag()
             rec.recognitionTask(with: req) { result, error in
-                guard !resumed else { return }
                 if let r = result, r.isFinal {
-                    resumed = true
-                    c.resume(returning: r.bestTranscription.formattedString)
+                    if once.claim() { c.resume(returning: r.bestTranscription.formattedString) }
                 } else if let error {
-                    resumed = true
-                    c.resume(throwing: error)
+                    if once.claim() { c.resume(throwing: error) }
                 }
             }
         }
@@ -138,12 +137,18 @@ public struct SpeechToText: Sendable {
         let failure = Locked<Error?>(nil)
         let finished = FinishedFlag()
         let task = rec.recognitionTask(with: req) { result, error in
+            // First terminal callback wins — a trailing error must not erase
+            // a final transcript that already landed.
             if let r = result, r.isFinal {
-                collected.value = r.bestTranscription.formattedString
-                finished.set()
+                if !finished.get {
+                    collected.value = r.bestTranscription.formattedString
+                    finished.set()
+                }
             } else if let error {
-                failure.value = error
-                finished.set()
+                if !finished.get {
+                    failure.value = error
+                    finished.set()
+                }
             }
         }
         var tapInstalled = false
@@ -266,6 +271,19 @@ private final class FinishedFlag: @unchecked Sendable {
     private var done = false
     var get: Bool { lock.lock(); defer { lock.unlock() }; return done }
     func set() { lock.lock(); done = true; lock.unlock() }
+}
+
+/// First `claim()` wins — the atomic test-and-set continuation resumption
+/// needs when several callbacks could race to finish it.
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
+    }
 }
 
 /// On-device text-to-speech — AVSpeechSynthesizer, works fully offline.

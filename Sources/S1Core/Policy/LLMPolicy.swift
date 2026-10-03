@@ -351,9 +351,13 @@ public struct LLMReasoner: Reasoner {
 
             \(LLMDecisionCodec.observationText(observation))
 
+            \(LLMDecisionCodec.historyText(history))
             \(LLMDecisionCodec.decisionFormat)
             """
-        let reply = try await client.chat([ChatMessage(role: "user", content: prompt)])
+        // Same "decision engine" framing the VLM gets — small local models
+        // hold the JSON contract far better with it than without.
+        let sys = ChatMessage(role: "system", content: "You are a GUI-control decision engine. You output one compact JSON decision per request — never prose, never repeat completed steps.")
+        let reply = try await client.chat([sys, ChatMessage(role: "user", content: prompt)])
         var d = LLMDecisionCodec.parse(reply)
             ?? Decision(action: nil, confidence: 0, rationale: "unparseable S2 reply")
         d.rawReply = String(reply.prefix(800))

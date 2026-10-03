@@ -181,7 +181,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(model.running || model.goal.isEmpty)
+                .disabled(model.running || model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if model.running {
                     Button {
