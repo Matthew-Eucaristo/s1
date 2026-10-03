@@ -24,6 +24,15 @@ public struct Endpoint: Sendable {
     public static func s2Default(env: [String: String] = ProcessInfo.processInfo.environment) -> Endpoint {
         Endpoints.s2(env: env)
     }
+
+    /// A local server tolerates Ollama-only request keys (`think`,
+    /// `options`) — a strict OpenAI-spec endpoint (OpenAI, OpenRouter, Groq)
+    /// 400s on unknown fields, so the wire body keeps them local-only.
+    public var isLocal: Bool {
+        let b = baseURL.lowercased()
+        return b.contains("localhost") || b.contains("127.0.0.1")
+            || b.contains("[::1]") || b.contains(".local")
+    }
 }
 
 public struct ChatMessage: Codable, Sendable {
@@ -65,15 +74,23 @@ public struct ChatClient: Sendable {
             }
             return ["role": m.role, "content": m.content]
         }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": endpoint.model,
             "messages": wire,
-            "max_tokens": maxTokens,
             "temperature": temperature,
             "stream": false,
-            "think": false,   // Ollama: skip reasoning traces for fast S1/S2 decisions; ignored elsewhere
-            "options": ["num_ctx": endpoint.numCtx, "num_predict": maxTokens],
         ]
+        if endpoint.isLocal {
+            // Ollama knobs: skip reasoning traces for fast decisions and
+            // pin the KV window — strict remote specs reject these keys.
+            body["think"] = false
+            body["options"] = ["num_ctx": endpoint.numCtx, "num_predict": maxTokens]
+            body["max_tokens"] = maxTokens
+        } else {
+            // Strict OpenAI spec: reasoning models only take the newer key,
+            // chat models accept it too — the safe remote cap.
+            body["max_completion_tokens"] = maxTokens
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, resp) = try await Self.session.data(for: req)
