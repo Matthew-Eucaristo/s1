@@ -109,9 +109,16 @@ public struct SystemPerceiver: Perceiver {
     public static func captureScreen() async throws -> CGImage {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else {
+        guard !content.displays.isEmpty else {
             throw S1Error.screenshotFailed("no displays")
         }
+        // Multi-monitor: the agent acts where the user looks — capture the
+        // display holding the main (key-window) screen, not blindly the
+        // first display ScreenCaptureKit happens to enumerate.
+        let mainID = (NSScreen.main?.deviceDescription[
+            NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        let display = content.displays.first(where: { $0.displayID == mainID })
+            ?? content.displays[0]
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
         // Filter rect is in points; the config wants pixels — multiply by the
