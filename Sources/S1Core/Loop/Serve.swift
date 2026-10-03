@@ -247,7 +247,9 @@ public final class Serve: @unchecked Sendable {
                     onEvent(ServeEvent(.step, "step \(rec.index): \(rec.decidedBy)"))
                 })
             emit(.runDone, report.status.rawValue)
-            if config.speak {
+            // A kill file means the user cancelled — sleep must mean silent,
+            // so an aborted run never says "Stopped" after the fact.
+            if config.speak && !FileManager.default.fileExists(atPath: config.killSwitch) {
                 // Speak the truth: "done" is only said when it actually is.
                 let id = sayLanguage.hasPrefix("id")
                 let reply: String = switch report.status {
@@ -288,7 +290,8 @@ public final class Serve: @unchecked Sendable {
         case .armed, .listening, .runStart, .runDone, .sleeping, .stopped, .idle: break
         default: return
         }
-        let escaped = text.replacingOccurrences(of: "\"", with: "'").prefix(120)
+        let escaped = text.replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "\n", with: " ").prefix(120)
         let iso = ISO8601DateFormatter().string(from: Date())
         let json = "{\"state\":\"\(state.rawValue)\",\"event\":\"\(kind.rawValue)\","
             + "\"detail\":\"\(escaped)\",\"pid\":\(ProcessInfo.processInfo.processIdentifier),"

@@ -424,6 +424,27 @@ struct ServeCmd: AsyncParsableCommand {
             toFile: pidPath, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(atPath: pidPath) }
 
+        // `s1 stop` sends SIGTERM and Ctrl-C sends SIGINT — neither runs
+        // `defer`, so the pid file would linger as a stale artifact. Take
+        // them via GCD: ignore the default disposition, clean up, exit.
+        // A global queue, not .main — dispatch signal sources only deliver
+        // on .main while the main thread sits in dispatchMain(), and this
+        // CLI's main is parked in a CFRunLoop instead.
+        // The sources must stay retained or they cancel on dealloc (which
+        // would leave the signals ignored with no handler at all).
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            src.setEventHandler {
+                // `_exit`, not `exit`: stdio locks held by a print on another
+                // thread would deadlock atexit processing.
+                try? FileManager.default.removeItem(atPath: pidPath)
+                _exit(0)
+            }
+            src.resume()
+            KeepAlive.signalSources.append(src)
+        }
+
         let serve = Serve(
             config: .init(makePolicy: makePol, s2: reasoner, speak: speak,
                           listenSeconds: listenSeconds, maxSilentTurns: idleTurns,
@@ -448,6 +469,14 @@ struct ServeCmd: AsyncParsableCommand {
         }
         while true { try await Task.sleep(for: .seconds(3600)) }
     }
+}
+
+/// Lifetime holder for the serve command's signal sources — released sources
+/// cancel on dealloc, which would leave SIGTERM/SIGINT ignored with no
+/// handler at all.
+private enum KeepAlive {
+    /// Filled once before the daemon parks; never touched concurrently.
+    nonisolated(unsafe) static var signalSources: [DispatchSourceSignal] = []
 }
 
 struct TasksCmd: AsyncParsableCommand {
