@@ -245,7 +245,16 @@ public struct SpeechToText: Sendable {
             }
         }
         inputTask = Task { try await analyzer.start(inputSequence: stream) }
-        try await Task.sleep(nanoseconds: UInt64(maxSeconds * 1e9))
+        // End the turn on speech, not on the clock: once a final segment has
+        // landed, a short grace catches trailing words, then the turn closes.
+        // Burning the full maxSeconds after every command made every voice
+        // turn feel frozen — the legacy path already exits on `isFinal`.
+        var waited = 0.0
+        while waited < maxSeconds {
+            try await Task.sleep(nanoseconds: 150_000_000)
+            waited += 0.15
+            if await collected.hasContent, await collected.idleFor(0.9) { break }
+        }
         continuation.finish()
         try await inputTask?.value
         try await analyzer.finalizeAndFinishThroughEndOfInput()
@@ -274,10 +283,17 @@ private final class Locked<Value>: @unchecked Sendable {
 /// ("buka" + "TextEdit" → "bukaTextEdit") and breaks the intent parser.
 private actor TextCollector {
     var value = ""
+    private var lastAppend = Date.distantPast
+    var hasContent: Bool { !value.isEmpty }
     func append(_ s: String) {
         let t = s.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return }
         value += (value.isEmpty ? "" : " ") + t
+        lastAppend = Date()
+    }
+    /// No new final segment for `seconds` — the utterance has ended.
+    func idleFor(_ seconds: Double) -> Bool {
+        Date().timeIntervalSince(lastAppend) >= seconds
     }
 }
 
