@@ -451,7 +451,9 @@ struct ServeCmd: AsyncParsableCommand {
         // (O_EXCL): two serves launched at the same instant can't both win.
         let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
         try S1Runner.claimPidFile(pidPath, what: "s1 listener")
-        defer { try? FileManager.default.removeItem(atPath: pidPath) }
+        // Pid-checked release: if the file was stolen and re-claimed by a
+        // competitor daemon, our exit must not delete THEIR lock.
+        defer { S1Runner.releasePidFile(pidPath) }
 
         // `s1 stop` sends SIGTERM and Ctrl-C sends SIGINT — neither runs
         // `defer`, so the pid file would linger as a stale artifact. Take
@@ -467,7 +469,7 @@ struct ServeCmd: AsyncParsableCommand {
             src.setEventHandler {
                 // `_exit`, not `exit`: stdio locks held by a print on another
                 // thread would deadlock atexit processing.
-                try? FileManager.default.removeItem(atPath: pidPath)
+                S1Runner.releasePidFile(pidPath)
                 _exit(0)
             }
             src.resume()
