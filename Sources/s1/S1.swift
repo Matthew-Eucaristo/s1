@@ -638,6 +638,9 @@ struct ReplayCmd: AsyncParsableCommand {
         let src = URL(fileURLWithPath: runDir)
         let kill = NSTemporaryDirectory() + "s1-stop"
         if !dryRun {
+            // Same gate as a live run — replayed clicks/types need trust
+            // or they land nowhere while the log claims they happened.
+            try S1Runner.requireAccessibility()
             try? FileManager.default.removeItem(atPath: kill)  // don't inherit a stale stop
             try S1Runner.acquireRunLock()   // live replay types/clicks — same lock as a run
         }

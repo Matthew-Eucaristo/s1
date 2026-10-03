@@ -157,6 +157,18 @@ public enum S1Runner {
     /// acquires) must not delete a live run's lock file.
     public static func releaseRunLock() { releasePidFile(lockPath) }
 
+    /// Non-dry-run gate — without AX trust the tree reads empty and
+    /// CGEvent posts silently drop, so a run would "type" into the void
+    /// while its log claims success. Throws with the fix instructions.
+    public static func requireAccessibility() throws {
+        let axPrompt = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(axPrompt) else {
+            throw S1Error.aborted(
+                "Accessibility not granted — enable this app in " +
+                "System Settings → Privacy & Security → Accessibility, then retry")
+        }
+    }
+
     @discardableResult
     public static func run(goal: String, policy: any Policy, artifacts: String,
                            maxSteps: Int, threshold: Double, dryRun: Bool,
@@ -164,15 +176,7 @@ public enum S1Runner {
                            s2: (any Reasoner)? = nil,
                            onStep: (@Sendable (StepRecord) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
         if !dryRun {
-            // Without AX trust the AX tree reads empty and CGEvent posts
-            // silently drop — a run would "type" into the void while its
-            // log claims success. Fail fast instead, pointing at the fix.
-            let axPrompt = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
-            guard AXIsProcessTrustedWithOptions(axPrompt) else {
-                throw S1Error.aborted(
-                    "Accessibility not granted — enable this app in " +
-                    "System Settings → Privacy & Security → Accessibility, then retry")
-            }
+            try requireAccessibility()
             try acquireRunLock()
         }
         defer { if !dryRun { releaseRunLock() } }
