@@ -128,6 +128,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
   folder in the artifacts root used to shadow the newest run (sorted-last
   picked it and failed with "not a run dir"); default selection now
   requires a `steps.jsonl` inside.
+- **CLI honors `config.json` locale + speak** — `--locale`/`--language`
+  were hardcoded to `id-ID` and `--speak` to off, so the app's GUI
+  language/voice settings never reached `s1 listen`/`serve`/`transcribe`/
+  `say`. Flags now resolve flag → config → default; `--no-speak`
+  overrides a `speak:true` config. `s1 serve --install` forwards the
+  resolved values so the plist pins what the installer saw. `s1 config`
+  prints all three. Verified: config `{en-US, speak:true}` → plist args
+  `--locale en-US --speak`.
 ### Security
 - **Act-time secure-focus re-check** — the loop gates keystrokes against
   the observe-time snapshot, but a password prompt appearing between
