@@ -69,20 +69,19 @@ public struct AXPolicy: Policy {
                 break
             }
         }
-        return g
-            .replacingOccurrences(of: " lalu ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " then ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " and then ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " terus ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " trus ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " kemudian ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " habis itu ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " abis itu ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " setelah itu ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " lantas ", with: ",", options: .caseInsensitive)
-            .components(separatedBy: CharacterSet(charactersIn: ",;"))
+        // Punctuation is an unconditional separator. Word conjunctions are
+        // NOT — "lalu"/"then" also appear inside text the user wants typed
+        // ("ketik aku lalu pergi" must type all three words). Every one of
+        // them goes through the same gate as "and"/"dan": split only when
+        // the following word is a grammar verb.
+        let conjWords = ["and then", "habis itu", "abis itu", "setelah itu",
+                         "kemudian", "lantas", "lalu", "then",
+                         "terus", "trus"]
+        var parts = g.components(separatedBy: CharacterSet(charactersIn: ",;"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        for c in conjWords { parts = parts.flatMap { splitOnConj($0, conj: c) } }
+        return parts
             // "and"/"dan" are ambiguous — real words inside typed text
             // ("milk and honey") AND conjunctions ("open X and type Y").
             // Split only when the following word is a grammar verb.
@@ -120,6 +119,25 @@ public struct AXPolicy: Policy {
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
         "ubah", "rename", "ganti",
     ]
+
+    /// Split " A <conj> B " only when B starts with a grammar verb —
+    /// otherwise the conjunction is literal text the user wants typed.
+    /// Recurses so several conjunctions chain correctly.
+    static func splitOnConj(_ s: String, conj: String) -> [String] {
+        let needle = " +\(NSRegularExpression.escapedPattern(for: conj)) +"
+        var searchFrom = s.startIndex
+        while let r = s.range(of: needle, options: [.regularExpression, .caseInsensitive],
+                              range: searchFrom ..< s.endIndex) {
+            let next = s[r.upperBound...]
+                .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
+            if verbs.contains(next) {
+                return splitOnConj(String(s[..<r.lowerBound]), conj: conj) +
+                       splitOnConj(String(s[r.upperBound...]), conj: conj)
+            }
+            searchFrom = r.upperBound
+        }
+        return [s]
+    }
 
     /// Split " A and B "/" A dan B " only when B starts with a grammar verb —
     /// otherwise it's literal text the user wants typed. Recurses so several

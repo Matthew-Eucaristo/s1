@@ -111,6 +111,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
   keyboard ownership — fixes mistargeted typing and a gate-evaluation
   race.
 
+- **Word-conjunctions respect typed text** — `lalu`/`then`/`terus`/
+  `kemudian`/`habis itu`/… used to split unconditionally, so
+  `ketik aku lalu pergi` typed only "aku" and abstained on "pergi".
+  They now take the same verb-gate as `and`/`dan`: split only when the
+  next word is a grammar verb.
 ### Added
 - **Live mic waveform** — `MicLevel` (RMS pushed inside the audio taps, so it
   only exists while listening — zero idle cost) + `LiveWaveform` (TimelineView

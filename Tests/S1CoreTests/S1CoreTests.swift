@@ -961,6 +961,15 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(AXPolicy.intents(of: "open Notes and type hi and click Save").count == 3)
     // A non-verb "and" before a verb "and" doesn't block the split.
     #expect(AXPolicy.intents(of: "type bread and butter and click Save").count == 2)
+    // "lalu"/"then"/"terus" get the same verb gate — a conjunction inside
+    // typed text must not truncate the string. "ketik aku lalu pergi" used
+    // to type only "aku" then abstain on the "pergi" intent.
+    #expect(AXPolicy.intents(of: "ketik aku lalu pergi").count == 1)
+    #expect(AXPolicy.intents(of: "ketik aku lalu pergi").first?.arg == "aku lalu pergi")
+    #expect(AXPolicy.intents(of: "type milk then honey").count == 1)
+    #expect(AXPolicy.intents(of: "buka Notes lalu ketik halo").count == 2)
+    #expect(AXPolicy.intents(of: "open Notes then type hi then done").count == 3)
+    #expect(AXPolicy.intents(of: "buka Notes terus tutup").count == 2)
     // Natural wait units: "wait 2 seconds" used to silently fall back to
     // 0.5s because the suffix-stripper only knew "ms"/"s".
     #expect(AXPolicy.parseWaitSeconds("2 seconds") == 2)
