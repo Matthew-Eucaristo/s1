@@ -53,6 +53,12 @@ final class AppModel {
     /// Optional GUI-grounding model for click targets ("" = none). Read
     /// from config by VLMPolicy at run time, so a save is enough.
     var grounderModel = "" { didSet { scheduleSave() } }
+    /// S1 decision model (System One API) — empty = no judge.
+    var decisionBase = "http://localhost:11434" { didSet { scheduleRearm() } }
+    var decisionModel = "" { didSet { scheduleRearm() } }
+    /// Bumped on Keychain writes so views re-read key presence.
+    private(set) var keyRevision = 0
+    var showConnections = false
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
@@ -199,6 +205,8 @@ final class AppModel {
         if let u = cfg.useS2 { useS2 = u }
         if let n = cfg.notchHUD { notchHUD = n }
         if let g = cfg.grounder?.model { grounderModel = g }
+        if let b = cfg.decision?.base { decisionBase = b }
+        if let m = cfg.decision?.model { decisionModel = m }
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
@@ -251,6 +259,7 @@ final class AppModel {
         // non-isolated and must not reach back into the model.
         let vlmEp = vlmEndpoint()
         let s2Ep = s2Endpoint()
+        let decisionEp = decisionEndpoint()
         let box = vlmAlive
         // Any rearm replaces the upgrade probe — a brain switch away from
         // `auto` must kill it outright, not leave it polling.
@@ -278,11 +287,10 @@ final class AppModel {
                 makePolicy: {
                     let wantsModel = brainKind == .vlm
                         || (brainKind == .auto && box.value == true)
-                    if wantsModel {
-                        return VLMPolicy(endpoint: vlmEp,
-                                         useScreenshot: shot)
-                    }
-                    return AXPolicy()
+                    let pol: any Policy = wantsModel
+                        ? VLMPolicy(endpoint: vlmEp, useScreenshot: shot)
+                        : AXPolicy()
+                    return JudgedPolicy.wrapIfConfigured(pol, endpoint: decisionEp)
                 },
                 s2: s2On ? LLMReasoner(endpoint: s2Ep) : nil,
                 speak: speakOn,
@@ -388,7 +396,78 @@ final class AppModel {
         cfg.grounder = grounderModel.isEmpty ? nil
             : .init(base: cfg.grounder?.base, model: grounderModel,
                     key: cfg.grounder?.key, numCtx: cfg.grounder?.numCtx)
+        cfg.decision = decisionModel.trimmingCharacters(in: .whitespaces).isEmpty ? nil
+            : .init(base: decisionBase, model: decisionModel.trimmingCharacters(in: .whitespaces),
+                    key: cfg.decision?.key, numCtx: nil)
         try? cfg.save()
+    }
+
+    /// The live decision endpoint (typed-but-unsaved edits count); env wins.
+    func decisionEndpoint() -> Endpoint? {
+        var cfg = S1Config.load()
+        let m = decisionModel.trimmingCharacters(in: .whitespaces)
+        cfg.decision = m.isEmpty ? nil : .init(base: decisionBase, model: m, key: cfg.decision?.key)
+        return Endpoints.decision(config: cfg)
+    }
+
+    func hasKey(_ role: ModelRole) -> Bool {
+        if SecretStore.has(account: role.rawValue) { return true }
+        let c = S1Config.load()
+        switch role {
+        case .vlm: return c.vlm?.key != nil
+        case .s2: return c.s2?.key != nil
+        case .grounder: return c.grounder?.key != nil
+        case .decision: return c.decision?.key != nil
+        }
+    }
+
+    func saveKey(_ key: String, for role: ModelRole) {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty else { return }
+        do {
+            try SecretStore.set(k, account: role.rawValue)
+            try S1Config.stripPlaintextKey(role)
+            status = "\(role.rawValue) key saved to Keychain"
+        } catch {
+            status = "keychain: \(error.localizedDescription)"
+        }
+        keyRevision += 1
+        scheduleRearm()
+    }
+
+    func removeKey(for role: ModelRole) {
+        SecretStore.delete(account: role.rawValue)
+        try? S1Config.stripPlaintextKey(role)
+        status = "\(role.rawValue) key removed"
+        keyRevision += 1
+        scheduleRearm()
+    }
+
+    /// One real round-trip per role — a 200 from /models isn't proof the
+    /// decision API exists, so the decision role asks an actual question.
+    func testConnection(_ role: ModelRole) async -> String {
+        let started = Date()
+        func ms() -> String { "\(Int(Date().timeIntervalSince(started) * 1000)) ms" }
+        switch role {
+        case .decision:
+            guard let ep = decisionEndpoint() else { return "set a model first" }
+            do {
+                let r = try await SystemOneClient(endpoint: ep, timeout: 120).evaluate(
+                    state: .string("The user said: open TextEdit."),
+                    questions: ["ok": .noul("Does the user want to open an app?")])
+                let p = r.answers["ok"]?.noul.map { String(format: "%.2f", $0) } ?? "?"
+                return "✓ \(r.model ?? ep.model) answered p(yes)=\(p) in \(ms())"
+            } catch {
+                return "✗ \(error.localizedDescription)"
+            }
+        case .vlm, .grounder, .s2:
+            let ep = role == .s2 ? s2Endpoint() : vlmEndpoint()
+            switch await AutoPolicy.probe(ep) {
+            case .reachableWithModel: return "✓ \(ep.model) available (\(ms()))"
+            case .reachableMissingModel: return "server up, but '\(ep.model)' isn't listed"
+            case .unreachable: return "✗ \(ep.baseURL) unreachable or key rejected"
+            }
+        }
     }
 
     private func scheduleRearm() {
@@ -578,9 +657,9 @@ final class AppModel {
             Task { box.value = await AutoPolicy.endpointAlive(vlmEndpoint()) }
         }
         let wantsModel = brain == .vlm || (brain == .auto && vlmAlive.value == true)
-        let pol: any Policy = wantsModel
-            ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot)
-            : AXPolicy()
+        let pol = JudgedPolicy.wrapIfConfigured(
+            wantsModel ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot) : AXPolicy(),
+            endpoint: decisionEndpoint())
         let reasoner: (any Reasoner)? = useS2
             ? LLMReasoner(endpoint: s2Endpoint())
             : nil

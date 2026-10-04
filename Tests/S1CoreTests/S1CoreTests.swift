@@ -1802,3 +1802,115 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
         #expect(out.frameLength > 1000)
     }
 }
+
+// MARK: - S1 decision model (System One API)
+
+@Test func systemOneURLResolvesEveryBaseShape() {
+    #expect(SystemOneClient.url(for: "http://localhost:11434")?.absoluteString == "http://localhost:11434/v1/systemone")
+    #expect(SystemOneClient.url(for: "http://localhost:11434/v1/")?.absoluteString == "http://localhost:11434/v1/systemone")
+    #expect(SystemOneClient.url(for: "https://api.typesafe.ai")?.absoluteString == "https://api.typesafe.ai/v1/systemone")
+    let cf = "https://api.cloudflare.com/client/v4/accounts/abc/ai/run/@cf/cloudflare/clef"
+    #expect(SystemOneClient.url(for: cf)?.absoluteString == cf)
+}
+
+@Test func systemOneBodyMatchesTypeSafeSchema() throws {
+    let data = try SystemOneClient.body(model: "nimble", state: .object(["goal": .string("x")]), questions: [
+        "a": .noul("Urgent?", yes: "now", no: nil),
+        "b": .choice("Team?", options: ["billing": "money", "other": nil]),
+        "c": .score("How bad?", levels: ["low", "high"]),
+    ])
+    let o = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(o["model"] as? String == "nimble")
+    let q = try #require(o["questions"] as? [String: [String: Any]])
+    #expect(q["a"]?["type"] as? String == "noul")
+    #expect((q["a"]?["criteria"] as? [String: String])?["true"] == "now")
+    #expect(q["b"]?["type"] as? String == "choice")
+    let crit = try #require(q["b"]?["criteria"] as? [String: Any])
+    #expect(crit["billing"] as? String == "money")
+    #expect(crit["other"] is NSNull)
+    #expect(q["c"]?["criteria"] as? [String] == ["low", "high"])
+}
+
+@Test func systemOneDecodesBareAndCloudflareReplies() throws {
+    let bare = #"{"model":"tev1:0.8b","answers":{"r":{"type":"choice","choice":"a","probabilities":{"a":0.8,"b":0.2},"confidence":0.5},"n":{"type":"noul","noul":0.2}},"usage":{"input_tokens":4,"output_tokens":1}}"#
+    let r = try SystemOneClient.decode(Data(bare.utf8))
+    #expect(r.answers["r"]?.choice == "a")
+    #expect(r.answers["n"]?.noul == 0.2)
+    let cf = #"{"result":{"model":"clef","answers":{"s":{"type":"score","score":1.5,"confidence":0.9}}},"success":true}"#
+    #expect(try SystemOneClient.decode(Data(cf.utf8)).answers["s"]?.score == 1.5)
+    #expect(throws: (any Error).self) { try SystemOneClient.decode(Data("nope".utf8)) }
+}
+
+@Test func decisionContextIsBoundedAndValueFree() {
+    let kids = (0 ..< 100).map { AXNode(ref: "e\($0)", role: "AXButton", title: "B\($0)", desc: nil, help: nil,
+                                         value: "SECRET-\($0)", frame: nil, children: []) }
+    let tree = AXNode(ref: "root", role: "AXWindow", title: "Doc", desc: nil, help: nil, value: nil, frame: nil, children: kids)
+    let snap = Snapshot(timestamp: Date(), frontmostApp: "TextEdit", frontmostPID: 1, windows: [], axTree: tree, screenshotPath: nil)
+    let hist = (0 ..< 20).map { StepRecord(index: $0, time: Date(), observation: "x", decidedBy: "s1:ax",
+                                           confidence: 0.9, rationale: "r", modelReply: nil,
+                                           action: .typeText("hi"), gate: "allow",
+                                           outcome: "typed", verified: true, escalation: nil) }
+    let s = DecisionContext.state(goal: "type hi", observation: snap, history: hist, proposed: .typeText("hi"))
+    guard case .object(let o) = s, case .object(let cur)? = o["current"],
+          case .array(let controls)? = cur["visible_controls"], case .array(let h)? = o["history"] else {
+        Issue.record("bad shape"); return
+    }
+    #expect(controls.count == DecisionContext.maxControls)
+    #expect(h.count == DecisionContext.maxHistory)
+    let json = String(decoding: try! JSONEncoder().encode(s), as: UTF8.self)
+    #expect(!json.contains("SECRET"))
+}
+
+private struct StubJudge: DecisionJudge {
+    var p: Double
+    var fail = false
+    var model: String { "stub" }
+    func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult {
+        if fail { throw S1Error.aborted("down") }
+        return DecisionResult(model: "stub", answers: ["advances": DecisionAnswer(type: "noul", noul: p)])
+    }
+}
+
+@Test func judgedPolicyOnlyLowersConfidence() async throws {
+    let plan = [ScriptedPolicy.Step(action: .typeText("hi"), confidence: 0.9)]
+    let obs = NullPerceiver().observation
+    let low = try await JudgedPolicy(inner: ScriptedPolicy(steps: plan), judge: StubJudge(p: 0.1))
+        .decide(observation: obs, goal: "g", history: [])
+    #expect(low.confidence == 0.1)
+    let high = try await JudgedPolicy(inner: ScriptedPolicy(steps: plan), judge: StubJudge(p: 0.99))
+        .decide(observation: obs, goal: "g", history: [])
+    #expect(high.confidence == 0.9)
+    let down = try await JudgedPolicy(inner: ScriptedPolicy(steps: plan), judge: StubJudge(p: 0, fail: true))
+        .decide(observation: obs, goal: "g", history: [])
+    #expect(down.confidence == 0.9)
+    #expect(down.rationale.contains("judge unavailable"))
+}
+
+@Test func endpointKeysPreferEnvThenKeychainThenFile() {
+    var cfg = S1Config()
+    cfg.s2 = .init(base: "https://openrouter.ai/api/v1", model: "x", key: "file-key")
+    cfg.decision = .init(model: "nimble")
+    #expect(Endpoints.s2(env: [:], config: cfg, secret: { _ in nil }).apiKey == "file-key")
+    #expect(Endpoints.s2(env: [:], config: cfg, secret: { $0 == .s2 ? "kc-key" : nil }).apiKey == "kc-key")
+    #expect(Endpoints.s2(env: ["S1_S2_KEY": "env-key"], config: cfg, secret: { _ in "kc-key" }).apiKey == "env-key")
+    #expect(Endpoints.decision(env: [:], config: cfg, secret: { _ in nil })?.baseURL == "http://localhost:11434")
+    #expect(Endpoints.decision(env: [:], config: S1Config(), secret: { _ in nil }) == nil)
+}
+
+@Test func secretStoreRoundTrips() throws {
+    let svc = "com.matthew.s1.tests.\(UUID().uuidString)"
+    defer { SecretStore.delete(account: "s2", service: svc) }
+    #expect(SecretStore.get(account: "s2", service: svc) == nil)
+    try SecretStore.set("sk-one", account: "s2", service: svc)
+    try SecretStore.set("sk-two", account: "s2", service: svc)
+    #expect(SecretStore.get(account: "s2", service: svc) == "sk-two")
+    #expect(SecretStore.delete(account: "s2", service: svc))
+    #expect(SecretStore.get(account: "s2", service: svc) == nil)
+}
+
+@Test func judgeLeavesTheExactAXGrammarAlone() async throws {
+    let d = try await JudgedPolicy(inner: AXPolicy(), judge: StubJudge(p: 0.01))
+        .decide(observation: NullPerceiver().observation, goal: "open TextEdit", history: [])
+    #expect(d.confidence > 0.5)
+    #expect(!d.rationale.contains("judge"))
+}

@@ -47,6 +47,9 @@ public struct S1Config: Codable, Sendable {
     public var notchHUD: Bool?
     /// Optional GUI-grounding specialist for click targets (see `Grounder`).
     public var grounder: ModelEndpoint?
+    /// S1 decision model (System One API: Ollama `/v1/systemone`, TypeSafe
+    /// Jev, Cloudflare Clef). Opt-in — nil means no decision judge.
+    public var decision: ModelEndpoint?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
@@ -98,22 +101,24 @@ public struct S1Config: Codable, Sendable {
 public enum Endpoints {
     public static func vlm(base: String? = nil, model: String? = nil,
                            env: [String: String] = ProcessInfo.processInfo.environment,
-                           config: S1Config = .load()) -> Endpoint {
+                           config: S1Config = .load(),
+        secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint {
         Endpoint(
             baseURL: base ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1",
             model: model ?? env["S1_VLM_MODEL"] ?? config.vlm?.model ?? "gemma3:4b",
-            apiKey: env["S1_VLM_KEY"] ?? config.vlm?.key,
+            apiKey: env["S1_VLM_KEY"] ?? secret(.vlm) ?? config.vlm?.key,
             // 4k covers the decision prompt (AX digest + format) with room —
             // 8k just doubles the KV allocation on tight 16GB machines.
             numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.vlm?.numCtx ?? 4096)
     }
 
     public static func s2(env: [String: String] = ProcessInfo.processInfo.environment,
-                          config: S1Config = .load()) -> Endpoint {
+                          config: S1Config = .load(),
+        secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint {
         Endpoint(
             baseURL: env["S1_S2_BASE"] ?? config.s2?.base ?? "http://localhost:11434/v1",
             model: env["S1_S2_MODEL"] ?? config.s2?.model ?? "gemma3:4b",
-            apiKey: env["S1_S2_KEY"] ?? config.s2?.key,
+            apiKey: env["S1_S2_KEY"] ?? secret(.s2) ?? config.s2?.key,
             numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.s2?.numCtx ?? 8192)
     }
 
@@ -121,14 +126,51 @@ public enum Endpoints {
     /// opt-in: a model the user never pulled must not sit in the click path.
     /// Base defaults to the VLM's server (same Ollama, one more model).
     public static func grounder(env: [String: String] = ProcessInfo.processInfo.environment,
-                                config: S1Config = .load()) -> Endpoint? {
+                                config: S1Config = .load(),
+        secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint? {
         guard let model = env["S1_GROUNDER_MODEL"] ?? config.grounder?.model,
               !model.isEmpty else { return nil }
         return Endpoint(
             baseURL: env["S1_GROUNDER_BASE"] ?? config.grounder?.base
                 ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1",
             model: model,
-            apiKey: env["S1_GROUNDER_KEY"] ?? config.grounder?.key,
+            apiKey: env["S1_GROUNDER_KEY"] ?? secret(.grounder) ?? config.grounder?.key,
             numCtx: config.grounder?.numCtx ?? 4096)
+    }
+    /// Keychain lookup for a role's API key — the default secret source.
+    public static func keychainSecret(_ role: ModelRole) -> String? {
+        SecretStore.get(account: role.rawValue)
+    }
+
+    /// Decision-model endpoint, or nil when none is configured. Base is the
+    /// server root: `http://localhost:11434` (Ollama ≥ 0.35),
+    /// `https://api.typesafe.ai` (Jev), or a full Cloudflare
+    /// `…/ai/run/@cf/cloudflare/clef` URL.
+    public static func decision(env: [String: String] = ProcessInfo.processInfo.environment,
+                                config: S1Config = .load(),
+                                secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint? {
+        guard let model = env["S1_DECISION_MODEL"] ?? config.decision?.model,
+              !model.isEmpty else { return nil }
+        return Endpoint(
+            baseURL: env["S1_DECISION_BASE"] ?? config.decision?.base ?? "http://localhost:11434",
+            model: model,
+            apiKey: env["S1_DECISION_KEY"] ?? secret(.decision) ?? config.decision?.key)
+    }
+}
+
+
+public extension S1Config {
+    /// Drop a role's plaintext `key` from config.json once the Keychain owns
+    /// it — a key must not linger in a file after moving to the Keychain.
+    static func stripPlaintextKey(_ role: ModelRole, path: String = S1Config.path) throws {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        var c = S1Config.load(from: path)
+        switch role {
+        case .vlm: guard c.vlm?.key != nil else { return }; c.vlm?.key = nil
+        case .s2: guard c.s2?.key != nil else { return }; c.s2?.key = nil
+        case .grounder: guard c.grounder?.key != nil else { return }; c.grounder?.key = nil
+        case .decision: guard c.decision?.key != nil else { return }; c.decision?.key = nil
+        }
+        try c.save(to: path)
     }
 }

@@ -1,0 +1,134 @@
+import SwiftUI
+import S1Core
+
+/// One place to wire every brain: S1 decision model, S1 vision + click
+/// grounder, S2 LLM — base URL, model, and an API key that goes straight
+/// to the Keychain (the field never shows a saved key back).
+@available(macOS 26, *)
+struct ConnectionsView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    presetMenu([
+                        ("Ollama · nimble 9B (local)", "http://localhost:11434", "nimble"),
+                        ("Ollama · tev1 4B (local)", "http://localhost:11434", "tev1"),
+                        ("Ollama · tev1 0.8B (local, fastest)", "http://localhost:11434", "tev1:0.8b"),
+                        ("Ollama · clef-flash 9B (local, vision)", "http://localhost:11434", "clef-flash"),
+                        ("TypeSafe · Jev (hosted)", "https://api.typesafe.ai", "jev-latest"),
+                        ("Cloudflare · Clef (Workers AI)",
+                         "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef", "clef"),
+                    ]) { model.decisionBase = $0; model.decisionModel = $1 }
+                    TextField("Server", text: $model.decisionBase)
+                    TextField("Model (empty = off)", text: $model.decisionModel)
+                    KeyRow(model: model, role: .decision)
+                    TestRow(model: model, role: .decision)
+                } header: {
+                    Text("S1 · Decision model")
+                } footer: {
+                    Text("Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
+                }
+                Section {
+                    presetMenu([
+                        ("Ollama (local)", "http://localhost:11434/v1", model.vlmModel),
+                        ("OpenRouter", "https://openrouter.ai/api/v1", model.vlmModel),
+                    ]) { model.vlmBase = $0; model.vlmModel = $1 }
+                    TextField("Base URL", text: $model.vlmBase)
+                    TextField("Vision model", text: $model.vlmModel)
+                    TextField("Click grounder (empty = VLM grounds)", text: $model.grounderModel)
+                    KeyRow(model: model, role: .vlm)
+                    TestRow(model: model, role: .vlm)
+                } header: {
+                    Text("S1 · Vision + click grounder")
+                } footer: {
+                    Text("OpenAI-compatible chat with images. Used when the brain is VLM (or Auto with the server up).")
+                }
+                Section {
+                    presetMenu([
+                        ("Ollama (local)", "http://localhost:11434/v1", "gemma3:4b"),
+                        ("OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-oss-120b"),
+                        ("OpenAI", "https://api.openai.com/v1", model.s2Model),
+                        ("Groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
+                    ]) { model.s2Base = $0; model.s2Model = $1 }
+                    TextField("Base URL", text: $model.s2Base)
+                    TextField("Model", text: $model.s2Model)
+                    Toggle("Escalate to S2", isOn: $model.useS2)
+                    KeyRow(model: model, role: .s2)
+                    TestRow(model: model, role: .s2)
+                } header: {
+                    Text("S2 · Reasoning LLM")
+                } footer: {
+                    Text("Any OpenAI-compatible /v1/chat/completions server. Gets low-confidence and judge-vetoed steps.")
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Text("Keys are stored in the login Keychain (\(SecretStore.defaultService)), never in ~/.s1/config.json.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding()
+        }
+        .frame(minWidth: 560, minHeight: 640)
+    }
+
+    private func presetMenu(_ items: [(String, String, String)],
+                            apply: @escaping (String, String) -> Void) -> some View {
+        Menu("Preset") {
+            ForEach(items, id: \.0) { item in
+                Button(item.0) { apply(item.1, item.2) }
+            }
+        }
+        .fixedSize()
+    }
+}
+
+@available(macOS 26, *)
+private struct KeyRow: View {
+    @Bindable var model: AppModel
+    let role: ModelRole
+    @State private var draft = ""
+
+    var body: some View {
+        // keyRevision makes the row re-read Keychain state after save/remove.
+        let saved = model.keyRevision >= 0 && model.hasKey(role)
+        LabeledContent("API key") {
+            HStack {
+                SecureField(saved ? "saved in Keychain — type to replace" : "none (local servers need none)",
+                            text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") { model.saveKey(draft, for: role); draft = "" }
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                if saved {
+                    Button("Remove", role: .destructive) { model.removeKey(for: role) }
+                }
+            }
+        }
+    }
+}
+
+@available(macOS 26, *)
+private struct TestRow: View {
+    @Bindable var model: AppModel
+    let role: ModelRole
+    @State private var result = ""
+    @State private var testing = false
+
+    var body: some View {
+        HStack {
+            Button(testing ? "Testing…" : "Test connection") {
+                testing = true
+                Task {
+                    result = await model.testConnection(role)
+                    testing = false
+                }
+            }
+            .disabled(testing)
+            Text(result).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+        }
+    }
+}

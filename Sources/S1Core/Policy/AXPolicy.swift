@@ -11,6 +11,7 @@ import Foundation
 /// in the loop.
 public struct AXPolicy: Policy {
     public let name = "ax"
+    public var judgeable: Bool { false }
     /// Seconds waited between queued sub-commands; the policy consumes one
     /// intent per step, using history length as its position cursor.
     public init() {}

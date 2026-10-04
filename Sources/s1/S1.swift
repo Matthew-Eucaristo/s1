@@ -15,7 +15,8 @@ struct S1: AsyncParsableCommand {
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
-                      ModelsCmd.self, PullCmd.self, GroundCmd.self])
+                      ModelsCmd.self, PullCmd.self, GroundCmd.self, DecideCmd.self,
+                      KeyCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -139,7 +140,7 @@ struct RunCmd: AsyncParsableCommand {
         try? FileManager.default.removeItem(atPath: killSwitch)
         // Live step feed — a 25-step run is otherwise silent for minutes and
         // reads as hung. Same digest format the app feed shows.
-        let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goalText, policy: JudgedPolicy.wrapIfConfigured(pol), artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2,
                                onStep: { rec in print(rec.digest) })
@@ -166,7 +167,12 @@ struct ConfigCmd: AsyncParsableCommand {
         print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
         let grounder = Endpoints.grounder()
         print("grounder → \(grounder.map { "\($0.baseURL) model=\($0.model)" } ?? "none (VLM grounds clicks itself)")")
-        print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_GROUNDER_BASE/S1_GROUNDER_MODEL/S1_GROUNDER_KEY, S1_NUM_CTX")
+        let decision = Endpoints.decision()
+        print("decision → \(decision.map { "\($0.baseURL) model=\($0.model)" } ?? "none (no S1 decision judge)")")
+        let keys = ModelRole.allCases.map { r in
+            "\(r.rawValue)=\(SecretStore.has(account: r.rawValue) ? "keychain" : "-")" }
+        print("api keys → \(keys.joined(separator: " ")) (set with `s1 key set <role>`)")
+        print("env overrides: S1_DECISION_BASE/S1_DECISION_MODEL/S1_DECISION_KEY, S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_GROUNDER_BASE/S1_GROUNDER_MODEL/S1_GROUNDER_KEY, S1_NUM_CTX")
         let cfg = S1Config.load()
         // The CLI honors these too — surface the values a flag-less run
         // will actually get (flag → config → default).
@@ -374,7 +380,7 @@ struct ListenCmd: AsyncParsableCommand {
         // a new run, so an old "stop" file must not silently abort step 0.
         let kill = NSTemporaryDirectory() + "s1-stop"
         try? FileManager.default.removeItem(atPath: kill)
-        let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goal, policy: JudgedPolicy.wrapIfConfigured(pol), artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: kill, s2: reasoner,
@@ -600,10 +606,13 @@ struct ServeCmd: AsyncParsableCommand {
         } else {
             vlmUp.value = policy == "vlm"
         }
+        let decisionEp = Endpoints.decision()
         let makePol: @Sendable () -> any Policy = {
-            guard vlmUp.value else { return AXPolicy() }
-            return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                             useScreenshot: S1Config.load().vlmScreenshot ?? true)
+            let pol: any Policy = vlmUp.value
+                ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                            useScreenshot: S1Config.load().vlmScreenshot ?? true)
+                : AXPolicy()
+            return JudgedPolicy.wrapIfConfigured(pol, endpoint: decisionEp)
         }
 
         // --file: one utterance through the same pipeline, then exit.
@@ -1137,5 +1146,97 @@ struct ReplayCmd: AsyncParsableCommand {
                                            killSwitchPath: dryRun ? nil : kill)
         print("replay run dir: \(logger.runDir.path)")
         print("replayed \(n) steps")
+    }
+}
+
+struct DecideCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "decide",
+        abstract: "Ask the S1 decision model one typed question (System One API: Ollama, Jev, Clef).")
+    @Argument(help: "State text to judge.") var state: String
+    @Argument(help: "The question, e.g. \"Is this urgent?\"") var question: String
+    @Option(help: "Comma-separated options → a Choice question (default: yes/no Noul).") var options: String?
+    @Option(help: "Decision model (default: configured, e.g. nimble, tev1, jev-latest, clef).") var model: String?
+    @Option(help: "Server root (default: configured, else http://localhost:11434).") var base: String?
+
+    func run() async throws {
+        let cfg = Endpoints.decision()
+        guard let name = model ?? cfg?.model else {
+            throw ValidationError("no decision model — pass --model (e.g. tev1:0.8b) or set one in the app's Connections")
+        }
+        let ep = Endpoint(baseURL: base ?? cfg?.baseURL ?? "http://localhost:11434", model: name,
+                          apiKey: cfg?.apiKey)
+        let q: DecisionQuestion = options.map { o in
+            .choice(question, options: Dictionary(uniqueKeysWithValues: o.split(separator: ",")
+                .map { (String($0).trimmingCharacters(in: .whitespaces), String?.none) }))
+        } ?? .noul(question)
+        let started = Date()
+        let r = try await SystemOneClient(endpoint: ep, timeout: 120)
+            .evaluate(state: .string(state), questions: ["q": q])
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        print("model    \((r.model ?? name).terminalSafe) (\(ms) ms)")
+        guard let a = r.answers["q"] else { print("answer   none"); throw ExitCode(2) }
+        if let p = a.noul { print(String(format: "yes      %.3f", p)) }
+        if let c = a.choice { print("choice   \(c.terminalSafe)") }
+        if let s = a.score { print(String(format: "score    %.3f", s)) }
+        for (k, v) in (a.probabilities ?? [:]).sorted(by: { $0.value > $1.value }) {
+            print(String(format: "  %-12@ %.3f", k.terminalSafe, v))
+        }
+        if let c = a.confidence { print(String(format: "confidence %.3f", c)) }
+    }
+}
+
+struct KeyCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "key",
+        abstract: "Store API keys in the macOS Keychain (never in config.json).",
+        subcommands: [Set.self, Remove.self, List.self])
+
+    static func role(_ s: String) throws -> ModelRole {
+        guard let r = ModelRole(rawValue: s) else {
+            throw ValidationError("role must be one of: \(ModelRole.allCases.map(\.rawValue).joined(separator: ", "))")
+        }
+        return r
+    }
+
+    struct Set: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "set",
+            abstract: "Read a key from stdin (hidden when interactive) into the Keychain.")
+        @Argument(help: "decision | vlm | grounder | s2") var role: String
+        func run() async throws {
+            let r = try KeyCmd.role(role)
+            let raw: String?
+            if isatty(STDIN_FILENO) != 0 {
+                var buf = [CChar](repeating: 0, count: 4096)
+                raw = readpassphrase("\(r.rawValue) API key: ", &buf, buf.count, 0).map { String(cString: $0) }
+                buf.withUnsafeMutableBytes { memset_s($0.baseAddress, $0.count, 0, $0.count) }
+            } else {
+                raw = readLine(strippingNewline: true)
+            }
+            guard let key = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
+                throw ValidationError("empty key")
+            }
+            try SecretStore.set(key, account: r.rawValue)
+            try S1Config.stripPlaintextKey(r)
+            print("saved \(r.rawValue) key to Keychain (\(SecretStore.defaultService))")
+        }
+    }
+
+    struct Remove: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "rm", abstract: "Delete a role's key.")
+        @Argument(help: "decision | vlm | grounder | s2") var role: String
+        func run() async throws {
+            let r = try KeyCmd.role(role)
+            SecretStore.delete(account: r.rawValue)
+            try S1Config.stripPlaintextKey(r)
+            print("removed \(r.rawValue) key")
+        }
+    }
+
+    struct List: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(commandName: "ls", abstract: "Which roles have a key (values never shown).")
+        func run() async throws {
+            for r in ModelRole.allCases {
+                print("\(r.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(SecretStore.has(account: r.rawValue) ? "keychain ✓" : "—")")
+            }
+        }
     }
 }

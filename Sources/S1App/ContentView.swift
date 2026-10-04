@@ -18,6 +18,15 @@ struct ContentView: View {
                     }
                     .pickerStyle(.inline)
                     Toggle("Escalate to S2 (LLM)", isOn: $model.useS2)
+                    Button {
+                        model.showConnections = true
+                    } label: {
+                        Label("Connections & API keys…", systemImage: "network")
+                    }
+                    if !model.decisionModel.isEmpty {
+                        Text("S1 decision judge: \(model.decisionModel)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section("Voice") {
                     Picker("Locale", selection: $model.locale) {
@@ -180,6 +189,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(minWidth: 740, minHeight: 540)
+        .sheet(isPresented: $model.showConnections) { ConnectionsView(model: model) }
     }
 
     // MARK: - pieces

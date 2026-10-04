@@ -24,11 +24,15 @@ public protocol Policy: Sendable {
     /// True → the loop attaches a screenshot to every observation for this
     /// policy (VLM brains). AX-first policies keep this false and stay cheap.
     var wantsScreenshot: Bool { get }
+    /// False for exact, rule-based brains (the AX grammar): their parse IS
+    /// the decision, so a statistical judge must not second-guess it.
+    var judgeable: Bool { get }
     func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision
 }
 
 public extension Policy {
     var wantsScreenshot: Bool { false }
+    var judgeable: Bool { true }
 }
 
 /// System 2: the escalation brain (LLM, local or cloud). P2 wires real

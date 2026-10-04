@@ -5,7 +5,23 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 ## [Unreleased]
 
+### Fixed
+- **Listen crash (EXC_BREAKPOINT on `RealtimeMessenger.mServiceQueue`,
+  macOS 27)** — the mic resampler answered `.endOfStream` after each tap
+  buffer, putting the reused `AVAudioConverter` in its terminal state; every
+  later buffer converted to 0 frames and the fallback fed raw mic-format
+  audio to SpeechAnalyzer, which traps. Now `.noDataNow`, and an
+  unconvertible buffer is dropped, never forwarded.
+
 ### Added
+- **S1 decision model** — System One API client (`noul`/`choice`/`score`
+  + probabilities) for Ollama `/v1/systemone` (nimble, tev1, clef-flash,
+  clef), TypeSafe Jev and Cloudflare Clef. Optional judge over model-brain
+  steps using bounded current + past context; can only lower confidence.
+  `s1 decide` to try one.
+- **Connections & API keys** sheet — per-role base/model/presets, test
+  button, keys to the Keychain. `s1 key set|rm|ls`. Plaintext config keys
+  still read, removed once a Keychain key is saved.
 - **`s1 ground <image> <target>`** — debug a grounding model on any
   screenshot: raw reply, parsed `[0,1000]` point, mapped pixel, latency.
   Grounder prompt now restates the `(x, y)` format in the user turn —

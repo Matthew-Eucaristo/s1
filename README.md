@@ -236,8 +236,53 @@ Try a grounder on any screenshot before wiring it in:
 
 S2 is plain OpenAI `/chat/completions`, so subscriptions with a compatible
 endpoint drop in by URL + key — e.g. OpenCode Go
-(`"s2": {"base": "https://opencode.ai/zen/go/v1", "model": "glm-5.3", "key": "…"}`),
-OpenRouter, Groq, OpenAI.
+(`"s2": {"base": "https://opencode.ai/zen/go/v1", "model": "glm-5.3"}` +
+`s1 key set s2`), OpenRouter, Groq, OpenAI.
+
+### S1 decision model (optional judge)
+
+A *decision model* is not a chatbot: it answers typed questions —
+`noul` (yes/no → probability), `choice` (option + full distribution),
+`score` (ordered levels) — over a JSON `state`, with no free-form text to
+parse. s1 speaks the **System One API** (`POST …/v1/systemone`), which one
+client covers for every provider:
+
+| Provider | Base | Models | Notes |
+| --- | --- | --- | --- |
+| Ollama ≥ 0.35 (local) | `http://localhost:11434` | `nimble` 9B, `tev1` 4B, `tev1:0.8b`, `clef-flash` 9B, `clef` 27B | open weights, no key |
+| TypeSafe Jev (hosted) | `https://api.typesafe.ai` | `jev-latest` | closed, text-only, key |
+| Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/<id>/ai/run/@cf/cloudflare/clef` | `clef`, `clef-flash` | Apache-2.0 weights, key |
+
+When set, it judges every step a *model* brain (VLM) proposes: "does this
+move toward the goal, given the screen and the run so far?" and "is this
+repeating a step that already failed?". The state it sees is bounded —
+goal, frontmost app, window titles, ≤40 control labels (never field
+values), the last 8 steps with outcomes. A low score lowers the step's
+confidence, which routes it to S2 (or stops). It never raises confidence,
+never overrides the safety gate, and skips the exact AX grammar. Judge down
+→ the step proceeds as before.
+
+```bash
+ollama pull tev1:0.8b
+s1 decide "Goal: open TextEdit. Frontmost: Finder." "Which brain?" --options deterministic,vision,planner --model tev1:0.8b
+```
+
+Config: `"decision": {"base": "http://localhost:11434", "model": "nimble"}`
+or `S1_DECISION_MODEL`/`S1_DECISION_BASE`/`S1_DECISION_KEY`, or the app's
+**Connections & API keys…** sheet. Small models are poorly calibrated on
+our steps (tev1:0.8b scored a correct "open TextEdit" at 0.12) — pick
+`nimble`/`clef-flash` or Jev for real use and watch the `judge … p=` notes
+in `steps.jsonl`. Laya and GLiNER2.5-Decide are Python libraries without
+this HTTP API; serve them behind a `/v1/systemone` shim to plug them in.
+
+### API keys
+
+Keys live in the login Keychain (service `com.matthew.s1.api-keys`, one
+item per role: `decision`, `vlm`, `grounder`, `s2`) — set them in the
+Connections sheet or `s1 key set <role>` (hidden prompt, or stdin), list
+with `s1 key ls` (values never shown), delete with `s1 key rm <role>`.
+Resolution order: `S1_<ROLE>_KEY` env → Keychain → legacy `key` in
+config.json (saving a key to the Keychain removes the plaintext copy).
 
 ### Getting a model
 
