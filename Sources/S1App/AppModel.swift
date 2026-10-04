@@ -57,6 +57,57 @@ final class AppModel {
     /// something. Off = the window never exists (see NotchHUD.swift).
     var notchHUD = true { didSet { if !notchHUD { hud.hide() }; scheduleSave() } }
 
+    // MARK: - model library (one-click downloads)
+
+    /// Models `ollama list` reports — refreshed on appear and after pulls.
+    private(set) var installedModels: [String] = []
+    /// Live download line per model name while a pull is in flight.
+    var pullProgress: [String: String] = [:]
+    /// The shipped shortlist (S1Core) minus what's already installed.
+    var catalog: [ModelPull.CatalogEntry] { ModelPull.catalog }
+    /// True while any pull runs — the section shows one progress at a time.
+    var pullInFlight: Bool { !pullProgress.isEmpty }
+    /// Ollama CLI found on disk?
+    var ollamaPresent: Bool { ModelPull.ollamaBinary() != nil }
+
+    /// Read `ollama list` off the main actor — Process.waitUntilExit is
+    /// synchronous; keep it off the UI thread.
+    func refreshModels() {
+        Task {
+            let names = await Task.detached { ModelPull.installed() }.value
+            self.installedModels = names
+        }
+    }
+
+    /// One tap: pull a catalog/model name into Ollama. On finish the model
+    /// auto-assigns — a vision model becomes the S1 brain, a text-only
+    /// model becomes S2 — matching how the catalog describes them.
+    func pullModel(_ name: String, vision: Bool) {
+        guard pullProgress[name] == nil else { return }
+        pullProgress[name] = "starting…"
+        Task {
+            do {
+                try await ModelPull.pull(model: name) { [weak self] line in
+                    Task { @MainActor in self?.pullProgress[name] = line }
+                }
+                pullProgress[name] = nil
+                refreshModels()
+                if vision {
+                    vlmModel = name; brain = .vlm
+                } else {
+                    s2Model = name; useS2 = true
+                }
+                vlmStatus.refresh(); s2Status.refresh()
+            } catch {
+                pullProgress[name] = "failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Installed row → wire it into the matching slot without re-downloading.
+    func useAsBrain(_ name: String) { vlmModel = name; brain = .vlm }
+    func useAsS2(_ name: String) { s2Model = name; useS2 = true }
+
     private(set) var steps: [StepRecord] = [] { didSet { syncHUD() } }
     private(set) var status = "idle" { didSet { syncHUD() } }
     private(set) var running = false { didSet { syncHUD() } }
@@ -98,8 +149,15 @@ final class AppModel {
     /// up after launch must upgrade the brain without a settings change.
     private var vlmProbeTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
+    /// One-click model install state per endpoint — the closures read the
+    /// user's live field edits, so a changed base/model is what refreshes.
+    /// (`lazy` is off-limits under @Observable — these get wired in init.)
+    let vlmStatus: ModelPullStatus
+    let s2Status: ModelPullStatus
 
     init() {
+        vlmStatus = ModelPullStatus { Endpoints.vlm() }
+        s2Status = ModelPullStatus { Endpoints.s2() }
         // ~/.s1/config.json seeds the app too — model choices made in the app
         // persist, and the CLI picks them up (and vice versa).
         let cfg = S1Config.load()
@@ -116,7 +174,13 @@ final class AppModel {
         if let u = cfg.useS2 { useS2 = u }
         if let n = cfg.notchHUD { notchHUD = n }
 
+        // Status providers read the live fields (typed-but-unsaved edits
+        // count immediately) — wired post-init since they capture self.
+        vlmStatus.ep = { [weak self] in self?.vlmEndpoint() ?? Endpoints.vlm() }
+        s2Status.ep = { [weak self] in self?.s2Endpoint() ?? Endpoints.s2() }
+
         refreshPermissions()
+        refreshModels()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         startServe()
         // TCC grants land in System Settings while s1 is open — re-check
@@ -585,6 +649,96 @@ final class AppModel {
     func revealRunDir() {
         guard let runDir else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: runDir)])
+    }
+}
+
+/// Per-endpoint "is the model there" status + one-click `ollama pull`.
+/// One instance per endpoint section (S1's VLM, S2's reasoner) — remote
+/// endpoints just report `.remote` and the row hides itself.
+@MainActor @Observable
+final class ModelPullStatus {
+    enum State: Equatable {
+        case checking
+        case installed
+        case missing
+        case downloading(String)
+        case failed(String)
+        case noOllama
+        case unreachable
+        case remote
+    }
+
+    private(set) var state: State = .checking
+    /// The endpoint's display name — the model the pull targets.
+    private(set) var modelName = ""
+    /// Wired after init — callers can't capture self until it exists.
+    var ep: @MainActor () -> Endpoint
+    private var pullTask: Task<Void, Never>?
+
+    init(_ ep: @escaping @MainActor () -> Endpoint = { Endpoints.vlm() }) { self.ep = ep }
+
+    /// Re-probe — call on appear and after state that could change the
+    /// answer (a pull finishing, a server starting).
+    func refresh() {
+        let e = ep()
+        modelName = e.model
+        guard e.isLocal else { state = .remote; return }
+        guard pullTask == nil else { return }   // a pull in flight owns the state
+        state = .checking
+        Task { [weak self] in
+            guard let self else { return }
+            switch await AutoPolicy.probe(e) {
+            case .reachableWithModel: self.state = .installed
+            case .reachableMissingModel: self.state = .missing
+            case .unreachable: self.state = .unreachable
+            }
+        }
+    }
+
+    /// `ollama pull` talks to the registry directly — it works even while
+    /// the local server is down, so the button shows in `.unreachable` too.
+    func pull() {
+        guard pullTask == nil else { return }
+        let e = ep()
+        modelName = e.model
+        guard ModelPull.ollamaBinary() != nil else { state = .noOllama; return }
+        state = .downloading("starting…")
+        pullTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.pullTask = nil }
+            do {
+                try await ModelPull.pull(model: e.model) { line in
+                    Task { @MainActor [weak self] in
+                        self?.state = .downloading(line)
+                    }
+                }
+                self.state = .checking
+                self.refresh()
+            } catch {
+                self.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Server down → bring it up. `ollama serve` detached survives the app
+    /// (launchd reparents it); then re-probe until the server answers.
+    func startServer() {
+        guard let bin = ModelPull.ollamaBinary() else { state = .noOllama; return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: bin)
+        proc.arguments = ["serve"]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        state = .checking
+        Task { [weak self] in
+            // give serve a moment to bind before the first probe
+            for _ in 0..<6 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.pullTask == nil else { return }
+                self.refresh()
+            }
+        }
     }
 }
 

@@ -19,6 +19,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
   is append-per-line, truncated tails are skipped on read); stale
   `run.lock`/`serve.pid` self-heal via live-pid checks; companion feed
   caps at 300 records so serve mode can't grow memory forever.
+- **One-click model library** — the app's sidebar lists a curated catalog
+  (size, vision vs text, one-line pitch) and every installed ollama model.
+  Download is one tap (streams `ollama pull` progress); vision models
+  auto-assign to S1, text-only to S2, and any installed model can be
+  picked from its ⋯ menu. No ollama? The section says how to get it —
+  and the AX brain needs zero downloads regardless. CLI twins:
+  `s1 models` (installed + catalog) and `s1 pull <model>` (any model,
+  ANSI-free progress).
 - **Task library searches `~/.s1/tasks/` too** — `--task name` resolves
   `tasks/<name>.txt` (cwd) first, then `~/.s1/tasks/<name>.txt`, so a
   cask-installed `s1` still has a persistent per-user task library when

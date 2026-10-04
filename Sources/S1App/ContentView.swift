@@ -38,6 +38,7 @@ struct ContentView: View {
                         TextField("Base URL", text: $model.vlmBase)
                         TextField("Model", text: $model.vlmModel)
                         Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
+                        modelStatusRow(model.vlmStatus)
                     }
                     .font(.callout)
                 }
@@ -45,9 +46,88 @@ struct ContentView: View {
                     Section("Model endpoint — S2") {
                         TextField("Base URL", text: $model.s2Base)
                         TextField("Model", text: $model.s2Model)
+                        modelStatusRow(model.s2Status)
                     }
                     .font(.callout)
                 }
+                Section("Model library") {
+                    if !model.ollamaPresent {
+                        Label("Ollama not installed", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Text(ModelPull.installHint)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    } else {
+                        if !model.installedModels.isEmpty {
+                            ForEach(model.installedModels, id: \.self) { name in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                        .accessibilityHidden(true)
+                                    Text(name).lineLimit(1).truncationMode(.tail)
+                                    Spacer()
+                                    if name == model.vlmModel && model.brain == .vlm {
+                                        Text("S1").font(.caption.weight(.semibold))
+                                            .foregroundStyle(.tint)
+                                    }
+                                    if name == model.s2Model && model.useS2 {
+                                        Text("S2").font(.caption.weight(.semibold))
+                                            .foregroundStyle(.purple)
+                                    }
+                                    Menu {
+                                        Button("Use as brain (S1)") { model.useAsBrain(name) }
+                                        Button("Use as reasoner (S2)") { model.useAsS2(name) }
+                                    } label: {
+                                        Image(systemName: "ellipsis.circle")
+                                            .accessibilityLabel("Assign \(name)")
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .menuIndicator(.hidden)
+                                    .frame(width: 20)
+                                }
+                            }
+                        }
+                        ForEach(model.catalog.filter { !model.installedModels.contains($0.name) },
+                                id: \.name) { entry in
+                            HStack(spacing: 6) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack(spacing: 4) {
+                                        Text(entry.name).font(.callout)
+                                        if entry.vision {
+                                            Image(systemName: "eye")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .accessibilityLabel("vision model")
+                                        }
+                                    }
+                                    Text("\(entry.size) · \(entry.blurb)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                if let prog = model.pullProgress[entry.name] {
+                                    Text(prog).font(.caption)
+                                        .lineLimit(1).truncationMode(.head)
+                                        .frame(maxWidth: 110)
+                                } else {
+                                    Button {
+                                        model.pullModel(entry.name, vision: entry.vision)
+                                    } label: {
+                                        Image(systemName: "arrow.down.circle")
+                                    }
+                                    .buttonStyle(.glass)
+                                    .controlSize(.small)
+                                    .accessibilityLabel("Download \(entry.name)")
+                                }
+                            }
+                        }
+                    }
+                    Text("One tap downloads the model and wires it in — vision models become the S1 brain, text models become S2.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.callout)
                 Section("Companion") {
                     Toggle("Notch HUD", isOn: $model.notchHUD)
                     Text("Floating status pill under the camera notch while s1 listens or works — hidden and released when idle.")
@@ -352,6 +432,54 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
+    }
+
+    /// One line under an endpoint section: is the configured model there,
+    /// and if not, the single button that fixes it.
+    @ViewBuilder
+    private func modelStatusRow(_ status: ModelPullStatus) -> some View {
+        HStack(spacing: 8) {
+            switch status.state {
+            case .checking:
+                ProgressView().controlSize(.mini)
+                Text("checking…").foregroundStyle(.secondary)
+            case .installed:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    .accessibilityLabel("installed")
+                Text("\(status.modelName) ready").foregroundStyle(.secondary)
+            case .missing:
+                Image(systemName: "arrow.down.circle").foregroundStyle(.orange)
+                    .accessibilityLabel("not downloaded")
+                Text("\(status.modelName) not pulled").foregroundStyle(.secondary)
+                Spacer()
+                Button("Download") { status.pull() }.controlSize(.mini)
+            case .downloading(let line):
+                ProgressView().controlSize(.mini)
+                Text(line).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+            case .failed(let err):
+                Image(systemName: "xmark.circle").foregroundStyle(.red)
+                    .accessibilityLabel("failed")
+                Text(err).foregroundStyle(.secondary).lineLimit(2)
+                Spacer()
+                Button("Retry") { status.pull() }.controlSize(.mini)
+            case .unreachable:
+                Image(systemName: "bolt.slash").foregroundStyle(.orange)
+                    .accessibilityLabel("server down")
+                Text("server down").foregroundStyle(.secondary)
+                Spacer()
+                Button("Start") { status.startServer() }.controlSize(.mini)
+            case .noOllama:
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    .accessibilityLabel("ollama missing")
+                Text(ModelPull.installHint).font(.caption.monospaced())
+                    .textSelection(.enabled)
+            case .remote:
+                EmptyView()
+            }
+        }
+        .font(.caption)
+        .onAppear { status.refresh() }
     }
 
     private func permRow(_ label: String, ok: Bool, pane: String) -> some View {

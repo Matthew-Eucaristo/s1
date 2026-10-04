@@ -152,6 +152,9 @@ public enum S1Error: Error, CustomStringConvertible, LocalizedError {
     case axFailed(String)
     case aborted(String)
     case busy(String)
+    /// An actuator-level operation failed outside the deny/abort paths —
+    /// e.g. a model pull exiting non-zero.
+    case actionFailed(String)
 
     public var description: String {
         switch self {
@@ -160,6 +163,7 @@ public enum S1Error: Error, CustomStringConvertible, LocalizedError {
         case .axFailed(let m): return "accessibility error: \(m)"
         case .aborted(let m): return "aborted: \(m)"
         case .busy(let m): return m
+        case .actionFailed(let m): return m
         }
     }
 

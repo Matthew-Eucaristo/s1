@@ -1710,3 +1710,35 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(g.evaluate(.keyCombo(keys: ["cmd", "s"])) == .allow)
     #expect(g.evaluate(.keyCombo(keys: ["return"])) == .allow)
 }
+
+// MARK: - model library
+
+@Test func ollamaListParsesNames() {
+    let out = """
+    NAME            ID              SIZE      MODIFIED
+    qwen3-vl:4b     1343d82ebee3    3.3 GB    2 days ago
+    gemma3:4b       a2af6cc3eb7f    3.3 GB    2 days ago
+    """
+    #expect(ModelPull.parseOllamaList(out) == ["qwen3-vl:4b", "gemma3:4b"])
+    // Server-down / empty / header-only all yield an empty list, never a crash.
+    #expect(ModelPull.parseOllamaList("") == [])
+    #expect(ModelPull.parseOllamaList("NAME  ID  SIZE  MODIFIED\n") == [])
+}
+
+@Test func catalogCoversBothBrainKinds() {
+    let names = ModelPull.catalog.map(\.name)
+    // The default brain ships in the catalog and must be vision-capable.
+    let gemma = ModelPull.catalog.first { $0.name == "gemma3:4b" }
+    #expect(gemma?.vision == true)
+    // At least one cheap vision pick and one text-only S2 pick exist.
+    #expect(ModelPull.catalog.contains { $0.vision && $0.name != "gemma3:4b" })
+    #expect(ModelPull.catalog.contains { !$0.vision })
+    #expect(names.count == Set(names).count, "catalog entries must be unique")
+}
+
+@Test func pullProgressStripsOllamaANSI() {
+    #expect(ModelPull.stripANSI("pulling manifest \u{1B}[K") == "pulling manifest ")
+    #expect(ModelPull.stripANSI("\u{1B}[?25l\u{1B}[?2026hverifying sha256 digest") ==
+        "verifying sha256 digest")
+    #expect(ModelPull.stripANSI("clean line") == "clean line")
+}

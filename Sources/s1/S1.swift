@@ -14,7 +14,8 @@ struct S1: AsyncParsableCommand {
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
-                      TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self])
+                      TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
+                      ModelsCmd.self, PullCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -819,6 +820,56 @@ struct TasksCmd: AsyncParsableCommand {
         if listed == 0 {
             print("no tasks — create tasks/<name>.txt (repo) or \(S1Home.path)/tasks/<name>.txt")
         }
+    }
+}
+
+struct ModelsCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "models",
+        abstract: "List installed Ollama models and the downloadable catalog.")
+
+    func run() async throws {
+        guard ModelPull.ollamaBinary() != nil else {
+            print("ollama not installed — \(ModelPull.installHint)")
+            return
+        }
+        let installed = Set(ModelPull.installed())
+        print("installed (ollama list):")
+        if installed.isEmpty { print("  (none)") }
+        for m in installed.sorted() { print("  \(m)") }
+        print("\ncatalog — `s1 pull <name>`:")
+        for e in ModelPull.catalog {
+            let mark = installed.contains(e.name) ? "✓" : " "
+            let kind = e.vision ? "vision" : "text  "
+            print("  [\(mark)] \(e.name)\t\(e.size)\t\(kind)\t\(e.blurb)")
+        }
+    }
+}
+
+struct PullCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "pull",
+        abstract: "Download a model with `ollama pull` (progress streams to stdout).")
+    @Argument(help: "Model name, e.g. gemma3:4b — any model ollama can pull, not just the app catalog.")
+    var model: String
+
+    func run() async throws {
+        let last = Locked()
+        try await ModelPull.pull(model: model) { line in
+            last.printOnce(line)
+        }
+        print("installed \(model)")
+    }
+}
+
+/// Dedupes ollama's progress redraws before printing — the pull callback
+/// is @Sendable and may fire on another queue.
+private final class Locked: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = ""
+    func printOnce(_ line: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard line != last else { return }
+        last = line
+        print(line)
     }
 }
 

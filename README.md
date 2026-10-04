@@ -198,6 +198,21 @@ resolved and where to edit; the app writes the same file, so GUI settings
 apply to the CLI too. To write a custom brain (a `Policy` or `Reasoner`
 conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 
+### Getting a model
+
+Nothing to download for the `ax` brain — it's fully deterministic. For
+`vlm`/`auto` you need a local model, which is one click or one command:
+
+```bash
+s1 models                      # installed models + the catalog with sizes
+s1 pull gemma3:4b              # any ollama model — progress streams to stdout
+```
+
+The app's **Model library** sidebar does the same with a Download button
+per catalog entry (vision models auto-assign to S1, text-only to S2), and
+any already-installed model can be assigned from its ⋯ menu. No Ollama?
+`brew install --cask ollama` — the section tells you so in-app.
+
 ## Task library & run tooling
 
 ```bash

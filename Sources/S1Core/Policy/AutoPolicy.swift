@@ -8,12 +8,20 @@ import Foundation
 /// delay, not a stall on every decision.
 public enum AutoPolicy {
 
-    /// One-shot usability probe for an OpenAI-compatible endpoint:
+    /// What the probe learned about an endpoint, in enough detail for the
+    /// UI to distinguish "server down" from "server up, model not pulled".
+    public enum ProbeResult: Equatable {
+        case unreachable
+        case reachableMissingModel
+        case reachableWithModel
+    }
+
+    /// One-shot probe for an OpenAI-compatible endpoint:
     /// `/models` (OpenAI/vLLM/MLX/Ollama-shim) then `/api/tags` (Ollama).
     /// A 200 is not enough — the server can be perfectly alive while the
     /// configured model was never pulled, which would burn every step on
     /// "model not found". So a parseable list must actually contain it.
-    public static func endpointAlive(_ ep: Endpoint) async -> Bool {
+    public static func probe(_ ep: Endpoint) async -> ProbeResult {
         for path in ["/models", "/api/tags"] {
             guard let url = URL(string: ep.baseURL + path) else { break }
             var req = URLRequest(url: url)
@@ -23,9 +31,14 @@ public enum AutoPolicy {
             }
             guard let (data, resp) = try? await URLSession.shared.data(for: req),
                   (resp as? HTTPURLResponse)?.statusCode == 200 else { continue }
-            return modelListed(ep.model, in: data)
+            return modelListed(ep.model, in: data) ? .reachableWithModel : .reachableMissingModel
         }
-        return false
+        return .unreachable
+    }
+
+    /// The boolean form the policy resolver and callers already use.
+    public static func endpointAlive(_ ep: Endpoint) async -> Bool {
+        await probe(ep) == .reachableWithModel
     }
 
     /// Does a model-list response contain the model we want?
