@@ -184,6 +184,15 @@ struct ContentView: View {
                 .accessibilityHint("Records a voice command, transcribes on-device, runs it")
                 .keyboardShortcut("l", modifiers: .command)
 
+                if model.listening {
+                    // Live proof the mic is capturing — Siri-style bars,
+                    // flat when it hears silence.
+                    LiveWaveform()
+                        .frame(width: 150, height: 30)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+
                 Button {
                     model.pickAudioAndTranscribe()
                 } label: {
@@ -228,6 +237,11 @@ struct ContentView: View {
                 Text(model.serveStatus)
                     .font(.callout)
                     .lineLimit(1)
+                if model.serveState == .listening {
+                    LiveWaveform(barCount: 16)
+                        .frame(width: 76, height: 16)
+                        .accessibilityHidden(true)
+                }
                 Spacer()
                 Button(model.serveState == .idle ? "Listen" : "Sleep") {
                     model.toggleServe()

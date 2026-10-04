@@ -1,9 +1,9 @@
 name: swift
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Manual-only: run via `gh workflow run swift` or the Actions tab when you
+  # want a fresh check — Actions minutes are a budget, not a trigger.
+  workflow_dispatch:
 
 jobs:
   build-test:

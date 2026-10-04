@@ -59,7 +59,7 @@ public final class Serve: @unchecked Sendable {
                     listenSeconds: Double = 12,
                     maxSilentTurns: Int = 3,
                     maxListenErrors: Int = 3,
-                    artifacts: String = "artifacts",
+                    artifacts: String = S1Home.path + "/artifacts",
                     killSwitch: String = NSTemporaryDirectory() + "s1-serve-stop",
                     lockPath: String? = nil,
                     stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur",

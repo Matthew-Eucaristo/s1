@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ApplicationServices
 @testable import S1Core
 
 private func jsonlDecoder() -> JSONDecoder {
@@ -696,7 +697,11 @@ private final class Locked<T>: @unchecked Sendable {
     try? FileManager.default.removeItem(at: dir)
 }
 
-@Test func serveRunUsesConfiguredPolicy() async throws {
+// A serve run needs a real Accessibility grant — the runner's first step
+// calls requireAccessibility(). Without it the test can't prove the wiring,
+// so it's gated rather than failing on machines that haven't granted yet.
+@Test(.enabled(if: AXIsProcessTrusted(), "no Accessibility grant on this machine"))
+func serveRunUsesConfiguredPolicy() async throws {
     // Prove an utterance becomes a goal and reaches the agent loop:
     // feed one command, then a stop phrase — both via injected transcribe.
     let feed = Locked<[String]>(["buka test, done", "stop"])
@@ -1424,4 +1429,16 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     let json = Serve.stateJSON(state: "idle", event: "e", detail: detail, pid: 1)
     let obj = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     #expect(obj["detail"] is String)
+}
+
+@Test func micLevelEnvelopeDecaysAndClamps() {
+    let m = MicLevel()
+    m.push(1.5)                       // clamps to 1
+    #expect(m.latest == 1)
+    m.push(0)                         // decays, doesn't drop to 0 instantly
+    let afterDecay = m.latest
+    #expect(afterDecay > 0.5 && afterDecay < 1)
+    m.reset()
+    #expect(m.latest == 0)
+    #expect(m.recent.isEmpty)
 }

@@ -43,7 +43,7 @@ struct RunCmd: AsyncParsableCommand {
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
     @Option(help: "Artifacts root directory.")
-    var artifacts: String = "artifacts"
+    var artifacts: String = S1Home.path + "/artifacts"
     @Option(help: "Max loop steps.")
     var maxSteps: Int = 25
     @Option(help: "Confidence threshold below which steps escalate to S2.")
@@ -252,7 +252,7 @@ struct ListenCmd: AsyncParsableCommand {
     @Option(help: "Policy for the run (default ax — fast, local).")
     var policy: String = "ax"
     @Option(help: "Artifacts root directory.")
-    var artifacts: String = "artifacts"
+    var artifacts: String = S1Home.path + "/artifacts"
     @Flag(help: "Speak the result with TTS.")
     var speak = false
     @Option(help: "Max loop steps.")
@@ -324,7 +324,7 @@ struct ListenCmd: AsyncParsableCommand {
 struct DemoCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "demo",
         abstract: "Canned P1 demo: open TextEdit, type, verify on-screen.")
-    @Option var artifacts: String = "artifacts"
+    @Option var artifacts: String = S1Home.path + "/artifacts"
     @Flag(help: "Log everything, execute nothing.")
     var dryRun = false
 
@@ -468,7 +468,7 @@ struct ServeCmd: AsyncParsableCommand {
             let kill = NSTemporaryDirectory() + "s1-serve-stop"
             try? FileManager.default.removeItem(atPath: kill)
             let (report, _) = try await S1Runner.run(goal: text, policy: makePol(),
-                artifacts: "artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
+                artifacts: S1Home.path + "/artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: kill,
                 s2: reasoner,
                 onStep: { rec in print(rec.digest) })
@@ -685,7 +685,7 @@ struct ReplayCmd: AsyncParsableCommand {
     @Argument(help: "Run directory to replay (contains steps.jsonl).")
     var runDir: String
     @Option(help: "Artifacts root for the replay run.")
-    var artifacts: String = "artifacts"
+    var artifacts: String = S1Home.path + "/artifacts"
     @Flag(help: "Log everything, execute nothing.")
     var dryRun = false
     @Flag(help: "Queue irreversible actions for human confirmation.")

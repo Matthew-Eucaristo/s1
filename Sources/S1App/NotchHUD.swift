@@ -101,6 +101,13 @@ struct NotchHUDView: View {
                 .frame(width: 16)
             Text(phase == .listening ? "listening" : "working")
                 .font(.callout.weight(.semibold))
+            if phase == .listening {
+                // Siri-style proof the mic is hearing — flat ticks mean
+                // "tap alive, silence", dancing bars mean "voice captured".
+                LiveWaveform()
+                    .frame(width: 110, height: 18)
+                    .accessibilityHidden(true)
+            }
             if !detail.isEmpty {
                 Text(detail)
                     .font(.callout)
@@ -128,6 +135,6 @@ struct NotchHUDView: View {
         // The pill speaks its own state — VoiceOver users get the same
         // "s1 is listening / working on step N" the sighted UI shows.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("s1 \(phase == .listening ? "listening" : "working")\(detail.isEmpty ? "" : ", \(detail)")")
+        .accessibilityLabel("s1 \(phase == .listening ? "listening, mic live" : "working")\(detail.isEmpty ? "" : ", \(detail)")")
     }
 }

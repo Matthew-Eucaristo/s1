@@ -174,8 +174,10 @@ public struct SpeechToText: Sendable {
             if tapInstalled { input.removeTap(onBus: 0) }
             engine.stop()
             req.endAudio()
+            MicLevel.shared.reset()
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            MicLevel.push(buffer: buffer)
             req.append(buffer)
         }
         tapInstalled = true
@@ -233,8 +235,10 @@ public struct SpeechToText: Sendable {
             if tapInstalled { input.removeTap(onBus: 0) }
             engine.stop()
             continuation.finish()
+            MicLevel.shared.reset()
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            MicLevel.push(buffer: buffer)
             if let converter, let best, let out = Self.convert(buffer, from: format, to: best, using: converter) {
                 continuation.yield(AnalyzerInput(buffer: out))
             } else {
