@@ -513,6 +513,12 @@ private struct StubReasoner: Reasoner {
     if case .openApp(let n)? = d?.action { #expect(n == "TextEdit") } else { Issue.record() }
     let t = LLMDecisionCodec.parse(#"{"action":{"type":"typeText","text":"hello world","confidence":0.8}}"#)
     if case .typeText(let s)? = t?.action { #expect(s == "hello world") } else { Issue.record() }
+    // A coord-less "click" reply must NOT salvage click(0,0) — that's the
+    // Apple-menu corner, a real action. Missing coords abstain.
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"click","confidence":0.8"#)?.action == nil)
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"drag","x":10,"y":20,"confidence":0.8"#)?.action == nil)
+    let ok = LLMDecisionCodec.parse(#"{"action":{"type":"click","x":100,"y":200,"confidence":0.8}}"#)
+    if case .click(let x, let y)? = ok?.action { #expect(x == 100 && y == 200) } else { Issue.record() }
 }
 
 @Test func identicalActionThreeTimesAbortsWithStuckLoop() async throws {

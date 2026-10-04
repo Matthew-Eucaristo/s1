@@ -177,11 +177,16 @@ enum LLMDecisionCodec {
         case "axSetValue": a = field("ref").map { .axSetValue(ref: $0, value: field("value") ?? field("text") ?? "") }
         case "typeText":  a = field("text").map { .typeText($0) }
         case "openApp":   a = (field("app") ?? field("name") ?? field("text")).map { .openApp(name: $0) }
-        case "click":     a = .click(x: num("x") ?? 0, y: num("y") ?? 0)
-        case "rightClick": a = .rightClick(x: num("x") ?? 0, y: num("y") ?? 0)
-        case "doubleClick": a = .doubleClick(x: num("x") ?? 0, y: num("y") ?? 0)
-        case "drag":      a = .drag(fromX: num("x") ?? 0, fromY: num("y") ?? 0,
-                                    toX: num("toX") ?? 0, toY: num("toY") ?? 0)
+        // Coordinate families: a missing coord means the reply truncated
+        // mid-object — defaulting to 0 would act on the top-left pixel
+        // (the Apple menu corner). Abstain instead of acting on a lie.
+        case "click":     a = num("x").flatMap { x in num("y").map { .click(x: x, y: $0) } }
+        case "rightClick": a = num("x").flatMap { x in num("y").map { .rightClick(x: x, y: $0) } }
+        case "doubleClick": a = num("x").flatMap { x in num("y").map { .doubleClick(x: x, y: $0) } }
+        case "moveMouse": a = num("x").flatMap { x in num("y").map { .moveMouse(x: x, y: $0) } }
+        case "drag":      a = num("x").flatMap { fx in num("y").flatMap { fy in
+                              num("toX").flatMap { tx in num("toY").map {
+                              .drag(fromX: fx, fromY: fy, toX: tx, toY: $0) } } } }
         case "axAction":  a = field("ref").map { .axAction(ref: $0, name: field("name") ?? "AXPress") }
         case "axSetAttribute": a = field("ref").map {
             .axSetAttribute(ref: $0, attr: field("attr") ?? "AXSelected",
@@ -190,7 +195,6 @@ enum LLMDecisionCodec {
         case "keyCombo":  a = field("keys").map { .keyCombo(keys: $0.split(separator: "+").map { $0.lowercased() }) }
         case "wait":      a = .wait(seconds: num("ms").map { $0 / 1000 } ?? num("seconds") ?? 0.5)
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
-        case "moveMouse": a = .moveMouse(x: num("x") ?? 0, y: num("y") ?? 0)
         case "verify":    a = field("expect").map { .verify(expectation: $0) }
         case "captureScreenshot": a = .captureScreenshot(reason: field("expect") ?? "salvaged")
         case "done":      a = .done(summary: field("expect") ?? "done")
