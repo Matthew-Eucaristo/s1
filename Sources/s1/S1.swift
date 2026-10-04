@@ -98,7 +98,7 @@ struct RunCmd: AsyncParsableCommand {
                     {"action":{"done":{"summary":"ok"}},"confidence":0.9,"rationale":"end"}]
                     """)
             }
-        default: throw ValidationError("unknown policy \(policy)")
+        default: throw ValidationError("unknown policy \(policyName) — use auto, ax, vlm, scripted or dummy")
         }
         let goalText: String
         if let task {
