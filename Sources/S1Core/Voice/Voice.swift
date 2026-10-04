@@ -32,12 +32,37 @@ public struct SpeechToText: Sendable {
         await SpeechTranscriber.installedLocales
     }
 
+    /// A SpeechTranscriber the system can actually run for `locale` —
+    /// nil when the configuration is unsupported. `SpeechTranscriber
+    /// .isAvailable` is only class-level: a locale the machine can't
+    /// serve still builds a transcriber, and SpeechAnalyzer then throws
+    /// "modules configured with an unsupported configuration" mid-listen.
+    /// Apple documents the real gate as supportedLocale + AssetInventory
+    /// status; unsupported → the caller falls back to SFSpeechRecognizer.
+    private func supportedTranscriber(
+        reportingOptions: Set<SpeechTranscriber.ReportingOption> = []
+    ) async -> SpeechTranscriber? {
+        guard SpeechTranscriber.isAvailable,
+              let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
+        let t = SpeechTranscriber(locale: supported,
+                                  transcriptionOptions: [],
+                                  reportingOptions: reportingOptions,
+                                  attributeOptions: [])
+        let status = await AssetInventory.status(forModules: [t])
+        guard status != .unsupported else { return nil }
+        if status != .installed,
+           let request = try? await AssetInventory.assetInstallationRequest(supporting: [t]) {
+            try? await request.downloadAndInstall()
+        }
+        return t
+    }
+
     /// Transcribe an audio file end-to-end (the testable path — no mic needed).
     /// Prefers SpeechAnalyzer (macOS 26); falls back to SFSpeechRecognizer
     /// when the new speech assets aren't installed on the machine.
     public func transcribe(file url: URL) async throws -> String {
-        if SpeechTranscriber.isAvailable {
-            return try await transcribeAnalyzer(file: url)
+        if let transcriber = await supportedTranscriber() {
+            return try await transcribeAnalyzer(file: url, transcriber: transcriber)
         }
         return try await transcribeLegacy(file: url)
     }
@@ -70,30 +95,14 @@ public struct SpeechToText: Sendable {
     /// Apple's `SpeechAnalyzer.prepareToAnalyze` exists for exactly this.
     /// Best-effort: every failure is swallowed (the real path retries).
     public func warmup() async {
-        guard SpeechTranscriber.isAvailable else { return }
-        let t = SpeechTranscriber(locale: locale, transcriptionOptions: [],
-                                  reportingOptions: [], attributeOptions: [])
-        if let req = try? await AssetInventory.assetInstallationRequest(supporting: [t]) {
-            try? await req.downloadAndInstall()
-        }
+        guard let t = await supportedTranscriber() else { return }
         let analyzer = SpeechAnalyzer(modules: [t])
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [t]) else { return }
         try? await analyzer.prepareToAnalyze(in: format)
     }
 
     /// SpeechAnalyzer/SpeechTranscriber path (macOS 26 assets required).
-    private func transcribeAnalyzer(file url: URL) async throws -> String {
-        let transcriber = SpeechTranscriber(locale: locale,
-                                          transcriptionOptions: [],
-                                          reportingOptions: [],
-                                          attributeOptions: [])
-        guard SpeechTranscriber.isAvailable else {
-            throw S1Error.aborted("SpeechTranscriber not available on this system")
-        }
-        // Ensure the locale's assets are installed (downloads on demand).
-        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            try await request.downloadAndInstall()
-        }
+    private func transcribeAnalyzer(file url: URL, transcriber: SpeechTranscriber) async throws -> String {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         if let ctx = analysisContext { try await analyzer.setContext(ctx) }
         guard let file = try? AVAudioFile(forReading: url) else {
@@ -128,8 +137,8 @@ public struct SpeechToText: Sendable {
         guard AVCaptureDevice.default(for: .audio) != nil else {
             throw S1Error.aborted("no microphone input available")
         }
-        if SpeechTranscriber.isAvailable {
-            return try await transcribeMicAnalyzer(maxSeconds: maxSeconds)
+        if let transcriber = await supportedTranscriber(reportingOptions: [.volatileResults]) {
+            return try await transcribeMicAnalyzer(maxSeconds: maxSeconds, transcriber: transcriber)
         }
         return try await transcribeMicLegacy(maxSeconds: maxSeconds)
     }
@@ -201,19 +210,12 @@ public struct SpeechToText: Sendable {
         return collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func transcribeMicAnalyzer(maxSeconds: Double) async throws -> String {
+    private func transcribeMicAnalyzer(maxSeconds: Double, transcriber: SpeechTranscriber) async throws -> String {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else {
             throw S1Error.aborted("no microphone input available")
-        }
-        let transcriber = SpeechTranscriber(locale: locale,
-                                          transcriptionOptions: [],
-                                          reportingOptions: [.volatileResults],
-                                          attributeOptions: [])
-        if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            try await request.downloadAndInstall()
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         if let ctx = analysisContext { try await analyzer.setContext(ctx) }
