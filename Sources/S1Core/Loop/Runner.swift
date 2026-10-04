@@ -94,7 +94,9 @@ public enum S1Runner {
     }
 
     /// The pid a live s1 process wrote to `path`, or nil for missing/stale.
-    private static func livePidHolder(of path: String) -> pid_t? {
+    /// Public so installers can check for a competing listener up front
+    /// (a launchd agent that fails to claim would respawn-churn forever).
+    public static func livePidHolder(of path: String) -> pid_t? {
         guard let txt = try? String(contentsOfFile: path, encoding: .utf8),
               let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
               pid != ProcessInfo.processInfo.processIdentifier,

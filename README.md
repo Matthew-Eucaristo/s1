@@ -22,11 +22,12 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 ```bash
 # Homebrew — the recommended way (both from our tap):
 brew tap Matthew-Eucaristo/tap
+brew trust Matthew-Eucaristo/tap   # one-time: the CLI ships a launchd service
 brew install s1             # the s1 CLI
 brew install --cask s1      # the S1 menu-bar app
 
 s1 preflight                # shows which macOS permissions are missing
-s1 serve --install          # optional: always-on listener via launchd (login + crash respawn)
+brew services start s1      # optional: always-on listener (or: s1 serve --install)
 ```
 
 Remove it cleanly any time (the `--formula`/`--cask` flags disambiguate

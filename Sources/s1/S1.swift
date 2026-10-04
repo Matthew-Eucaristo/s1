@@ -561,7 +561,7 @@ struct ServeCmd: AsyncParsableCommand {
         let domain = "gui/\(getuid())"
         let plistPath = ServeLaunchd.plistPath
         if !install {
-            _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"])
+            _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"], quiet: true)
             try? fm.removeItem(atPath: plistPath)
             print("launch agent removed: \(plistPath)")
             return
@@ -569,6 +569,17 @@ struct ServeCmd: AsyncParsableCommand {
         try fm.createDirectory(
             atPath: (plistPath as NSString).deletingLastPathComponent,
             withIntermediateDirectories: true)
+        _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"], quiet: true)  // replace cleanly
+        // Refuse while a listener that ISN'T our agent holds the lock —
+        // the agent would fail claimPidFile, exit non-zero, and KeepAlive
+        // would respawn-churn against it forever. Our own agent was already
+        // booted out above, so any live holder here is a manual serve/app.
+        if let live = S1Runner.livePidHolder(
+            of: NSHomeDirectory() + "/.s1/serve.pid") {
+            throw S1Error.aborted(
+                "a listener is already running (pid \(live)) — `s1 stop` it first, " +
+                "then re-run `s1 serve --install`")
+        }
         // Armed, not --wake: "always on" means the hotkey is ready at
         // login — not a mic that comes up live before anyone asks.
         var args = [s1BinaryPath(), "serve",
@@ -582,7 +593,6 @@ struct ServeCmd: AsyncParsableCommand {
         if let v = vocabulary { args += ["--vocabulary", v] }
         try ServeLaunchd.plist(args: args)
             .write(toFile: plistPath, atomically: true, encoding: .utf8)
-        _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"])  // replace cleanly
         guard launchctl(["bootstrap", domain, plistPath]) == 0 else {
             throw S1Error.aborted("launchctl bootstrap failed — plist at \(plistPath)")
         }
@@ -605,10 +615,11 @@ struct ServeCmd: AsyncParsableCommand {
         return arg0
     }
 
-    private func launchctl(_ args: [String]) -> Int32 {
+    private func launchctl(_ args: [String], quiet: Bool = false) -> Int32 {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = args
+        if quiet { p.standardError = FileHandle.nullDevice }
         try? p.run()
         p.waitUntilExit()
         return p.terminationStatus

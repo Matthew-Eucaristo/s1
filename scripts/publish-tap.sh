@@ -89,8 +89,18 @@ class S1 < Formula
       what's still missing.
       Menu-bar app + notch HUD:  brew install --cask s1
       Local model brain:         brew install ollama && ollama pull gemma3:4b
+      Always-on listener:        brew services start s1   (or: s1 serve --install)
       Full reset:                brew uninstall s1 && rm -rf ~/.s1
     EOS
+  end
+
+  # `brew services start s1` — the official Homebrew daemon path.
+  service do
+    run [opt_bin/"s1", "serve"]
+    keep_alive crashed: true
+    process_type :interactive
+    log_path var/"log/s1.log"
+    error_log_path var/"log/s1.log"
   end
 
   test do
