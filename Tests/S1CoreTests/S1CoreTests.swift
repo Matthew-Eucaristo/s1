@@ -1695,6 +1695,10 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     guard case .needsHuman = g.evaluate(.keyCombo(keys: ["control", "option", "spacebar"])) else {
         Issue.record("own wake hotkey (aliases) not escalated"); return
     }
+    // ⌃⌘Q locks the screen — the agent stalls blind on a locked display.
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["ctrl", "cmd", "q"])) else {
+        Issue.record("lock-screen chord not escalated"); return
+    }
     // Near-misses stay free: wrong modifier, or space without both.
     #expect(g.evaluate(.keyCombo(keys: ["ctrl", "space"])) == .allow)
     #expect(g.evaluate(.keyCombo(keys: ["cmd", "space"])) == .allow)

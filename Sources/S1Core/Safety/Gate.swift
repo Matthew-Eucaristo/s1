@@ -142,6 +142,11 @@ public struct SafetyGate: Sendable {
             if cmd && opt && !ks.isDisjoint(with: ["esc", "escape"]) {
                 return .needsHuman(reason: "⌘⌥⎋ opens Force Quit")
             }
+            // ⌃⌘Q locks the screen instantly — a run that locks the
+            // screen can't observe or act afterwards: self-stalling.
+            if cmd && ctrl && ks.contains("q") {
+                return .needsHuman(reason: "⌃⌘Q locks the screen — a locked screen stalls the agent")
+            }
             // ⌃⌥Space is s1's own wake chord — a model posting it toggles
             // the agent's listener mid-run: self-disruption, not the goal.
             if ctrl && opt && !ks.isDisjoint(with: ["space", "spacebar"]) {
