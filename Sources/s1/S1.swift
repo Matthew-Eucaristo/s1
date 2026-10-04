@@ -171,7 +171,7 @@ struct ConfigCmd: AsyncParsableCommand {
         let vocab = cfg.vocabulary ?? []
         print("vocabulary → \(vocab.count) custom words + installed app names (auto)")
         let assembled = Vocabulary.assemble(custom: vocab)
-        print("  resolved: \(assembled.prefix(10).joined(separator: ", "))\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
+        print("  resolved: \(assembled.prefix(10).joined(separator: ", ").terminalSafe)\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
         print("edit the JSON file to swap brains permanently — no rebuild needed")
         // Reachability: a misconfigured brain is the #1 user-facing failure —
         // say it plainly instead of failing mid-run.
@@ -285,7 +285,9 @@ struct TranscribeCmd: AsyncParsableCommand {
             FileHandle.standardError.write("listening... (speak)\n".data(using: .utf8)!)
             text = try await stt.transcribeMic(maxSeconds: maxSeconds)
         }
-        print(text)
+        // The transcript is model-derived — strip control chars before it
+        // reaches the user's terminal (audio can smuggle ESC/OSC sequences).
+        print(text.terminalSafe)
     }
 }
 
