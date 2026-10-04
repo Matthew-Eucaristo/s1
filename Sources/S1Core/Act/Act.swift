@@ -112,10 +112,12 @@ public struct CGEventActuator: Actuator {
             return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
 
         case .typeText(let text):
+            try refuseIfSecureFocus()
             try postUnicode(text)
             return "typed \(text.count) chars"
 
         case .keyCombo(let keys):
+            try refuseIfSecureFocus()
             try postKeyCombo(keys)
             return "keyCombo \(keys.joined(separator: "+"))"
 
@@ -174,6 +176,7 @@ public struct CGEventActuator: Actuator {
                 CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
                         mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
             }
+            try refuseIfSecureFocus()
             try postUnicode(value)
             return "focused+typed \(value.count) chars (AXSetValue refused)"
 
@@ -254,6 +257,24 @@ public struct CGEventActuator: Actuator {
         "AXSelected", "AXFocused", "AXExpanded", "AXMain",
         "AXMinimized", "AXFrontmost",
     ]
+
+    /// Act-time secure-focus re-check: the loop gates keystrokes against
+    /// the observe-time snapshot, but a password prompt can grab focus in
+    /// the seconds a model decision takes. Re-reading the live focused
+    /// element right before posting closes that window — the step errors,
+    /// the next observe re-gates, and the run escalates to human.
+    private func refuseIfSecureFocus() throws {
+        let sys = AXUIElementCreateSystemWide()
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+              let el = v, CFGetTypeID(el) == AXUIElementGetTypeID()
+        else { return }
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success,
+              (role as? String) == "AXSecureTextField"
+        else { return }
+        throw S1Error.axFailed("secure text field grabbed focus — keystrokes refused")
+    }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).
     /// One CGEvent carries a bounded unicode string — longer text is chunked

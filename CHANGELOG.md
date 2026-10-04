@@ -50,8 +50,18 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `throwIfListenerOwnsMic`).
 - **`s1 serve --install` plists the real binary** — resolved the brew
   `binary` symlink so a reinstall can't strand the launchd agent.
+- **`auto` brain upgrades mid-life** — the daemon and the app companion
+  probed the local model endpoint once at start; an Ollama that comes up
+  later left them pinned to the grammar. A slow re-probe (60s while down)
+  upgrades `auto → vlm` when the endpoint answers.
 
 ### Security
+- **Act-time secure-focus re-check** — the loop gates keystrokes against
+  the observe-time snapshot, but a password prompt appearing between
+  observe and act (model decisions take seconds) would still get typed
+  into. `typeText`, `keyCombo`, and the `axSetValue` fallback now re-read
+  the live focused element right before posting; a grabbed secure field
+  errors the step and the next observe escalates to a human.
 - **Terminal-aware typing** — text destined for a terminal's command line
   (Terminal, iTerm2, kitty, alacritty, WezTerm, ghostty, Warp, Hyper,
   tmux…) is scanned with a command-level deny-list: flag-less `rm`,
