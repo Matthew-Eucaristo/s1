@@ -225,18 +225,17 @@ func resolveLocale(_ flag: String?) -> String {
     flag ?? S1Config.load().locale ?? "id-ID"
 }
 
-/// Refuse a mic grab while the listener daemon is mid-turn: two audio
-/// engines on one input device fails cryptically (or silently starves
-/// both). Idle daemon = mic free.
-func throwIfListenerOwnsMic() throws {
-    guard let data = FileManager.default.contents(atPath: Serve.statePath),
-          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          (obj["state"] as? String) == "listening",
-          let pid = (obj["pid"] as? Int).map(pid_t.init),
-          S1Runner.pidLooksLikeS1(pid) else { return }
-    throw ValidationError(
-        "the s1 listener is actively listening (pid \(pid)) — it owns the mic; " +
-        "say your command to it, or `s1 stop` first")
+/// Claim the mic for a foreground command — the lock file is atomic, so
+/// a listening daemon, another foreground capture, or a daemon that wakes
+/// mid-recording all resolve to one owner. The holder check is only for
+/// a friendly error; the claim is what actually serializes.
+func claimMicOrThrow() throws {
+    if let pid = S1Runner.livePidHolder(of: S1Runner.micPidPath) {
+        throw ValidationError(
+            "the mic is already owned by s1 pid \(pid) — `s1 stop` a listening " +
+            "daemon first, or wait for the other capture to finish")
+    }
+    try S1Runner.claimMic()
 }
 
 /// Shared `auto` resolution: probe the VLM endpoint once, log which brain
@@ -278,9 +277,10 @@ struct TranscribeCmd: AsyncParsableCommand {
             }
             text = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
-            // Same ownership rule as `s1 listen`: a LISTENING daemon
-            // holds the mic — two audio engines fail cryptically.
-            try throwIfListenerOwnsMic()
+            // The mic lock serializes against a listening daemon AND
+            // another foreground capture — two engines fail cryptically.
+            try claimMicOrThrow()
+            defer { S1Runner.releaseMic() }
             // stderr, not stdout — piped output must be the transcript alone.
             FileHandle.standardError.write("listening... (speak)\n".data(using: .utf8)!)
             text = try await stt.transcribeMic(maxSeconds: maxSeconds)
@@ -346,9 +346,10 @@ struct ListenCmd: AsyncParsableCommand {
             }
             goal = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
-            // A live LISTENING daemon owns the mic — refuse only when it
-            // is actually listening (idle = mic free).
-            try throwIfListenerOwnsMic()
+            // Same mic lock as `s1 transcribe` — daemon or peer capture,
+            // one owner at a time.
+            try claimMicOrThrow()
+            defer { S1Runner.releaseMic() }
             FileHandle.standardError.write("listening... (speak a command)\n".data(using: .utf8)!)
             goal = try await stt.transcribeMic(maxSeconds: 20)
         }

@@ -12,6 +12,11 @@ public enum S1Runner {
     /// Pid file marking a live agent run. Two agents typing at once is the
     /// disaster this prevents: any process can check screen ownership.
     public static let lockPath = NSHomeDirectory() + "/.s1/run.pid"
+    /// The mic is one physical input: a listening daemon, a foreground
+    /// `s1 transcribe`, or the app's companion must never open two audio
+    /// engines on it at once. This lock is shared across all consumers —
+    /// claimed for a whole listening session or one foreground capture.
+    public static let micPidPath = NSHomeDirectory() + "/.s1/mic.pid"
 
     /// True while another process holds the run lock. Stale files after a
     /// crash expire via pid-liveness AND identity: a recycled pid owned by
@@ -74,10 +79,16 @@ public enum S1Runner {
                 close(fd)
                 return
             }
-            // Exists already: a live s1 holds it, or a crash left a stale
-            // file. Only ever remove a provably-stale lock — a competitor
-            // who won the O_EXCL race wrote a live pid, which this check
-            // sees and reports as busy.
+            // Exists already: our own pid means this process already owns
+            // the lock — a second in-process claim (parallel test wakes,
+            // the app holding serve.pid while its mic path re-claims)
+            // must be a no-op, not a stale-clean that deletes our own
+            // lock and lets a real competitor slip into the gap.
+            if holdsPidFile(path) { return }
+            // A live s1 holds it, or a crash left a stale file. Only ever
+            // remove a provably-stale lock — a competitor who won the
+            // O_EXCL race wrote a live pid, which this check sees and
+            // reports as busy.
             if let live = livePidHolder(of: path) {
                 throw S1Error.busy("another \(what) is already running (pid \(live)) — wait for it or stop it first")
             }
@@ -158,6 +169,15 @@ public enum S1Runner {
     /// Removes the lock only when WE hold it — a dry-run (which never
     /// acquires) must not delete a live run's lock file.
     public static func releaseRunLock() { releasePidFile(lockPath) }
+
+    /// Claim/release the mic lock. Two audio engines on one input device
+    /// fail cryptically — or silently starve each other — so every mic
+    /// consumer (daemon wake, foreground transcribe/listen) holds this
+    /// for the duration of its audio session.
+    public static func claimMic() throws {
+        try claimPidFile(micPidPath, what: "s1 mic session")
+    }
+    public static func releaseMic() { releasePidFile(micPidPath) }
 
     /// Non-dry-run gate — without AX trust the tree reads empty and
     /// CGEvent posts silently drop, so a run would "type" into the void

@@ -415,6 +415,14 @@ final class AppModel {
             status = "companion is running — wait or sleep it first"
             return
         }
+        // The mic lock is shared with the CLI daemon and foreground
+        // `s1 transcribe`/`s1 listen` — the companion's own state only
+        // covers this process.
+        do { try S1Runner.claimMic() } catch {
+            status = "mic is in use — a CLI listener or capture owns it (`s1 stop` first)"
+            return
+        }
+        defer { S1Runner.releaseMic() }
         listening = true
         status = "listening…"
         defer { listening = false; listenTask = nil }

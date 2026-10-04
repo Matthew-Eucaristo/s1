@@ -166,6 +166,11 @@ public final class Serve: @unchecked Sendable {
             do { try S1Runner.claimPidFile(lockPath, what: "s1 listener") }
             catch { emit(.error, "another listener is running"); return }
         }
+        // The mic is shared with foreground `s1 transcribe`/`listen` —
+        // claim it for the whole listening session or two audio engines
+        // race on the same input.
+        do { try S1Runner.claimMic() }
+        catch { emit(.error, "mic is in use — try again"); return }
         try? FileManager.default.removeItem(atPath: config.killSwitch)
         setState(.listening)
         emit(.listening)
@@ -193,6 +198,9 @@ public final class Serve: @unchecked Sendable {
         // Land the kill switch too — an in-flight run aborts at its next step
         // instead of finishing a task the user already cancelled.
         try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
+        // The mic goes free the moment we stop listening — a foreground
+        // `s1 transcribe` must not stay locked out by a sleeping daemon.
+        S1Runner.releaseMic()
         // And cut any speech in flight — "sleep" should mean silent.
         speaker.stop()
         if state != .idle {
