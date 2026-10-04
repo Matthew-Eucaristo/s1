@@ -634,7 +634,9 @@ struct ServeCmd: AsyncParsableCommand {
             locale: Locale(identifier: loc),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { ev in
-            print("[\(ev.kind.rawValue)] \(ev.text)")
+            // Event text carries transcripts/goal/error strings — same
+            // derived-source rule as heard/digest: never raw to the tty.
+            print("[\(ev.kind.rawValue)] \(ev.text.terminalSafe)")
         }
         serve.armHotkey()
         print("serve armed — double-tap Shift or ⌃⌥Space toggles listening")
