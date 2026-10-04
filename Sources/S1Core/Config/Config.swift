@@ -99,7 +99,9 @@ public enum Endpoints {
             baseURL: base ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1",
             model: model ?? env["S1_VLM_MODEL"] ?? config.vlm?.model ?? "gemma3:4b",
             apiKey: env["S1_VLM_KEY"] ?? config.vlm?.key,
-            numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.vlm?.numCtx ?? 8192)
+            // 4k covers the decision prompt (AX digest + format) with room —
+            // 8k just doubles the KV allocation on tight 16GB machines.
+            numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.vlm?.numCtx ?? 4096)
     }
 
     public static func s2(env: [String: String] = ProcessInfo.processInfo.environment,

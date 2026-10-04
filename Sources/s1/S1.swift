@@ -632,7 +632,13 @@ struct ServeCmd: AsyncParsableCommand {
             config: .init(makePolicy: makePol, s2: reasoner, speak: resolvedSpeak,
                           listenSeconds: listenSeconds, maxSilentTurns: idleTurns,
                           lockPath: pidPath,
-                          transcribe: { try await stt.transcribeMic(maxSeconds: listenSeconds) }),
+                          transcribe: { onPartial in
+                              try await stt.transcribeMic(maxSeconds: listenSeconds) { p in
+                                  // Live best-guess on the tty — same
+                                  // "words landing" feedback the app shows.
+                                  FileHandle.standardError.write(Data("\r\(p)   ".utf8))
+                              }
+                          }),
             locale: Locale(identifier: loc),
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { ev in

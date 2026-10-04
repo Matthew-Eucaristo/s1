@@ -3,7 +3,7 @@ import Foundation
 /// Lifecycle events the serve daemon reports — UI and CLI both render these.
 public struct ServeEvent: Sendable {
     public enum Kind: String, Sendable {
-        case armed, idle, listening, heard, runStart, step, runDone, error, sleeping, stopped
+        case armed, idle, listening, partial, heard, runStart, phase, step, runDone, error, sleeping, stopped
     }
     public var kind: Kind
     public var text: String
@@ -47,7 +47,9 @@ public final class Serve: @unchecked Sendable {
         /// Utterances that end the listening session instead of running.
         public var stopPhrases: [String]
         /// Injectable transcription — real path is the mic; tests/demos feed files.
-        public var transcribe: @Sendable () async throws -> String
+        /// The parameter forwards live partial (volatile) text to the UI —
+        /// pass it through to SpeechToText.transcribeMic's onPartial.
+        public var transcribe: @Sendable (@Sendable @escaping (String) -> Void) async throws -> String
         /// True while another agent run (e.g. the app's Run button) owns the
         /// screen — heard utterances are skipped rather than starting a second
         /// concurrent run that would fight it for keyboard focus.
@@ -64,7 +66,7 @@ public final class Serve: @unchecked Sendable {
                     lockPath: String? = nil,
                     stopPhrases: [String] = ["stop", "berhenti", "stop listening", "matikan", "tidur",
                                              "sleep", "go to sleep", "istirahat"],
-                    transcribe: @escaping @Sendable () async throws -> String,
+                    transcribe: @escaping @Sendable (@Sendable @escaping (String) -> Void) async throws -> String,
                     isBusy: @escaping @Sendable () async -> Bool = {
                         S1Runner.anotherRunActive() }) {
             self.makePolicy = makePolicy
@@ -102,7 +104,8 @@ public final class Serve: @unchecked Sendable {
     /// Best-effort: a daemon should never fail because telemetry can't write.
     public static let statePath = NSHomeDirectory() + "/.s1/serve-state.json"
 
-    public init(config: Config, locale: Locale = Locale(identifier: "id-ID"),
+    public init(config: Config,
+                locale: Locale = Locale(identifier: Locale.preferredLanguages.first ?? "id-ID"),
                 hotkeyPatterns: [HotkeyPattern]? = nil,
                 onEvent: @escaping @Sendable (ServeEvent) -> Void) {
         self.config = config
@@ -218,7 +221,12 @@ public final class Serve: @unchecked Sendable {
                               // microphone must not hide a dead endpoint
         while state == .listening, !Task.isCancelled {
             do {
-                let text = try await config.transcribe()
+                // Partial hypotheses stream straight to the UI — words
+                // appear while the user is still speaking instead of one
+                // dump at end-of-turn.
+                let text = try await config.transcribe { [onEvent] partial in
+                    onEvent(ServeEvent(.partial, partial))
+                }
                 errors = 0
                 // `s1 stop` (or the app's Stop button) wrote the stop file
                 // while we were transcribing — honor it as "sleep the
@@ -294,6 +302,9 @@ public final class Serve: @unchecked Sendable {
                     // The full digest (decider, conf, action → outcome) —
                     // the daemon's log should tell the whole story per step.
                     onEvent(ServeEvent(.step, rec.digest, record: rec))
+                },
+                onPhase: { [onEvent] phase in
+                    onEvent(ServeEvent(.phase, phase))
                 })
             emit(.runDone, report.status.rawValue, dir: logger.runDir.path)
             // A kill file means the user cancelled — sleep must mean silent,

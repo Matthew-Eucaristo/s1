@@ -11,7 +11,15 @@ public struct SpeechToText: Sendable {
     /// Apple's "contextual strings" on both the legacy and Analyzer paths.
     public var vocabulary: [String]
 
-    public init(locale: Locale = Locale(identifier: "id-ID"), vocabulary: [String] = []) {
+    /// The system-preferred speech locale — the user's macOS language is
+    /// the honest "auto" (SpeechTranscriber needs ONE locale per session;
+    /// per-utterance language detection isn't a public API). supportedLocale
+    /// still resolves the closest servable equivalent at listen time.
+    public static var preferredLocale: Locale {
+        Locale(identifier: Locale.preferredLanguages.first ?? "id-ID")
+    }
+
+    public init(locale: Locale = SpeechToText.preferredLocale, vocabulary: [String] = []) {
         self.locale = locale
         self.vocabulary = vocabulary
     }
@@ -130,7 +138,11 @@ public struct SpeechToText: Sendable {
     /// elapses. Requires mic permission + an input device. Uses whichever
     /// engine the system supports (legacy recognizer if Analyzer assets are
     /// absent — the honest fallback, same on-device privacy).
-    public func transcribeMic(maxSeconds: Double = 30) async throws -> String {
+    /// `onPartial` receives the live best-guess transcript while the user is
+    /// still speaking — the volatile results Apple emits between finals —
+    /// so a UI can show words landing instead of looking dead mid-utterance.
+    public func transcribeMic(maxSeconds: Double = 30,
+                            onPartial: (@Sendable (String) -> Void)? = nil) async throws -> String {
         // No input device at all → clean error. Without this, installTap throws
         // an NSException (uncatchable from Swift) and kills the whole process —
         // which would take down the always-on daemon with it.
@@ -138,12 +150,14 @@ public struct SpeechToText: Sendable {
             throw S1Error.aborted("no microphone input available")
         }
         if let transcriber = await supportedTranscriber(reportingOptions: [.volatileResults]) {
-            return try await transcribeMicAnalyzer(maxSeconds: maxSeconds, transcriber: transcriber)
+            return try await transcribeMicAnalyzer(maxSeconds: maxSeconds, transcriber: transcriber,
+                                                  onPartial: onPartial)
         }
-        return try await transcribeMicLegacy(maxSeconds: maxSeconds)
+        return try await transcribeMicLegacy(maxSeconds: maxSeconds, onPartial: onPartial)
     }
 
-    private func transcribeMicLegacy(maxSeconds: Double) async throws -> String {
+    private func transcribeMicLegacy(maxSeconds: Double,
+                                     onPartial: (@Sendable (String) -> Void)?) async throws -> String {
         guard let rec = SFSpeechRecognizer(locale: locale), rec.isAvailable else {
             throw S1Error.aborted("no speech recognizer for \(locale.identifier)")
         }
@@ -154,7 +168,7 @@ public struct SpeechToText: Sendable {
             throw S1Error.aborted("no microphone input available")
         }
         let req = SFSpeechAudioBufferRecognitionRequest()
-        req.shouldReportPartialResults = false
+        req.shouldReportPartialResults = onPartial != nil
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         let collected = Locked<String>("")
@@ -173,6 +187,10 @@ public struct SpeechToText: Sendable {
                     failure.value = error
                     finished.set()
                 }
+            } else if let r = result {
+                // Partial hypothesis — volatile best-guess while the user
+                // is still mid-word; live UI transcript, never persisted.
+                onPartial?(r.bestTranscription.formattedString)
             }
         }
         var tapInstalled = false
@@ -210,19 +228,24 @@ public struct SpeechToText: Sendable {
         return collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func transcribeMicAnalyzer(maxSeconds: Double, transcriber: SpeechTranscriber) async throws -> String {
+    private func transcribeMicAnalyzer(maxSeconds: Double, transcriber: SpeechTranscriber,
+                                       onPartial: (@Sendable (String) -> Void)?) async throws -> String {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else {
             throw S1Error.aborted("no microphone input available")
         }
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        // SpeechDetector is Apple's VAD module — its results tell us when
+        // speech actually ended rather than guessing from transcript-idle
+        // timeouts, so a mid-word pause can't cut the turn early.
+        let detector = SpeechDetector()
+        let analyzer = SpeechAnalyzer(modules: [transcriber, detector])
         if let ctx = analysisContext { try await analyzer.setContext(ctx) }
         // Apple doc pattern: feed the analyzer its best available format —
         // the mic's native rate may differ, and odd hardware (8 kHz devices)
         // would otherwise hand the analyzer a format it can't use.
-        let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber, detector])
         let converter = best.flatMap { AVAudioConverter(from: format, to: $0) }
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         var tapInstalled = false
@@ -230,10 +253,12 @@ public struct SpeechToText: Sendable {
         // come down even when the task is cancelled mid-listen.
         var resultsTask: Task<Void, Error>?
         var inputTask: Task<Void, Error>?
+        var detectorTask: Task<Void, Never>?
         defer {
             // Cancelled mid-listen → children must not outlive the scope.
             resultsTask?.cancel()
             inputTask?.cancel()
+            detectorTask?.cancel()
             if tapInstalled { input.removeTap(onBus: 0) }
             engine.stop()
             continuation.finish()
@@ -252,22 +277,41 @@ public struct SpeechToText: Sendable {
         try engine.start()
 
         let collected = TextCollector()
+        let speechEnded = FinishedFlag()
+        // VAD: speechDetected true→false means the utterance is over —
+        // close the turn promptly even when the final segment lags.
+        detectorTask = Task {
+            var spoke = false
+            do {
+                for try await r in detector.results {
+                    if r.speechDetected { spoke = true }
+                    else if spoke { speechEnded.set(); break }
+                }
+            } catch { /* detector stream dying shouldn't kill the turn */ }
+        }
         resultsTask = Task {
             for try await result in transcriber.results {
+                let text = String(result.text.characters)
                 if result.isFinal {
-                    await collected.append(String(result.text.characters))
+                    await collected.append(text)
+                } else {
+                    // Volatile best-guess of the in-flight segment — the
+                    // "words appearing as you speak" the UI streams.
+                    let soFar = await collected.value
+                    onPartial?(soFar.isEmpty ? text : soFar + " " + text)
                 }
             }
         }
         inputTask = Task { try await analyzer.start(inputSequence: stream) }
-        // End the turn on speech, not on the clock: once a final segment has
-        // landed, a short grace catches trailing words, then the turn closes.
-        // Burning the full maxSeconds after every command made every voice
-        // turn feel frozen — the legacy path already exits on `isFinal`.
+        // End the turn on speech, not on the clock: VAD says the utterance
+        // ended, or once a final segment has landed a short grace catches
+        // trailing words. Burning the full maxSeconds after every command
+        // made every voice turn feel frozen.
         var waited = 0.0
         while waited < maxSeconds {
             try await Task.sleep(nanoseconds: 150_000_000)
             waited += 0.15
+            if speechEnded.get { break }
             if await collected.hasContent, await collected.idleFor(0.9) { break }
         }
         continuation.finish()

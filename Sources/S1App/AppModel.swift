@@ -279,9 +279,9 @@ final class AppModel {
                 // it too. The serve loop also sleeps on seeing it.
                 killSwitch: killPath,
                 lockPath: NSHomeDirectory() + "/.s1/serve.pid",
-                transcribe: { [weak self] in
+                transcribe: { [weak self] onPartial in
                     guard let self else { return "" }
-                    return try await self.stt.transcribeMic(maxSeconds: 12)
+                    return try await self.stt.transcribeMic(maxSeconds: 12, onPartial: onPartial)
                 },
             isBusy: { [weak self] in
                 // Our own Run button OR another process's agent (a CLI
@@ -296,6 +296,9 @@ final class AppModel {
                 switch ev.kind {
                 case .armed: self.serveStatus = "hotkey armed: ⇧⇧ or ⌃⌥Space"
                 case .listening: self.serveState = .listening; self.serveStatus = "listening…"
+                // Words landing while the user is still speaking — volatile
+                // partials, never the final goal text.
+                case .partial: self.transcript = ev.text
                 case .heard: self.serveStatus = "heard: \(ev.text)"; self.transcript = ev.text
                 case .runStart:
                     self.serveState = .running
@@ -313,6 +316,7 @@ final class AppModel {
                         // of voice turns can't grow the array unboundedly.
                         if self.steps.count > 300 { self.steps.removeFirst(self.steps.count - 300) }
                     }
+                case .phase: self.serveStatus = ev.text
                 case .runDone:
                     self.serveStatus = ev.text
                     self.status = ev.text
@@ -506,7 +510,9 @@ final class AppModel {
         status = "listening…"
         defer { listening = false; listenTask = nil }
         do {
-            let text = try await stt.transcribeMic(maxSeconds: 20)
+            let text = try await stt.transcribeMic(maxSeconds: 20) { p in
+                Task { @MainActor in self.transcript = p }
+            }
             guard !Task.isCancelled else { return }
             transcript = text
             if text.isEmpty {

@@ -39,7 +39,11 @@ public struct AgentLoop {
         self.s2 = s2
     }
 
-    public func run(goal: String, policy: any Policy, logger: RunLogger) async throws -> RunReport {
+    /// `onPhase` narrates each step's phase ("observing", "thinking",
+    /// "reasoning", "acting") — lets a UI show the run is alive while a
+    /// slow local model holds the decision call for tens of seconds.
+    public func run(goal: String, policy: any Policy, logger: RunLogger,
+                    onPhase: (@Sendable (String) -> Void)? = nil) async throws -> RunReport {
         var history: [StepRecord] = []
         var escalations = 0
         var status: RunStatus = .maxStepsReached
@@ -65,6 +69,7 @@ public struct AgentLoop {
 
             let obs: Snapshot
             do {
+                onPhase?("observing…")
                 obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
             } catch {
                 // Evidence continuity: a perception failure must land in
@@ -79,7 +84,7 @@ public struct AgentLoop {
             let rec: StepRecord
             do {
                 rec = try await step(i, goal: goal, policy: policy, obs: obs,
-                                     history: history, logger: logger)
+                                     history: history, logger: logger, onPhase: onPhase)
             } catch is S1Error {
                 // A kill-switch abort landing mid-decision ends the run as
                 // aborted — not as an abstention that escalates to S2.
@@ -127,7 +132,8 @@ public struct AgentLoop {
     }
 
     private func step(_ i: Int, goal: String, policy: any Policy, obs input: Snapshot,
-                      history: [StepRecord], logger: RunLogger) async throws -> StepRecord {
+                      history: [StepRecord], logger: RunLogger,
+                      onPhase: (@Sendable (String) -> Void)?) async throws -> StepRecord {
         var obs = input
         // A throwing policy counts as abstention — logged like any other
         // low-confidence step instead of crashing the run.
@@ -136,6 +142,7 @@ public struct AgentLoop {
             // Raced against the kill file — a model request would otherwise
             // sit out the whole HTTP timeout before `s1 stop` is noticed.
             let decisionObs = obs
+            onPhase?("thinking…")
             decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
                 try await policy.decide(observation: decisionObs, goal: goal, history: history)
             }
@@ -165,6 +172,7 @@ public struct AgentLoop {
                 esc = StepRecord.Escalation(to: "s2:\(s2.name)", reason: reason)
                 do {
                     let s2Obs = obs
+                    onPhase?("reasoning (S2)…")
                     decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
                         try await s2.decide(observation: s2Obs, goal: goal,
                                             history: history, reason: reason)

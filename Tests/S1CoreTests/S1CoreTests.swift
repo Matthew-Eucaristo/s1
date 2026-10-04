@@ -759,7 +759,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             speak: false,
             artifacts: dir.path,
             killSwitch: dir.appendingPathComponent("ks").path,
-            transcribe: {
+            transcribe: { _ in
                 var out = "stop"
                 feed.mutate { f in out = f.isEmpty ? "stop" : f.removeFirst() }
                 return out
@@ -794,7 +794,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             speak: false,
             artifacts: dir.path,
             killSwitch: kill,
-            transcribe: {
+            transcribe: { _ in
                 turns.mutate { $0 += 1 }
                 // First turn behaves normally; the file appears after it.
                 if turns.get() == 1 { try? "x".write(toFile: kill, atomically: true, encoding: .utf8) }
@@ -827,7 +827,7 @@ func serveRunUsesConfiguredPolicy() async throws {
     try? "\(ProcessInfo.processInfo.processIdentifier)".write(toFile: lock, atomically: true, encoding: .utf8)
     #expect(S1Runner.holdsPidFile(lock))
     let serve = Serve(
-        config: .init(speak: false, lockPath: lock, transcribe: { "" }),
+        config: .init(speak: false, lockPath: lock, transcribe: { _ in "" }),
         locale: Locale(identifier: "en-US"), hotkeyPatterns: nil
     ) { _ in }
     serve.wake()
@@ -842,7 +842,7 @@ func serveRunUsesConfiguredPolicy() async throws {
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let lock = dir.appendingPathComponent("serve.pid").path
     let serve = Serve(
-        config: .init(speak: false, lockPath: lock, transcribe: { "" }),
+        config: .init(speak: false, lockPath: lock, transcribe: { _ in "" }),
         locale: Locale(identifier: "en-US"), hotkeyPatterns: nil
     ) { _ in }
     serve.wake()
@@ -860,7 +860,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             maxSilentTurns: 2,
             artifacts: FileManager.default.temporaryDirectory.path,
             killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks2").path,
-            transcribe: { "" }),
+            transcribe: { _ in "" }),
         locale: Locale(identifier: "en-US"),
         hotkeyPatterns: nil
     ) { ev in events.mutate { $0.append(ev.kind) } }
@@ -881,7 +881,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             maxListenErrors: 2,
             artifacts: FileManager.default.temporaryDirectory.path,
             killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks3").path,
-            transcribe: { calls.mutate { $0 += 1 }; throw Boom() }),
+            transcribe: { _ in calls.mutate { $0 += 1 }; throw Boom() }),
         locale: Locale(identifier: "en-US"),
         hotkeyPatterns: nil
     ) { _ in }
@@ -906,7 +906,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             speak: false,
             artifacts: dir.path,
             killSwitch: dir.appendingPathComponent("ks").path,
-            transcribe: {
+            transcribe: { _ in
                 var out = "stop"
                 feed.mutate { f in out = f.isEmpty ? "stop" : f.removeFirst() }
                 return out
@@ -944,7 +944,7 @@ func serveRunUsesConfiguredPolicy() async throws {
             maxListenErrors: 2,
             artifacts: "/proc/s1-cannot-write-here",
             killSwitch: FileManager.default.temporaryDirectory.appendingPathComponent("s1test-ks4").path,
-            transcribe: { calls.mutate { $0 += 1 }; return "do something" }),
+            transcribe: { _ in calls.mutate { $0 += 1 }; return "do something" }),
         locale: Locale(identifier: "en-US"),
         hotkeyPatterns: nil
     ) { _ in }
@@ -1423,7 +1423,7 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(e.baseURL == "http://localhost:11434/v1")
     #expect(e.model == "gemma3:4b")
     #expect(e.apiKey == nil)
-    #expect(e.numCtx == 8192)
+    #expect(e.numCtx == 4096)   // VLM decision prompts fit in 4k; 8k doubled KV
     let s = Endpoints.s2(env: ["S1_S2_MODEL": "big-model"], config: S1Config())
     #expect(s.model == "big-model")
     #expect(s.baseURL == "http://localhost:11434/v1")  // env base unset → default

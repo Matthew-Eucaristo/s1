@@ -78,7 +78,7 @@ public struct ChatClient: Sendable {
             if let img = m.imageBase64 {
                 return ["role": m.role, "content": [
                     ["type": "text", "text": m.content],
-                    ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(img)"]],
+                    ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(img)"]],
                 ]]
             }
             return ["role": m.role, "content": m.content]
@@ -95,6 +95,9 @@ public struct ChatClient: Sendable {
             body["think"] = false
             body["options"] = ["num_ctx": endpoint.numCtx, "num_predict": maxTokens]
             body["max_tokens"] = maxTokens
+            // Ollama evicts a model after ~5min idle; a voice agent then
+            // re-pays the full GB load on every other turn. Hold it warm.
+            body["keep_alive"] = "30m"
         } else {
             // Strict OpenAI spec: reasoning models only take the newer key,
             // chat models accept it too — the safe remote cap.

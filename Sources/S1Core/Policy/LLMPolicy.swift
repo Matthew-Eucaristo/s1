@@ -328,7 +328,7 @@ public struct VLMPolicy: Policy {
             """
         var image: String? = nil
         if useScreenshot, let path = observation.screenshotPath,
-           let data = Self.downscaledPNG(path: path) {
+           let data = Self.downscaledJPEG(path: path) {
             image = data
         }
         let sys = ChatMessage(role: "system", content: "You are a GUI-control decision engine. You output one compact JSON decision per request — never prose, never repeat completed steps.")
@@ -367,9 +367,11 @@ public struct VLMPolicy: Policy {
         return !o.hasPrefix("error:")
     }
 
-    /// VLMs don't need retina pixels — a ~1024px-wide PNG keeps the prompt
-    /// (and context window) small enough for local endpoints.
-    static func downscaledPNG(path: String, maxWidth: Int = 1024) -> String? {
+    /// VLMs don't need retina pixels — a ~1024px-wide JPEG keeps the prompt
+    /// (and context window) small enough for local endpoints. JPEG at 0.72
+    /// is ~5-10× smaller than PNG for a desktop shot — less base64 upload,
+    /// faster server decode, same visual ground truth for the model.
+    static func downscaledJPEG(path: String, maxWidth: Int = 1024) -> String? {
         let url = URL(fileURLWithPath: path)
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
@@ -381,8 +383,10 @@ public struct VLMPolicy: Policy {
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
         guard let out = ctx.makeImage(),
               let destData = CFDataCreateMutable(nil, 0),
-              let dest = CGImageDestinationCreateWithData(destData, "public.png" as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(dest, out, nil)
+              let dest = CGImageDestinationCreateWithData(destData, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, out, [
+            kCGImageDestinationLossyCompressionQuality: 0.72,
+        ] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
         return (destData as Data).base64EncodedString()
     }
