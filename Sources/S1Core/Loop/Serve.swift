@@ -313,11 +313,19 @@ public final class Serve: @unchecked Sendable {
 
     /// True when the utterance is a "go to sleep" phrase (case/locale-insensitive,
     /// prefix match so "stop dong" still works).
+    ///
+    /// Phrases that are also ordinary verbs ("matikan wifi", "tidur siang",
+    /// "sleep mode") must be the WHOLE utterance — a leading "matikan" with
+    /// an object is a command, not a bedtime wish. Unambiguous phrases like
+    /// "stop"/"berhenti" still match as a prefix.
     public static func isStop(_ text: String, phrases: [String]) -> Bool {
+        let exactOnly: Set<String> = ["matikan", "tidur", "istirahat", "sleep",
+                                      "turn off", "shut down"]
         let t = text.lowercased().trimmingCharacters(
             in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return phrases.contains { p in
-            t == p || t.hasPrefix(p + " ") || t.hasPrefix(p + ",")
+            t == p || (!exactOnly.contains(p) &&
+                       (t.hasPrefix(p + " ") || t.hasPrefix(p + ",")))
         }
     }
 

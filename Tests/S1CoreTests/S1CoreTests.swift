@@ -650,7 +650,10 @@ private final class Locked<T>: @unchecked Sendable {
     #expect(Serve.isStop("stop", phrases: phrases))
     #expect(Serve.isStop("Berhenti.", phrases: phrases))
     #expect(Serve.isStop("stop dong", phrases: phrases))
-    #expect(Serve.isStop("matikan sekarang", phrases: phrases))
+    #expect(Serve.isStop("matikan", phrases: phrases))
+    // Verb-with-object is a command, not a bedtime wish.
+    #expect(!Serve.isStop("matikan sekarang", phrases: phrases))
+    #expect(!Serve.isStop("matikan wifi", phrases: phrases))
     #expect(!Serve.isStop("buka stopwatch", phrases: phrases))
     #expect(!Serve.isStop("stopwatch launch", phrases: phrases))
     #expect(!Serve.isStop("", phrases: phrases))
