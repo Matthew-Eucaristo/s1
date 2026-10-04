@@ -174,9 +174,7 @@ struct ConfigCmd: AsyncParsableCommand {
             guard let (data, resp) = try? await URLSession.shared.data(for: req),
                   let http = resp as? HTTPURLResponse else { continue }
             if http.statusCode == 200 {
-                let body = String(decoding: data, as: UTF8.self)
-                let hasModel = (try? JSONSerialization.jsonObject(with: data)) != nil
-                    && body.contains(ep.model)
+                let hasModel = AutoPolicy.modelListed(ep.model, in: data)
                 return "\(ep.baseURL) reachable ✓\(hasModel ? " · \(ep.model) present" : " · WARNING: '\(ep.model)' not listed")"
             }
             if http.statusCode != 404 { return "\(ep.baseURL) → HTTP \(http.statusCode)" }

@@ -33,7 +33,7 @@ public enum AutoPolicy {
     /// `{"models":[{"name":"…"}]}`. An unparseable or empty list can't
     /// prove the model missing — count it usable rather than guessing.
     /// Tags match loosely: "gemma3" should find "gemma3:4b".
-    static func modelListed(_ want: String, in data: Data) -> Bool {
+    public static func modelListed(_ want: String, in data: Data) -> Bool {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return true }
         var names: [String] = []
