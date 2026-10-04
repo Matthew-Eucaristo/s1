@@ -19,6 +19,10 @@ this project is pre-1.0 — breaking changes land in minor versions.
   is append-per-line, truncated tails are skipped on read); stale
   `run.lock`/`serve.pid` self-heal via live-pid checks; companion feed
   caps at 300 records so serve mode can't grow memory forever.
+- **Task library searches `~/.s1/tasks/` too** — `--task name` resolves
+  `tasks/<name>.txt` (cwd) first, then `~/.s1/tasks/<name>.txt`, so a
+  cask-installed `s1` still has a persistent per-user task library when
+  there's no repo checkout. `s1 tasks` lists both directories.
 
 ### Fixed
 - **Dangling conjunctions stripped from args** — "buka notes lalu" (STT
