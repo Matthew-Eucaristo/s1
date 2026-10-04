@@ -414,7 +414,7 @@ public struct VLMPolicy: Policy {
     /// (and context window) small enough for local endpoints. JPEG at 0.72
     /// is ~5-10× smaller than PNG for a desktop shot — less base64 upload,
     /// faster server decode, same visual ground truth for the model.
-    static func downscaledJPEG(path: String, maxWidth: Int = 1024) -> String? {
+    public static func downscaledJPEG(path: String, maxWidth: Int = 1024) -> String? {
         let url = URL(fileURLWithPath: path)
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }

@@ -230,6 +230,9 @@ Click order: exact AX label match (no model) → grounder → general VLM.
 Grounder config: `"grounder": {"model": "ahmadwaqar/holo-3.1:0.8b"}` in
 `~/.s1/config.json` (base defaults to the VLM's server) or
 `S1_GROUNDER_MODEL`/`S1_GROUNDER_BASE`/`S1_GROUNDER_KEY`.
+Try a grounder on any screenshot before wiring it in:
+`s1 ground shot.png "Save button" --model ahmadwaqar/holo-3.1:0.8b`
+(prints the raw reply, the parsed `[0,1000]` point and the pixel it maps to).
 
 S2 is plain OpenAI `/chat/completions`, so subscriptions with a compatible
 endpoint drop in by URL + key — e.g. OpenCode Go

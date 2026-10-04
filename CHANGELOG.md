@@ -6,6 +6,10 @@ this project is pre-1.0 — breaking changes land in minor versions.
 ## [Unreleased]
 
 ### Added
+- **`s1 ground <image> <target>`** — debug a grounding model on any
+  screenshot: raw reply, parsed `[0,1000]` point, mapped pixel, latency.
+  Grounder prompt now restates the `(x, y)` format in the user turn —
+  Holo-3.1 0.8b went from prose replies to 3/3 hits within 15/1000.
 - **Click grounder role** — optional GUI-grounding model (Holo-3.1 etc.,
   normalized [0,1000] replies; parses `(x,y)`, `click(start_box=…)`,
   `<point>`, `{"x","y"}`, `bbox_2d`) aims click steps. Order: exact AX

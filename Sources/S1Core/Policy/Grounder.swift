@@ -31,16 +31,30 @@ public struct Grounder: Sendable {
         [0, 1000], origin top-left, formatted exactly: (x, y)
         """
 
+    /// Small grounders drop the system-prompt format and answer in prose;
+    /// restating it in the user turn fixed that (Holo-3.1 0.8b: 3/3 hits
+    /// within 15/1000 vs prose / mirrored-x without it).
+    static func userPrompt(_ target: String) -> String {
+        "Task: click \(target)\nAnswer with only (x, y) in [0,1000]."
+    }
+
     /// Click point for `target` in global screen points, or nil when the
     /// model found nothing parseable.
     public func locate(_ target: String, screenshotBase64: String) async throws -> (x: Double, y: Double)? {
-        let reply = try await client.chat([
-            ChatMessage(role: "system", content: Self.system),
-            ChatMessage(role: "user", content: "Task: click \(target)", imageBase64: screenshotBase64),
-        ], maxTokens: 96)
-        guard let p = Self.parsePoint(reply) else { return nil }
+        guard let p = try await normalizedPoint(target, imageBase64: screenshotBase64).point else { return nil }
         let b = Self.capturedDisplayBounds()
         return (b.minX + p.x / 1000 * b.width, b.minY + p.y / 1000 * b.height)
+    }
+
+    /// Raw grounding answer: the model's reply plus the parsed [0,1000]
+    /// point (nil when unparseable/out of range). Used by `s1 ground`.
+    public func normalizedPoint(_ target: String, imageBase64: String) async throws
+        -> (point: (x: Double, y: Double)?, reply: String) {
+        let reply = try await client.chat([
+            ChatMessage(role: "system", content: Self.system),
+            ChatMessage(role: "user", content: Self.userPrompt(target), imageBase64: imageBase64),
+        ], maxTokens: 96)
+        return (Self.parsePoint(reply), reply)
     }
 
     /// Normalized [0,1000] point from the reply shapes grounding models emit:

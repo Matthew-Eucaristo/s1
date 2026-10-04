@@ -15,7 +15,7 @@ struct S1: AsyncParsableCommand {
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
-                      ModelsCmd.self, PullCmd.self])
+                      ModelsCmd.self, PullCmd.self, GroundCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -439,6 +439,38 @@ struct CaptureCmd: AsyncParsableCommand {
             throw ValidationError("cannot write screenshot to \(out)")
         }
         print("wrote \(out) (\(img.width)x\(img.height))")
+    }
+}
+
+struct GroundCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "ground",
+        abstract: "Ask the click grounder where a target is in an image (debug a grounding model).")
+    @Argument(help: "Screenshot path (PNG/JPEG).") var image: String
+    @Argument(help: "What to click, e.g. \"Save button\".") var target: String
+    @Option(help: "Grounder model (default: configured grounder, else the VLM model).") var model: String?
+    @Option(help: "OpenAI-compatible base URL (default: configured).") var base: String?
+
+    func run() async throws {
+        let cfgEp = Endpoints.grounder() ?? Endpoints.vlm()
+        let ep = Endpoint(baseURL: base ?? cfgEp.baseURL, model: model ?? cfgEp.model,
+                          apiKey: cfgEp.apiKey, numCtx: cfgEp.numCtx)
+        guard FileManager.default.fileExists(atPath: image),
+              let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: image) as CFURL, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
+              let b64 = VLMPolicy.downscaledJPEG(path: image) else {
+            throw ValidationError("cannot read image \(image)")
+        }
+        let started = Date()
+        let (p, reply) = try await Grounder(endpoint: ep).normalizedPoint(target, imageBase64: b64)
+        let secs = String(format: "%.1f", Date().timeIntervalSince(started))
+        print("model    \(ep.model) (\(secs)s)")
+        print("reply    \(reply.trimmingCharacters(in: .whitespacesAndNewlines).terminalSafe)")
+        guard let p else {
+            print("point    none (unparseable or outside [0,1000])")
+            throw ExitCode(2)
+        }
+        let px = Int(p.x / 1000 * Double(img.width)), py = Int(p.y / 1000 * Double(img.height))
+        print("point    (\(Int(p.x)), \(Int(p.y))) /1000 → pixel (\(px), \(py)) in \(img.width)x\(img.height)")
     }
 }
 

@@ -1769,6 +1769,12 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(pt("not found") == nil)
 }
 
+@Test func grounderUserTurnRestatesFormat() {
+    let p = Grounder.userPrompt("Save button")
+    #expect(p.contains("click Save button"))
+    #expect(p.contains("(x, y)") && p.contains("[0,1000]"))
+}
+
 @Test func grounderIsOptIn() {
     #expect(Endpoints.grounder(env: [:], config: S1Config()) == nil)
     let e = Endpoints.grounder(env: ["S1_GROUNDER_MODEL": "holo"],
