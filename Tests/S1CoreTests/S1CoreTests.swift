@@ -517,6 +517,9 @@ private struct StubReasoner: Reasoner {
     // Apple-menu corner, a real action. Missing coords abstain.
     #expect(LLMDecisionCodec.parse(#"{"action":{"type":"click","confidence":0.8"#)?.action == nil)
     #expect(LLMDecisionCodec.parse(#"{"action":{"type":"drag","x":10,"y":20,"confidence":0.8"#)?.action == nil)
+    // Well-formed JSON with missing coords must abstain too — same (0,0) trap.
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"click"},"confidence":0.8}"#)?.action == nil)
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"drag","x":10,"y":20},"confidence":0.8}"#)?.action == nil)
     let ok = LLMDecisionCodec.parse(#"{"action":{"type":"click","x":100,"y":200,"confidence":0.8}}"#)
     if case .click(let x, let y)? = ok?.action { #expect(x == 100 && y == 200) } else { Issue.record() }
 }

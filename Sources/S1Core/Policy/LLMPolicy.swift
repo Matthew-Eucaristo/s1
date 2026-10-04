@@ -212,12 +212,19 @@ enum LLMDecisionCodec {
     static func action(_ a: Wire.A) -> Action? {
         if let ref = a.ref, !ref.isEmpty, a.type == "click" { return .axPress(ref: ref) }
         switch a.type {
-        case "moveMouse": return .moveMouse(x: a.x ?? 0, y: a.y ?? 0)
-        case "click":     return .click(x: a.x ?? 0, y: a.y ?? 0)
-        case "rightClick": return .rightClick(x: a.x ?? 0, y: a.y ?? 0)
-        case "doubleClick": return .doubleClick(x: a.x ?? 0, y: a.y ?? 0)
-        case "drag":      return .drag(fromX: a.x ?? 0, fromY: a.y ?? 0,
-                                       toX: a.toX ?? 0, toY: a.toY ?? 0)
+        // Missing coords must abstain, not act at (0,0) — that's the
+        // Apple-menu corner of a real screen.
+        case "moveMouse": guard let x = a.x, let y = a.y else { return nil }
+                          return .moveMouse(x: x, y: y)
+        case "click":     guard let x = a.x, let y = a.y else { return nil }
+                          return .click(x: x, y: y)
+        case "rightClick": guard let x = a.x, let y = a.y else { return nil }
+                          return .rightClick(x: x, y: y)
+        case "doubleClick": guard let x = a.x, let y = a.y else { return nil }
+                          return .doubleClick(x: x, y: y)
+        case "drag":      guard let fx = a.x, let fy = a.y,
+                                let tx = a.toX, let ty = a.toY else { return nil }
+                          return .drag(fromX: fx, fromY: fy, toX: tx, toY: ty)
         case "axAction":  guard let ref = a.ref, !ref.isEmpty else { return nil }
                           let n = a.name ?? "AXPress"
                           return .axAction(ref: ref, name: n)
