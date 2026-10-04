@@ -227,6 +227,9 @@ private func jsonlDecoder() -> JSONDecoder {
     await #expect(throws: S1Error.self) { _ = try await act.perform(.click(x: .infinity, y: 0), frontmostPID: nil) }
     await #expect(throws: S1Error.self) { _ = try await act.perform(.drag(fromX: 0, fromY: 0, toX: .nan, toY: 1), frontmostPID: nil) }
     await #expect(throws: S1Error.self) { _ = try await act.perform(.moveMouse(x: -.infinity, y: 5), frontmostPID: nil) }
+    // Two non-modifier keys isn't a chord — must throw, not silently post
+    // only the last key and log a combo that never ran.
+    await #expect(throws: S1Error.self) { _ = try await act.perform(.keyCombo(keys: ["cmd", "x", "y"]), frontmostPID: nil) }
 }
 
 // MARK: - secure text fields

@@ -330,7 +330,13 @@ public struct CGEventActuator: Actuator {
             case "shift": flags.insert(.maskShift)
             case "opt", "option", "alt": flags.insert(.maskAlternate)
             case "ctrl", "control": flags.insert(.maskControl)
-            default: key = k
+            default:
+                // ["cmd","x","y"] isn't a chord — silently keeping the last
+                // key would post "cmd+y" and log a combo that never ran.
+                guard key == nil else {
+                    throw S1Error.aborted("ambiguous keyCombo \(keys) — one non-modifier key only")
+                }
+                key = k
             }
         }
         guard let k = key, let code = Self.keyCodes[k.lowercased()] else {
