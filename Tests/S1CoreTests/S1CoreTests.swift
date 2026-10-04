@@ -1684,6 +1684,21 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     guard case .needsHuman = g.evaluate(.keyCombo(keys: ["cmd", "opt", "esc"])) else {
         Issue.record("cmd+opt+esc not escalated"); return
     }
+    // The "escape" alias posts the same Force Quit chord — must not slip.
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["command", "option", "escape"])) else {
+        Issue.record("command+option+escape alias bypass"); return
+    }
+    // ⌃⌥Space is s1's own wake hotkey — self-disruption, not a user goal.
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["ctrl", "opt", "space"])) else {
+        Issue.record("own wake hotkey not escalated"); return
+    }
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["control", "option", "spacebar"])) else {
+        Issue.record("own wake hotkey (aliases) not escalated"); return
+    }
+    // Near-misses stay free: wrong modifier, or space without both.
+    #expect(g.evaluate(.keyCombo(keys: ["ctrl", "space"])) == .allow)
+    #expect(g.evaluate(.keyCombo(keys: ["cmd", "space"])) == .allow)
+    #expect(g.evaluate(.keyCombo(keys: ["ctrl", "opt", "x"])) == .allow)
     #expect(g.evaluate(.keyCombo(keys: ["cmd", "s"])) == .allow)
     #expect(g.evaluate(.keyCombo(keys: ["return"])) == .allow)
 }

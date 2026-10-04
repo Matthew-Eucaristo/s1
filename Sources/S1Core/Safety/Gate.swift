@@ -134,11 +134,19 @@ public struct SafetyGate: Sendable {
             let ks = Set(keys.map { $0.lowercased() })
             let cmd = !ks.isDisjoint(with: ["cmd", "command"])
             let opt = !ks.isDisjoint(with: ["opt", "option", "alt"])
+            let ctrl = !ks.isDisjoint(with: ["ctrl", "control"])
             if cmd && ks.contains("q") {
                 return .needsHuman(reason: "⌘Q quits the app — possible unsaved-work loss")
             }
-            if cmd && opt && ks.contains("esc") {
+            // Key aliases matter: "escape" posts the same keyCode as "esc".
+            if cmd && opt && !ks.isDisjoint(with: ["esc", "escape"]) {
                 return .needsHuman(reason: "⌘⌥⎋ opens Force Quit")
+            }
+            // ⌃⌥Space is s1's own wake chord — a model posting it toggles
+            // the agent's listener mid-run: self-disruption, not the goal.
+            if ctrl && opt && !ks.isDisjoint(with: ["space", "spacebar"]) {
+                return .needsHuman(
+                    reason: "⌃⌥Space is s1's own wake hotkey — it would toggle the agent's listener")
             }
         }
         for payload in action.textPayloads {
