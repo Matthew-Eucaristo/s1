@@ -270,7 +270,8 @@ s1 decide "Goal: open TextEdit. Frontmost: Finder." "Which brain?" --options det
 Config: `"decision": {"base": "http://localhost:11434", "model": "nimble"}`
 or `S1_DECISION_MODEL`/`S1_DECISION_BASE`/`S1_DECISION_KEY`, or the app's
 **Connections & API keys…** sheet. Small models are poorly calibrated on
-our steps (tev1:0.8b scored a correct "open TextEdit" at 0.12) — pick
+our steps (tev1:0.8b scored a correct "open TextEdit" at 0.12; `nimble`
+separated it 0.998 vs 0.002 for "delete Documents") — pick
 `nimble`/`clef-flash` or Jev for real use and watch the `judge … p=` notes
 in `steps.jsonl`. Laya and GLiNER2.5-Decide are Python libraries without
 this HTTP API; serve them behind a `/v1/systemone` shim to plug them in.
