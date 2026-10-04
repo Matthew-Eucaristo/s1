@@ -41,16 +41,24 @@ public enum ModelPull {
         public let vision: Bool
         /// GUI-grounding specialist — wired as the click grounder, not the brain.
         public let grounding: Bool
+        /// System One decision judge (typed yes/no · choice · score) — not a chat model.
+        public let decision: Bool
         public init(_ name: String, _ size: String, _ blurb: String, vision: Bool,
-                    grounding: Bool = false) {
+                    grounding: Bool = false, decision: Bool = false) {
             self.name = name; self.size = size; self.blurb = blurb
-            self.vision = vision; self.grounding = grounding
+            self.vision = vision; self.grounding = grounding; self.decision = decision
         }
     }
 
     /// The shipped shortlist — smallest-useful first, all Apache/MIT and
     /// all one `ollama pull` away. S1 wants vision; S2 wants reasoning.
     public static let catalog: [CatalogEntry] = [
+        .init("nimble", "9.5 GB",
+              "default S1 decision judge — calibrated yes/no · choice · score",
+              vision: false, decision: true),
+        .init("tev1:0.8b", "811 MB",
+              "tiny decision judge — fast, but poorly calibrated for step checks",
+              vision: false, decision: true),
         .init("gemma3:4b", "3.3 GB",
               "default — sees screenshots, decent reasoning, ships tested", vision: true),
         .init("qwen2.5vl:3b", "3.1 GB",
@@ -75,6 +83,11 @@ public enum ModelPull {
 
     /// Models already pulled — parses `ollama list` ("NAME  ID  SIZE  MODIFIED").
     /// Returns [] when ollama or its server is missing; never throws.
+    /// `nimble` matches `nimble:latest`; a tagged name must match exactly.
+    public static func contains(_ installed: [String], _ model: String) -> Bool {
+        installed.contains { $0 == model || (!model.contains(":") && $0 == model + ":latest") }
+    }
+
     public static func installed() -> [String] {
         guard let bin = ollamaBinary() else { return [] }
         let proc = Process()

@@ -15,6 +15,13 @@ struct S1App: App {
         .windowStyle(.automatic)
         .defaultSize(width: 880, height: 620)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Command") {
+                    model.goal = ""
+                    model.focusGoalToken += 1
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
             CommandMenu("Agent") {
                 Button("Run") { Task { await model.run() } }
                     .keyboardShortcut("r", modifiers: .command)
@@ -28,12 +35,25 @@ struct S1App: App {
                     model.toggleServe()
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button(model.listening ? "Stop Dictation" : "Dictate Command") { model.toggleListen() }
+                    .keyboardShortcut("l", modifiers: .command)
+                Divider()
+                Button("Clear Steps") { model.clearFeed() }
+                    .keyboardShortcut("k", modifiers: .command)
+                    .disabled(model.running || model.steps.isEmpty)
+                Button("Reveal Run in Finder") { model.revealRunDir() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(model.runDir == nil)
             }
             CommandGroup(replacing: .help) {
                 Button("s1 on GitHub") {
                     NSWorkspace.shared.open(URL(string: "https://github.com/Matthew-Eucaristo/s1")!)
                 }
             }
+        }
+
+        Settings {
+            SettingsView(model: model)
         }
 
         // The always-on companion lives here: menu bar presence, global
@@ -135,6 +155,8 @@ private struct MenuBarView: View {
                 get: { model.launchAtLogin },
                 set: { _ in model.toggleLoginItem() }))
             Divider()
+            SettingsLink { Text("Settings…") }
+                .keyboardShortcut(",", modifiers: .command)
             Button("Open s1") {
                 openWindow(id: "s1")
                 NSApp.activate()   // macOS 14+ API — ignores-other-apps is deprecated

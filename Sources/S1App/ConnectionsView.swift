@@ -7,11 +7,10 @@ import S1Core
 @available(macOS 26, *)
 struct ConnectionsView: View {
     @Bindable var model: AppModel
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
+        Form {
+                decisionStatus
                 Section {
                     presetMenu([
                         ("Ollama · nimble 9B (local)", "http://localhost:11434", "nimble"),
@@ -23,7 +22,7 @@ struct ConnectionsView: View {
                          "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef", "clef"),
                     ]) { model.decisionBase = $0; model.decisionModel = $1 }
                     TextField("Server", text: $model.decisionBase)
-                    TextField("Model (empty = off)", text: $model.decisionModel)
+                    TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text("nimble"))
                     KeyRow(model: model, role: .decision)
                     TestRow(model: model, role: .decision)
                 } header: {
@@ -38,6 +37,8 @@ struct ConnectionsView: View {
                     ]) { model.vlmBase = $0; model.vlmModel = $1 }
                     TextField("Base URL", text: $model.vlmBase)
                     TextField("Vision model", text: $model.vlmModel)
+                    Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
+                    ModelStatusRow(status: model.vlmStatus)
                     TextField("Click grounder (empty = VLM grounds)", text: $model.grounderModel)
                     KeyRow(model: model, role: .vlm)
                     TestRow(model: model, role: .vlm)
@@ -56,6 +57,7 @@ struct ConnectionsView: View {
                     TextField("Base URL", text: $model.s2Base)
                     TextField("Model", text: $model.s2Model)
                     Toggle("Escalate to S2", isOn: $model.useS2)
+                    ModelStatusRow(status: model.s2Status)
                     KeyRow(model: model, role: .s2)
                     TestRow(model: model, role: .s2)
                 } header: {
@@ -63,17 +65,43 @@ struct ConnectionsView: View {
                 } footer: {
                     Text("Any OpenAI-compatible /v1/chat/completions server. Gets low-confidence and judge-vetoed steps.")
                 }
-            }
-            .formStyle(.grouped)
-            HStack {
-                Text("Keys are stored in the login Keychain (\(SecretStore.defaultService)), never in ~/.s1/config.json.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding()
+                ModelLibrarySection(model: model)
+                Section {
+                } footer: {
+                    Text("API keys live in the login Keychain (\(SecretStore.defaultService)), never in ~/.s1/config.json, and are never shown again after saving.")
+                }
         }
-        .frame(minWidth: 560, minHeight: 640)
+        .formStyle(.grouped)
+    }
+
+    /// The judge is optional caution: missing just means "no second
+    /// opinion" — one button fixes it, nothing nags elsewhere.
+    @ViewBuilder
+    private var decisionStatus: some View {
+        let _ = model.installedModels
+        if !model.decisionModel.isEmpty && model.decisionIsLocal && !model.decisionReady {
+            Section {
+                HStack {
+                    Image(systemName: "arrow.down.circle").foregroundStyle(.orange)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Decision judge \(model.decisionModel) isn't downloaded")
+                        Text("s1 runs fine without it; with it, risky or off-goal steps go to S2 instead of acting.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let p = model.pullProgress[model.decisionModel] {
+                        Text(p).font(.caption).lineLimit(1).truncationMode(.head).frame(maxWidth: 140)
+                    } else if model.ollamaPresent {
+                        Button("Download") {
+                            model.pullModel(model.decisionModel, vision: false, decision: true)
+                        }
+                    } else {
+                        Text(ModelPull.installHint).font(.caption.monospaced()).textSelection(.enabled)
+                    }
+                }
+            }
+        }
     }
 
     private func presetMenu(_ items: [(String, String, String)],

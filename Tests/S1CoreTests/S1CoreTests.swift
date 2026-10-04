@@ -1893,8 +1893,73 @@ private struct StubJudge: DecisionJudge {
     #expect(Endpoints.s2(env: [:], config: cfg, secret: { _ in nil }).apiKey == "file-key")
     #expect(Endpoints.s2(env: [:], config: cfg, secret: { $0 == .s2 ? "kc-key" : nil }).apiKey == "kc-key")
     #expect(Endpoints.s2(env: ["S1_S2_KEY": "env-key"], config: cfg, secret: { _ in "kc-key" }).apiKey == "env-key")
-    #expect(Endpoints.decision(env: [:], config: cfg, secret: { _ in nil })?.baseURL == "http://localhost:11434")
-    #expect(Endpoints.decision(env: [:], config: S1Config(), secret: { _ in nil }) == nil)
+    #expect(Endpoints.decision(env: [:], config: cfg, secret: { _ in nil }, installed: { nil })?.baseURL == "http://localhost:11434")
+}
+
+@Test func decisionDefaultsToNimbleOnlyWhenPulled() {
+    let none = S1Config()
+    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
+                               installed: { ["nimble:latest"] })?.model == "nimble")
+    // Not pulled → judge quietly off instead of failing every step.
+    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
+                               installed: { ["gemma3:4b"] }) == nil)
+    // Can't ask Ollama (no CLI) → trust the server.
+    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
+                               installed: { nil })?.model == "nimble")
+    var off = S1Config(); off.decision = .init(model: "")
+    #expect(Endpoints.decision(env: [:], config: off, secret: { _ in nil }, installed: { ["nimble:latest"] }) == nil)
+    #expect(Endpoints.decision(env: ["S1_DECISION_MODEL": "off"], config: none, secret: { _ in nil },
+                               installed: { ["nimble:latest"] }) == nil)
+    // Remote servers aren't gated on the local model list.
+    var jev = S1Config(); jev.decision = .init(base: "https://api.typesafe.ai", model: "jev-latest")
+    #expect(Endpoints.decision(env: [:], config: jev, secret: { _ in "k" }, installed: { [] })?.model == "jev-latest")
+}
+
+@Test func catalogShipsNimbleAsDecisionModel() {
+    let n = ModelPull.catalog.first { $0.name == "nimble" }
+    #expect(n?.decision == true && n?.vision == false)
+    #expect(ModelPull.contains(["nimble:latest"], "nimble"))
+    #expect(!ModelPull.contains(["nimble:latest"], "nimble:9b"))
+    #expect(ModelPull.contains(["tev1:0.8b"], "tev1:0.8b"))
+}
+
+@Test func autoLanguageCandidates() {
+    let en = SpokenLanguage.candidates(for: "auto", preferred: ["en-US"]).map(SpokenLanguage.code)
+    #expect(en == ["en", "id"])
+    let id = SpokenLanguage.candidates(for: nil, preferred: ["id-ID"]).map(SpokenLanguage.code)
+    #expect(id == ["id", "en"])
+    let ja = SpokenLanguage.candidates(for: "", preferred: ["ja-JP"]).map(SpokenLanguage.code)
+    #expect(ja == ["ja", "en"])
+    #expect(SpokenLanguage.candidates(for: "id-ID", preferred: ["en-US"]).map(\.identifier) == ["id-ID"])
+}
+
+@Test func detectsSpokenLanguageOfGoal() {
+    let c = [Locale(identifier: "en-US"), Locale(identifier: "id-ID")]
+    #expect(SpokenLanguage.detect("buka aplikasi TextEdit lalu ketik halo semuanya", among: c)
+        .map(SpokenLanguage.code) == "id")
+    #expect(SpokenLanguage.detect("open the TextEdit app and type hello everyone", among: c)
+        .map(SpokenLanguage.code) == "en")
+    #expect(SpokenLanguage.detect("", among: c)?.identifier == "en-US")
+}
+
+@Test func picksMostConfidentTranscriptInItsLanguage() {
+    let en = Locale(identifier: "en-US"), id = Locale(identifier: "id-ID")
+    // An English recognizer forced onto Indonesian speech: words, low confidence.
+    let best = SpokenLanguage.pick([
+        .init(locale: en, text: "book a text edit lily kitty halo", confidence: 0.41),
+        .init(locale: id, text: "buka TextEdit lalu ketik halo", confidence: 0.86),
+    ])
+    #expect(best?.locale == id)
+    #expect(SpokenLanguage.pick([.init(locale: en, text: "open notes", confidence: 0.9),
+                                 .init(locale: id, text: "", confidence: nil)])?.locale == en)
+    #expect(SpokenLanguage.pick([.init(locale: en, text: " ", confidence: nil)]) == nil)
+}
+
+@Test func pinnedVoiceOnlyUsedForItsLanguage() {
+    let enVoice = AVSpeechSynthesisVoice.speechVoices().first { $0.language.hasPrefix("en") }
+    guard let enVoice else { return }
+    #expect(Speaker.voice(for: "en-US", pinned: enVoice.identifier)?.identifier == enVoice.identifier)
+    #expect(Speaker.voice(for: "id-ID", pinned: enVoice.identifier)?.language.hasPrefix("en") != true)
 }
 
 @Test func secretStoreRoundTrips() throws {

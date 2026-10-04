@@ -48,8 +48,11 @@ public struct S1Config: Codable, Sendable {
     /// Optional GUI-grounding specialist for click targets (see `Grounder`).
     public var grounder: ModelEndpoint?
     /// S1 decision model (System One API: Ollama `/v1/systemone`, TypeSafe
-    /// Jev, Cloudflare Clef). Opt-in — nil means no decision judge.
+    /// Jev, Cloudflare Clef). nil = default (`nimble` when pulled); an
+    /// empty model = judge off.
     public var decision: ModelEndpoint?
+    /// TTS voice identifier ("" / nil = best installed voice per language).
+    public var voice: String?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
@@ -142,19 +145,43 @@ public enum Endpoints {
         SecretStore.get(account: role.rawValue)
     }
 
-    /// Decision-model endpoint, or nil when none is configured. Base is the
+    /// The local judge s1 uses when nothing is configured — the best
+    /// calibrated System One model that runs on a 16 GB Mac.
+    public static let defaultDecisionModel = "nimble"
+
+    /// Decision-model endpoint, or nil when the judge is off. Base is the
     /// server root: `http://localhost:11434` (Ollama ≥ 0.35),
     /// `https://api.typesafe.ai` (Jev), or a full Cloudflare
     /// `…/ai/run/@cf/cloudflare/clef` URL.
+    ///
+    /// Unset → `nimble` on local Ollama. An empty or "off" model turns the
+    /// judge off. A local Ollama model that isn't pulled yet resolves to nil
+    /// instead of failing every step — the judge is optional caution, never
+    /// a gate, so a missing model just means "no second opinion".
     public static func decision(env: [String: String] = ProcessInfo.processInfo.environment,
                                 config: S1Config = .load(),
-                                secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint? {
-        guard let model = env["S1_DECISION_MODEL"] ?? config.decision?.model,
-              !model.isEmpty else { return nil }
+                                secret: (ModelRole) -> String? = Endpoints.keychainSecret,
+                                installed: () -> [String]? = Endpoints.localModels) -> Endpoint? {
+        let model = (env["S1_DECISION_MODEL"] ?? config.decision?.model ?? defaultDecisionModel)
+            .trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty, model.lowercased() != "off" else { return nil }
+        let base = env["S1_DECISION_BASE"] ?? config.decision?.base ?? "http://localhost:11434"
+        if isLocal(base), let have = installed(), !ModelPull.contains(have, model) { return nil }
         return Endpoint(
-            baseURL: env["S1_DECISION_BASE"] ?? config.decision?.base ?? "http://localhost:11434",
+            baseURL: base,
             model: model,
             apiKey: env["S1_DECISION_KEY"] ?? secret(.decision) ?? config.decision?.key)
+    }
+
+    /// `ollama list`, or nil when the Ollama CLI isn't here to ask (a remote
+    /// or containerized server can't be checked, so it's trusted).
+    public static func localModels() -> [String]? {
+        ModelPull.ollamaBinary() == nil ? nil : ModelPull.installed()
+    }
+
+    static func isLocal(_ base: String) -> Bool {
+        guard let host = URL(string: base)?.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 }
 

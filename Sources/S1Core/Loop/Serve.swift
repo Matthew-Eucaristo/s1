@@ -54,6 +54,11 @@ public final class Serve: @unchecked Sendable {
         /// screen — heard utterances are skipped rather than starting a second
         /// concurrent run that would fight it for keyboard focus.
         public var isBusy: @Sendable () async -> Bool
+        /// Candidate reply languages — the ack is spoken in whichever of
+        /// these the heard goal is in (empty = the serve locale).
+        public var languages: [Locale]
+        /// Pinned TTS voice identifier (nil = best installed per language).
+        public var voice: String?
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -68,7 +73,9 @@ public final class Serve: @unchecked Sendable {
                                              "sleep", "go to sleep", "istirahat"],
                     transcribe: @escaping @Sendable (@Sendable @escaping (String) -> Void) async throws -> String,
                     isBusy: @escaping @Sendable () async -> Bool = {
-                        S1Runner.anotherRunActive() }) {
+                        S1Runner.anotherRunActive() },
+                    languages: [Locale] = [],
+                    voice: String? = nil) {
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -81,6 +88,8 @@ public final class Serve: @unchecked Sendable {
             self.stopPhrases = stopPhrases
             self.transcribe = transcribe
             self.isBusy = isBusy
+            self.languages = languages
+            self.voice = voice
         }
     }
 
@@ -311,14 +320,16 @@ public final class Serve: @unchecked Sendable {
             // so an aborted run never says "Stopped" after the fact.
             if config.speak && !FileManager.default.fileExists(atPath: config.killSwitch) {
                 // Speak the truth: "done" is only said when it actually is.
-                let id = sayLanguage.hasPrefix("id")
+                let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
+                let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
+                let id = lang.hasPrefix("id")
                 let reply: String = switch report.status {
                 case .done: id ? "Selesai: \(goal)" : "Done: \(goal)"
                 case .needsHuman, .escalatedToS2:
                     id ? "Butuh kamu" : "Needs you"
                 default: id ? "Berhenti" : "Stopped"
                 }
-                await speaker.say(reply, language: sayLanguage)
+                await speaker.say(reply, language: lang, voice: config.voice)
             }
         } catch {
             ok = false

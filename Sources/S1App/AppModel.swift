@@ -36,7 +36,10 @@ final class AppModel {
     /// Unknown while the first probe is in flight → auto degrades to ax
     /// for that utterance, then resolves once the answer lands.
     private let vlmAlive = LockedFlag()
-    var locale = "id-ID" { didSet { rearmServe(); invalidateStt() } }
+    /// "auto" = detect Indonesian/English (+ the Mac's language) per turn.
+    var locale = SpokenLanguage.auto { didSet { rearmServe(); invalidateStt() } }
+    /// Pinned TTS voice identifier; "" = best installed voice per language.
+    var ttsVoice = "" { didSet { rearmServe() } }
     var useS2 = false { didSet { rearmServe() } }
     var speakReply = true { didSet { rearmServe() } }
     /// Text fields debounce — rearming the hotkey per keystroke would tear
@@ -55,10 +58,21 @@ final class AppModel {
     var grounderModel = "" { didSet { scheduleSave() } }
     /// S1 decision model (System One API) — empty = no judge.
     var decisionBase = "http://localhost:11434" { didSet { scheduleRearm() } }
-    var decisionModel = "" { didSet { scheduleRearm() } }
+    var decisionModel = Endpoints.defaultDecisionModel { didSet { scheduleRearm() } }
+    /// The configured judge model is pulled into local Ollama (or remote).
+    var decisionReady: Bool {
+        let m = decisionModel.trimmingCharacters(in: .whitespaces)
+        guard !m.isEmpty else { return false }
+        return !decisionIsLocal || ModelPull.contains(installedModels, m)
+    }
+    var decisionIsLocal: Bool {
+        let host = URL(string: decisionBase)?.host?.lowercased() ?? ""
+        return host == "localhost" || host == "127.0.0.1"
+    }
+    /// Bumped to pull focus into the command field (⌘N).
+    var focusGoalToken = 0
     /// Bumped on Keychain writes so views re-read key presence.
     private(set) var keyRevision = 0
-    var showConnections = false
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
@@ -105,7 +119,7 @@ final class AppModel {
     /// One tap: pull a catalog/model name into Ollama. On finish the model
     /// auto-assigns — a vision model becomes the S1 brain, a text-only
     /// model becomes S2 — matching how the catalog describes them.
-    func pullModel(_ name: String, vision: Bool, grounding: Bool = false) {
+    func pullModel(_ name: String, vision: Bool, grounding: Bool = false, decision: Bool = false) {
         guard pullProgress[name] == nil else { return }
         pullProgress[name] = "starting…"
         Task {
@@ -115,7 +129,9 @@ final class AppModel {
                 }
                 pullProgress[name] = nil
                 refreshModels()
-                if grounding {
+                if decision {
+                    useAsDecision(name)
+                } else if grounding {
                     useAsGrounder(name)
                 } else if vision {
                     vlmModel = name; brain = .vlm
@@ -132,6 +148,28 @@ final class AppModel {
     /// Installed row → wire it into the matching slot without re-downloading.
     func useAsBrain(_ name: String) { vlmModel = name; brain = .vlm }
     func useAsS2(_ name: String) { s2Model = name; useS2 = true }
+    func useAsDecision(_ name: String) {
+        decisionBase = "http://localhost:11434"; decisionModel = name
+        rearmServe()   // the judge endpoint is resolved when serve arms
+    }
+    /// Settings → Voice → Preview: one line in each candidate language.
+    func previewVoice() {
+        let voice = ttsVoice.isEmpty ? nil : ttsVoice
+        let langs = SpokenLanguage.candidates(for: locale)
+        Task {
+            for l in langs {
+                let id = SpokenLanguage.code(l) == "id"
+                await speaker.say(id ? "Halo, aku s1. Siap membantu." : "Hi, I'm s1. Ready when you are.",
+                                  language: l.identifier, voice: voice, timeout: 8)
+            }
+        }
+    }
+
+    /// ⌘K — empty the step feed (artifacts on disk stay).
+    func clearFeed() {
+        guard !running else { return }
+        steps = []; runDir = nil; transcript = ""; status = "idle"
+    }
     /// Grounding only runs on the VLM brain's click steps — pick it too
     /// unless the user already chose a model brain.
     func useAsGrounder(_ name: String) {
@@ -166,7 +204,7 @@ final class AppModel {
     private var _stt: SpeechToText?
     private var stt: SpeechToText {
         if let _stt { return _stt }
-        let s = SpeechToText(locale: Locale(identifier: locale),
+        let s = SpeechToText(locales: SpokenLanguage.candidates(for: locale),
                              vocabulary: Vocabulary.assemble(custom: parsedVocab))
         _stt = s
         // Pre-warm the model assets so the first listen isn't cold-slow.
@@ -207,6 +245,7 @@ final class AppModel {
         if let g = cfg.grounder?.model { grounderModel = g }
         if let b = cfg.decision?.base { decisionBase = b }
         if let m = cfg.decision?.model { decisionModel = m }
+        if let v = cfg.voice { ttsVoice = v }
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
@@ -250,7 +289,8 @@ final class AppModel {
     }
 
     private func startServe() {
-        let loc = locale
+        let langs = SpokenLanguage.candidates(for: locale)
+        let voiceID = ttsVoice.isEmpty ? nil : ttsVoice
         let brainKind = brain
         let s2On = useS2
         let speakOn = speakReply
@@ -308,8 +348,9 @@ final class AppModel {
                 // Our own Run button OR another process's agent (a CLI
                 // `s1 run`/`s1 serve` holds ~/.s1/run.pid) owns the screen.
                 if await self?.running == true { return true }
-                return S1Runner.anotherRunActive() }),
-            locale: Locale(identifier: loc),
+                return S1Runner.anotherRunActive() },
+                languages: langs, voice: voiceID),
+            locale: langs[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in
             Task { @MainActor [weak self] in
@@ -396,9 +437,11 @@ final class AppModel {
         cfg.grounder = grounderModel.isEmpty ? nil
             : .init(base: cfg.grounder?.base, model: grounderModel,
                     key: cfg.grounder?.key, numCtx: cfg.grounder?.numCtx)
-        cfg.decision = decisionModel.trimmingCharacters(in: .whitespaces).isEmpty ? nil
-            : .init(base: decisionBase, model: decisionModel.trimmingCharacters(in: .whitespaces),
-                    key: cfg.decision?.key, numCtx: nil)
+        // Always written — an empty model is the explicit "judge off"; nil
+        // would fall back to the nimble default.
+        cfg.decision = .init(base: decisionBase, model: decisionModel.trimmingCharacters(in: .whitespaces),
+                             key: cfg.decision?.key, numCtx: nil)
+        cfg.voice = ttsVoice.isEmpty ? nil : ttsVoice
         try? cfg.save()
     }
 
@@ -406,7 +449,7 @@ final class AppModel {
     func decisionEndpoint() -> Endpoint? {
         var cfg = S1Config.load()
         let m = decisionModel.trimmingCharacters(in: .whitespaces)
-        cfg.decision = m.isEmpty ? nil : .init(base: decisionBase, model: m, key: cfg.decision?.key)
+        cfg.decision = .init(base: decisionBase, model: m, key: cfg.decision?.key)
         return Endpoints.decision(config: cfg)
     }
 
@@ -450,7 +493,7 @@ final class AppModel {
         func ms() -> String { "\(Int(Date().timeIntervalSince(started) * 1000)) ms" }
         switch role {
         case .decision:
-            guard let ep = decisionEndpoint() else { return "set a model first" }
+            guard let ep = decisionEndpoint() else { return decisionModel.isEmpty ? "judge is off" : "\(decisionModel) not pulled — download it below" }
             do {
                 let r = try await SystemOneClient(endpoint: ep, timeout: 120).evaluate(
                     state: .string("The user said: open TextEdit."),
@@ -700,13 +743,16 @@ final class AppModel {
             saveConfig()
             running = false
             if speakReply {
-                let id = locale.hasPrefix("id")
+                let lang = SpokenLanguage.detect(goalText, among: SpokenLanguage.candidates(for: locale))?
+                    .identifier ?? "en-US"
+                let id = lang.hasPrefix("id")
                 let reply: String = switch report.status {
                 case .done: id ? "Selesai" : "Done"
                 case .needsHuman, .escalatedToS2: id ? "Butuh kamu" : "Needs you"
                 default: id ? "Berhenti" : "Stopped"
                 }
-                await speaker.say("\(reply): \(goalText)", language: locale)
+                await speaker.say("\(reply): \(goalText)", language: lang,
+                                  voice: ttsVoice.isEmpty ? nil : ttsVoice)
             }
         } catch {
             status = "error: \(error.localizedDescription)"

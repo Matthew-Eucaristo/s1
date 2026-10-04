@@ -227,11 +227,11 @@ func validatedSTTPolicy(_ policy: String) throws -> String {
     return policy
 }
 
-/// `--locale`/`--language` flags → config.json's `locale` → id-ID, in that
+/// `--locale`/`--language` flags → config.json's `locale` → auto, in that
 /// order. The app writes the same key, so the GUI language picker and the
 /// CLI speak the same language without re-flagging every call.
 func resolveLocale(_ flag: String?) -> String {
-    flag ?? S1Config.load().locale ?? "id-ID"
+    flag ?? S1Config.load().locale ?? SpokenLanguage.auto
 }
 
 /// Claim the mic for a foreground command — the lock file is atomic, so
@@ -266,7 +266,7 @@ struct TranscribeCmd: AsyncParsableCommand {
         abstract: "On-device STT: transcribe an audio file (or the mic).")
     @Option(help: "Audio file to transcribe (.aiff/.wav).")
     var file: String?
-    @Option(help: "Locale, e.g. id-ID, en-US (default: config locale, else id-ID).")
+    @Option(help: "Locale, e.g. id-ID, en-US, or auto (default: config locale, else auto-detect).")
     var locale: String?
     @Option(help: "Max seconds of mic recording when --file is omitted.")
     var maxSeconds: Double = 15
@@ -277,7 +277,7 @@ struct TranscribeCmd: AsyncParsableCommand {
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
-        let stt = SpeechToText(locale: Locale(identifier: resolveLocale(locale)),
+        let stt = SpeechToText(locales: SpokenLanguage.candidates(for: resolveLocale(locale)),
                                vocabulary: sttVocabulary(vocabulary))
         let text: String
         if let file {
@@ -305,7 +305,7 @@ struct SayCmd: AsyncParsableCommand {
         abstract: "On-device TTS (AVSpeechSynthesizer).")
     @Argument(help: "Text to speak.")
     var text: String
-    @Option(help: "Voice language, e.g. id-ID, en-US (default: config locale, else id-ID).")
+    @Option(help: "Voice language, e.g. id-ID, en-US (default: config locale, else auto-detect).")
     var language: String?
 
     func run() async throws {
@@ -318,7 +318,7 @@ struct ListenCmd: AsyncParsableCommand {
         abstract: "Voice-first: hear a command, run it, speak the result.")
     @Option(help: "Transcribe this audio file instead of the mic (testing).")
     var file: String?
-    @Option(help: "STT/TTS locale (default: config locale, else id-ID).")
+    @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
     @Option(help: "Policy for the run (default auto — model if reachable, else ax).")
     var policy: String = "auto"
@@ -346,7 +346,7 @@ struct ListenCmd: AsyncParsableCommand {
         }
         let polName = try validatedSTTPolicy(policy)   // fail fast, before the mic turn
         let loc = resolveLocale(locale)
-        let stt = SpeechToText(locale: Locale(identifier: loc),
+        let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
                                vocabulary: sttVocabulary(vocabulary))
         let goal: String
         if let file {
@@ -527,7 +527,7 @@ struct AXCmd: AsyncParsableCommand {
 struct ServeCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "serve",
         abstract: "Always-on companion: hotkey toggles continuous listening (double-tap Shift or ⌃⌥Space).")
-    @Option(help: "STT/TTS locale (default: config locale, else id-ID).")
+    @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
     @Option(help: "Policy for runs (default auto — model if reachable, else ax).")
     var policy: String = "auto"
@@ -566,7 +566,7 @@ struct ServeCmd: AsyncParsableCommand {
         let resolvedSpeak = speak ?? S1Config.load().speak ?? false
         setbuf(stdout, nil)   // daemon: stream events unbuffered
         _ = try validatedSTTPolicy(policy)
-        let stt = SpeechToText(locale: Locale(identifier: loc),
+        let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
                                vocabulary: sttVocabulary(vocabulary))
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
         // Warm the speech model in the background — the first hotkey press
@@ -681,8 +681,10 @@ struct ServeCmd: AsyncParsableCommand {
                                   // "words landing" feedback the app shows.
                                   FileHandle.standardError.write(Data("\r\(p)   ".utf8))
                               }
-                          }),
-            locale: Locale(identifier: loc),
+                          },
+                          languages: SpokenLanguage.candidates(for: loc),
+                          voice: S1Config.load().voice),
+            locale: SpokenLanguage.candidates(for: loc)[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { ev in
             // Event text carries transcripts/goal/error strings — same
