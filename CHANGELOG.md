@@ -76,6 +76,8 @@ this project is pre-1.0 — breaking changes land in minor versions.
   later left them pinned to the grammar. A slow re-probe (60s while down)
   upgrades `auto → vlm` when the endpoint answers.
 
+- **`--no-vlm-screenshot` honored under `auto`** — the flag reached only
+  the explicit `--policy vlm` branch; the default path read config only.
 ### Security
 - **Act-time secure-focus re-check** — the loop gates keystrokes against
   the observe-time snapshot, but a password prompt appearing between
