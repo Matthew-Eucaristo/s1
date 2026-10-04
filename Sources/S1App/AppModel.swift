@@ -94,6 +94,9 @@ final class AppModel {
     private func invalidateStt() { _stt = nil }
     private var serve: Serve?
     private var rearmTask: Task<Void, Never>?
+    /// Slow re-probe while `auto` finds the endpoint down — Ollama coming
+    /// up after launch must upgrade the brain without a settings change.
+    private var vlmProbeTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
 
     init() {
@@ -159,9 +162,26 @@ final class AppModel {
         let vlmEp = vlmEndpoint()
         let s2Ep = s2Endpoint()
         let box = vlmAlive
+        // Any rearm replaces the upgrade probe — a brain switch away from
+        // `auto` must kill it outright, not leave it polling.
+        vlmProbeTask?.cancel()
         if brainKind == .auto {
             box.value = nil   // re-probe on each rearm — the server may have come up
             Task { box.value = await AutoPolicy.endpointAlive(vlmEp) }
+            // That one shot isn't enough for a long-lived companion: if the
+            // endpoint comes up later, auto would stay pinned to `ax` until
+            // some unrelated rearm. Probe slowly while down — upgrade only;
+            // a mid-run endpoint death still errors honestly per step.
+            vlmProbeTask = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                    if Task.isCancelled || box.value == true { return }
+                    if await AutoPolicy.endpointAlive(vlmEp) {
+                        box.value = true
+                        return
+                    }
+                }
+            }
         }
         let s = Serve(
             config: .init(
