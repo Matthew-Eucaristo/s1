@@ -20,22 +20,18 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 ## Install
 
 ```bash
-# Homebrew — the recommended way (both from our tap):
+# Homebrew — the recommended way (one package carries GUI + CLI):
 brew tap Matthew-Eucaristo/tap
-brew trust Matthew-Eucaristo/tap   # one-time: the CLI ships a launchd service
-brew install s1             # the s1 CLI
-brew install --cask s1      # the S1 menu-bar app
+brew install --cask s1      # the S1 menu-bar app; `s1` CLI lands on PATH too
 
 s1 preflight                # shows which macOS permissions are missing
-brew services start s1      # optional: always-on listener (or: s1 serve --install)
+s1 serve --install          # optional: always-on listener (launchd, armed at login)
 ```
 
-Remove it cleanly any time (the `--formula`/`--cask` flags disambiguate
-the shared name — bare `brew uninstall s1` can complain about both):
+Remove it cleanly any time (one cask carries everything — `--zap` is the full wipe):
 
 ```bash
-brew services stop s1             # first, if you started the always-on listener
-brew uninstall --formula s1
+s1 serve --uninstall              # first, if you installed the always-on agent
 brew uninstall --cask s1            # quits the app + removes /Applications/S1.app
 brew uninstall --cask s1 --zap      # + wipes ~/.s1 state and Library traces
 ```
@@ -285,7 +281,8 @@ Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
 
 ## How S1 thinks
 
-- **AX policy** (`--policy ax`, default): zero model, parses `open X, type Y, done` intents and executes deterministically — the baseline every smarter S1 must beat.
+- **Auto policy** (`--policy auto`, default): a real decision model when the VLM endpoint answers (one 3s probe at start, never per step), the deterministic AX policy when it doesn't — zero-config for both worlds.
+- **AX policy** (`--policy ax`): zero model, parses `open X, type Y, done` intents and executes deterministically — the baseline every smarter S1 must beat.
 - **VLM policy** (`--policy vlm`): goal → deterministic intent cursor (shared grammar with AX policy) → the model grounds ONE intent per step. Small local models decide actions; they don't track whole plans. Truncated/malformed JSON is salvaged field-by-field before a strict-JSON retry.
 - **S2** (`--s2`): any OpenAI-compatible endpoint; called only below the confidence threshold, with the reason logged.
 - Defaults on this project: `gemma3:4b` via Ollama for VLM and S2 (benchmarked on an arm64 VM: correct JSON ≈1min/step on CPU; much faster on a real Mac). Set `S1_VLM_MODEL` / `S1_S2_MODEL` to swap.

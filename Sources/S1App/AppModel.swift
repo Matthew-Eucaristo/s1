@@ -17,14 +17,25 @@ final class AppModel {
     static let shared = AppModel()
 
     enum Brain: String, CaseIterable, Identifiable {
-        case ax, vlm
+        case auto, ax, vlm
         var id: String { rawValue }
-        var title: String { self == .ax ? "AX (instant, no model)" : "VLM (model)" }
+        var title: String {
+            switch self {
+            case .auto: return "Auto (model if reachable)"
+            case .ax:   return "AX (instant, no model)"
+            case .vlm:  return "VLM (model)"
+            }
+        }
     }
 
     var goal = ""
     var transcript = "" { didSet { syncHUD() } }
-    var brain: Brain = .ax { didSet { rearmServe() } }
+    var brain: Brain = .auto { didSet { rearmServe() } }
+    /// Cached endpoint probe for the auto brain — read inside Serve's
+    /// @Sendable makePolicy, so it lives in a lock box, not MainActor state.
+    /// Unknown while the first probe is in flight → auto degrades to ax
+    /// for that utterance, then resolves once the answer lands.
+    private let vlmAlive = LockedFlag()
     var locale = "id-ID" { didSet { rearmServe(); invalidateStt() } }
     var useS2 = false { didSet { rearmServe() } }
     var speakReply = true { didSet { rearmServe() } }
@@ -147,10 +158,17 @@ final class AppModel {
         // non-isolated and must not reach back into the model.
         let vlmEp = vlmEndpoint()
         let s2Ep = s2Endpoint()
+        let box = vlmAlive
+        if brainKind == .auto {
+            box.value = nil   // re-probe on each rearm — the server may have come up
+            Task { box.value = await AutoPolicy.endpointAlive(vlmEp) }
+        }
         let s = Serve(
             config: .init(
                 makePolicy: {
-                    if brainKind == .vlm {
+                    let wantsModel = brainKind == .vlm
+                        || (brainKind == .auto && box.value == true)
+                    if wantsModel {
                         return VLMPolicy(endpoint: vlmEp,
                                          useScreenshot: shot)
                     }
@@ -522,5 +540,17 @@ final class AppModel {
     func revealRunDir() {
         guard let runDir else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: runDir)])
+    }
+}
+
+/// Lock-protected tri-state read from @Sendable closures (the auto brain's
+/// endpoint probe lands off-actor; makePolicy reads it on whatever thread
+/// the serve loop calls it from).
+final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _v: Bool?
+    var value: Bool? {
+        get { lock.lock(); defer { lock.unlock() }; return _v }
+        set { lock.lock(); _v = newValue; lock.unlock() }
     }
 }

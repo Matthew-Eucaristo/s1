@@ -1,15 +1,18 @@
 cask "s1" do
   version "0.2.0"
-  sha256 "a223d6fd0a902196b8de6806181a5f1bb9113d7ba239ddddd63d7c5a1037a0bc"
+  sha256 "7d0bd4088c396e1d650f5729f672898856babe81935b2332aca020691934efa2"
 
   url "https://raw.githubusercontent.com/Matthew-Eucaristo/homebrew-tap/main/releases/v#{version}/S1-#{version}-app.zip"
-  name "S1"
-  desc "Voice-first agent — fast System 1 + LLM System 2, accessibility-driven"
+  name "s1"
+  desc "Voice-first agent — menu-bar companion (System 1 + System 2), CLI included"
   homepage "https://github.com/Matthew-Eucaristo/s1"
 
   depends_on macos: :tahoe
 
   app "S1.app"
+  # The CLI ships inside the bundle (Contents/Resources/s1) — brew links it
+  # into HOMEBREW_PREFIX/bin so `s1` works on PATH from the same install.
+  binary "#{appdir}/S1.app/Contents/Resources/s1"
 
   uninstall launchctl: ["com.matthew.s1.serve", "sh.brew.s1"],
             quit:      "com.matthew.s1.app"
@@ -33,6 +36,10 @@ cask "s1" do
     with `brew install --cask --no-quarantine s1`, or once:
       xattr -dr com.apple.quarantine /Applications/S1.app
     Then open S1 and grant Accessibility + Screen Recording + Microphone
-    when it asks — `s1 preflight` (from `brew install s1`) shows the score.
+    when it asks — `s1 preflight` shows the score.
+
+      Always-on listener:        s1 serve --install   (launchd agent, armed at login)
+      Local model brain:         brew install ollama && ollama pull gemma3:4b
+      Full reset:                brew uninstall --cask s1 --zap
   EOS
 end

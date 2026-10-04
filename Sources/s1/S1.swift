@@ -67,7 +67,7 @@ struct RunCmd: AsyncParsableCommand {
     func run() async throws {
         // --plan is a program to replay: scripted is the only policy that
         // consumes it. Resolve it implicitly so `s1 run --plan` just works.
-        let policyName = policy ?? (plan != nil ? "scripted" : "ax")
+        let policyName = policy ?? (plan != nil ? "scripted" : "auto")
         if plan != nil, policyName != "scripted" {
             FileHandle.standardError.write(
                 "note: --plan given but --policy \(policyName) ignores the file\n".data(using: .utf8)!)
@@ -76,6 +76,7 @@ struct RunCmd: AsyncParsableCommand {
         switch policyName {
         case "dummy": pol = DummyPolicy()
         case "ax":    pol = AXPolicy()
+        case "auto":  pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel)
         case "vlm":
             pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
                             useScreenshot: vlmScreenshot ?? S1Config.load().vlmScreenshot ?? true)
@@ -192,10 +193,23 @@ func sttVocabulary(_ csv: String?) -> [String] {
 }
 
 func validatedSTTPolicy(_ policy: String) throws -> String {
-    guard ["ax", "vlm"].contains(policy) else {
-        throw ValidationError("unknown policy \(policy) — use ax or vlm")
+    guard ["auto", "ax", "vlm"].contains(policy) else {
+        throw ValidationError("unknown policy \(policy) — use auto, ax or vlm")
     }
     return policy
+}
+
+/// Shared `auto` resolution: probe the VLM endpoint once, log which brain
+/// the run actually got, return the concrete policy.
+func resolveAutoPolicy(vlmBase: String?, vlmModel: String?) async -> any Policy {
+    let useShot = S1Config.load().vlmScreenshot ?? true
+    let (pol, name) = await AutoPolicy.resolve(vlmBase: vlmBase, vlmModel: vlmModel,
+                                              useScreenshot: useShot)
+    let note = name == "vlm"
+        ? "policy auto → vlm (local decision model)\n"
+        : "policy auto → ax (model endpoint unreachable — deterministic grammar)\n"
+    FileHandle.standardError.write(note.data(using: .utf8)!)
+    return pol
 }
 
 struct TranscribeCmd: AsyncParsableCommand {
@@ -249,8 +263,8 @@ struct ListenCmd: AsyncParsableCommand {
     var file: String?
     @Option(help: "STT/TTS locale.")
     var locale: String = "id-ID"
-    @Option(help: "Policy for the run (default ax — fast, local).")
-    var policy: String = "ax"
+    @Option(help: "Policy for the run (default auto — model if reachable, else ax).")
+    var policy: String = "auto"
     @Option(help: "Artifacts root directory.")
     var artifacts: String = S1Home.path + "/artifacts"
     @Flag(help: "Speak the result with TTS.")
@@ -300,10 +314,16 @@ struct ListenCmd: AsyncParsableCommand {
         print("heard: \(goal)")
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
-        let pol: any Policy = polName == "vlm"
-            ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                        useScreenshot: S1Config.load().vlmScreenshot ?? true)
-            : AXPolicy()
+        let pol: any Policy
+        switch polName {
+        case "vlm":
+            pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
+                            useScreenshot: S1Config.load().vlmScreenshot ?? true)
+        case "auto":
+            pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel)
+        default:
+            pol = AXPolicy()
+        }
         let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
         // A fresh listen clears a stale kill switch — the user just asked for
         // a new run, so an old "stop" file must not silently abort step 0.
@@ -415,8 +435,8 @@ struct ServeCmd: AsyncParsableCommand {
         abstract: "Always-on companion: hotkey toggles continuous listening (double-tap Shift or ⌃⌥Space).")
     @Option(help: "STT/TTS locale.")
     var locale: String = "id-ID"
-    @Option(help: "Policy for runs (default ax — fast, local).")
-    var policy: String = "ax"
+    @Option(help: "Policy for runs (default auto — model if reachable, else ax).")
+    var policy: String = "auto"
     @Flag(help: "Enable System 2 escalation (LLM endpoint).")
     var s2 = false
     @Flag(help: "Speak results with TTS.")
@@ -456,8 +476,20 @@ struct ServeCmd: AsyncParsableCommand {
         // shouldn't pay the cold-load cost mid-conversation.
         Task { await stt.warmup() }
 
+        // `auto` resolves ONCE here — a daemon must not re-probe the
+        // endpoint on every utterance (each probe is up to 3s).
+        let useVLM: Bool
+        if policy == "auto" {
+            useVLM = await AutoPolicy.endpointAlive(Endpoints.vlm(base: vlmBase, model: vlmModel))
+            FileHandle.standardError.write(
+                (useVLM ? "policy auto → vlm (local decision model)\n"
+                        : "policy auto → ax (model endpoint unreachable — deterministic grammar)\n")
+                .data(using: .utf8)!)
+        } else {
+            useVLM = policy == "vlm"
+        }
         let makePol: @Sendable () -> any Policy = {
-            guard policy == "vlm" else { return AXPolicy() }
+            guard useVLM else { return AXPolicy() }
             return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
                              useScreenshot: S1Config.load().vlmScreenshot ?? true)
         }
@@ -570,6 +602,9 @@ struct ServeCmd: AsyncParsableCommand {
             atPath: (plistPath as NSString).deletingLastPathComponent,
             withIntermediateDirectories: true)
         _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"], quiet: true)  // replace cleanly
+        // launchd does NOT create StandardOutPath parent dirs — a fresh
+        // machine without ~/.s1 would run the agent with its log lost.
+        try fm.createDirectory(atPath: S1Home.path, withIntermediateDirectories: true)
         // Refuse while a listener that ISN'T our agent holds the lock —
         // the agent would fail claimPidFile, exit non-zero, and KeepAlive
         // would respawn-churn against it forever. Our own agent was already

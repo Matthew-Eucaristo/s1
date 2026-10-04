@@ -1453,3 +1453,14 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(xml.contains("<key>RunAtLoad</key>"))
     #expect(!xml.contains("--wake"))
 }
+
+@Test func autoPolicyFallsBackWhenEndpointDead() async {
+    // A dead endpoint must resolve `auto` to the deterministic AX policy —
+    // the whole point of the default: model when reachable, ax when not.
+    let dead = Endpoint(baseURL: "http://127.0.0.1:1", model: "none")
+    #expect(await AutoPolicy.endpointAlive(dead) == false)
+    let (pol, name) = await AutoPolicy.resolve(
+        vlmBase: "http://127.0.0.1:1", vlmModel: "none", useScreenshot: false)
+    #expect(name == "ax")
+    #expect(pol.name == "ax")
+}
