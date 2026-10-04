@@ -1464,3 +1464,24 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(name == "ax")
     #expect(pol.name == "ax")
 }
+
+@Test func artifactPruneKeepsNewestAndNonRunDirs() throws {
+    // Storage bound: oldest run dirs go first, non-run dirs survive, and
+    // `cleanAll` empties the whole root. Sort order = name = time.
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1-prune-\(UUID().uuidString)")
+    let fm = FileManager.default
+    defer { try? fm.removeItem(at: root) }
+    for i in 1...4 {
+        try fm.createDirectory(at: root.appendingPathComponent(
+            "2026-01-0\(i)T00-00-00Z-r\(i)"), withIntermediateDirectories: true)
+    }
+    try fm.createDirectory(at: root.appendingPathComponent("my-notes"),
+                           withIntermediateDirectories: true)
+    #expect(ArtifactStore.prune(root: root, keep: 2) == 2)
+    let left = (try fm.contentsOfDirectory(atPath: root.path)).sorted()
+    #expect(left == ["2026-01-03T00-00-00Z-r3",
+                     "2026-01-04T00-00-00Z-r4", "my-notes"])
+    #expect(ArtifactStore.cleanAll(root: root) == 2)
+    #expect((try fm.contentsOfDirectory(atPath: root.path)) == ["my-notes"])
+}

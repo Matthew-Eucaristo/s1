@@ -210,7 +210,12 @@ final class AppModel {
                     self.status = "running"
                 case .step:
                     self.serveStatus = "running · \(ev.text)"
-                    if let rec = ev.record { self.steps.append(rec) }
+                    if let rec = ev.record {
+                        self.steps.append(rec)
+                        // Serve mode runs forever — cap the feed so a day
+                        // of voice turns can't grow the array unboundedly.
+                        if self.steps.count > 300 { self.steps.removeFirst(self.steps.count - 300) }
+                    }
                 case .runDone:
                     self.serveStatus = ev.text
                     self.status = ev.text
@@ -448,7 +453,10 @@ final class AppModel {
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: killPath, s2: reasoner,
                 onStep: { [weak self] rec in
-                    Task { @MainActor [weak self] in self?.steps.append(rec) }
+                    Task { @MainActor [weak self] in
+                        self?.steps.append(rec)
+                        if let n = self?.steps.count, n > 300 { self?.steps.removeFirst(n - 300) }
+                    }
                 })
             runDir = report.runDir
             // "needsHuman" alone is jargon — say what for (denylist, secure
