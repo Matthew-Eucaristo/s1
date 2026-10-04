@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 import ApplicationServices
 @testable import S1Core
 
@@ -1781,4 +1782,23 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
                                config: S1Config(vlm: .init(base: "http://h:1/v1")))
     #expect(e?.model == "holo")
     #expect(e?.baseURL == "http://h:1/v1")
+}
+
+// The live-mic converter is reused for every tap buffer — a converter that
+// went terminal after buffer #1 fed raw 48 kHz audio to SpeechAnalyzer,
+// which traps on macOS 27 (EXC_BREAKPOINT, RealtimeMessenger queue).
+@available(macOS 26, *)
+@Test func micConverterKeepsProducingAcrossBuffers() throws {
+    let src = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+    let dst = try #require(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000,
+                                         channels: 1, interleaved: true))
+    let conv = try #require(AVAudioConverter(from: src, to: dst))
+    for _ in 0 ..< 6 {
+        let b = try #require(AVAudioPCMBuffer(pcmFormat: src, frameCapacity: 4096))
+        b.frameLength = 4096
+        for i in 0 ..< 4096 { b.floatChannelData![0][i] = sin(Float(i) * 0.05) * 0.3 }
+        let out = try #require(SpeechToText.convert(b, from: src, to: dst, using: conv))
+        #expect(out.format == dst)
+        #expect(out.frameLength > 1000)
+    }
 }

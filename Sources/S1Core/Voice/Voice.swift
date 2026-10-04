@@ -264,9 +264,19 @@ public struct SpeechToText: Sendable {
             continuation.finish()
             MicLevel.shared.reset()
         }
+        // The analyzer must only ever see ONE format: a buffer in the mic's
+        // native format slipped past a failed conversion traps inside
+        // Speech (EXC_BREAKPOINT on RealtimeMessenger.mServiceQueue, macOS 27).
+        // So a buffer that can't be converted is dropped, never forwarded raw.
+        let needsConversion = best.map { $0 != format } ?? false
+        if needsConversion, converter == nil {
+            throw S1Error.aborted("cannot convert mic audio to the speech analyzer's format")
+        }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             MicLevel.push(buffer: buffer)
-            if let converter, let best, let out = Self.convert(buffer, from: format, to: best, using: converter) {
+            if needsConversion {
+                guard let converter, let best,
+                      let out = Self.convert(buffer, from: format, to: best, using: converter) else { return }
                 continuation.yield(AnalyzerInput(buffer: out))
             } else {
                 continuation.yield(AnalyzerInput(buffer: buffer))
@@ -336,7 +346,10 @@ public struct SpeechToText: Sendable {
     }
 
     /// Resample a tap buffer into the analyzer's preferred format.
-    private static func convert(_ buffer: AVAudioPCMBuffer,
+    /// The converter is reused across the whole stream, so an exhausted
+    /// input block must answer `.noDataNow` — `.endOfStream` puts the
+    /// converter in its terminal state and every later call yields 0 frames.
+    static func convert(_ buffer: AVAudioPCMBuffer,
                                 from src: AVAudioFormat, to dst: AVAudioFormat,
                                 using converter: AVAudioConverter) -> AVAudioPCMBuffer? {
         let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * dst.sampleRate / src.sampleRate)) + 64
@@ -347,7 +360,7 @@ public struct SpeechToText: Sendable {
         nonisolated(unsafe) let source = buffer
         var error: NSError?
         converter.convert(to: out, error: &error) { _, status in
-            if consumed { status.pointee = .endOfStream; return nil }
+            if consumed { status.pointee = .noDataNow; return nil }
             consumed = true
             status.pointee = .haveData
             return source
