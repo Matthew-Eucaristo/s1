@@ -392,11 +392,17 @@ struct CaptureCmd: AsyncParsableCommand {
     func run() async throws {
         let img = try await SystemPerceiver.captureScreen()
         let url = URL(fileURLWithPath: out)
+        // A parent that doesn't exist used to surface as a bare ExitCode(1)
+        // with no message — create it, the user asked for this exact path.
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
-            throw ExitCode(1)
+            throw ValidationError("cannot create image destination for \(out)")
         }
         CGImageDestinationAddImage(dest, img, nil)
-        guard CGImageDestinationFinalize(dest) else { throw ExitCode(1) }
+        guard CGImageDestinationFinalize(dest) else {
+            throw ValidationError("cannot write screenshot to \(out)")
+        }
         print("wrote \(out) (\(img.width)x\(img.height))")
     }
 }
