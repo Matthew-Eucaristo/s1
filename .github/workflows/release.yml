@@ -25,6 +25,9 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          # Still beta — every v0.x release lands flagged "pre-release";
+          # v1.0.0 and up publish as normal releases automatically.
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           files: |
             S1-*-app.zip
             S1-*-app.zip.sha256

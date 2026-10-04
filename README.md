@@ -3,11 +3,15 @@
 # s1
 
 [![CI](https://github.com/Matthew-Eucaristo/s1/actions/workflows/swift.yml/badge.svg)](https://github.com/Matthew-Eucaristo/s1/actions/workflows/swift.yml)
+[![Release](https://img.shields.io/github/v/release/Matthew-Eucaristo/s1?include_prereleases&label=release&color=orange)](https://github.com/Matthew-Eucaristo/s1/releases)
+[![Beta](https://img.shields.io/badge/status-public%20beta-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black)
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
 
 Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
+
+> **Public beta (v0.x)** — works, tested, and still sharpening. Read [`SECURITY.md`](SECURITY.md) before letting it drive a real machine.
 
 **Status:** P0 harness, P1 real run, P2 S1+S2 brains, P4 voice, **macOS app (Liquid Glass)**, **always-on companion (global hotkey → continuous listening)** — all verified on real macOS 26. See `PLAN.md` for the roadmap.
 
@@ -27,6 +31,12 @@ brew install --cask s1      # the S1 menu-bar app; `s1` CLI lands on PATH too
 s1 preflight                # shows which macOS permissions are missing
 s1 serve --install          # optional: always-on listener (launchd, armed at login)
 ```
+
+Or grab the signed zip straight from
+[**Releases**](https://github.com/Matthew-Eucaristo/s1/releases/latest)
+(`S1-*-app.zip` — drag `S1.app` into /Applications; the `s1` CLI is inside
+`Contents/Resources/`). It's ad-hoc signed, so first launch needs the usual
+**right-click → Open** to pass Gatekeeper.
 
 Remove it cleanly any time (one cask carries everything — `--zap` is the full wipe):
 
