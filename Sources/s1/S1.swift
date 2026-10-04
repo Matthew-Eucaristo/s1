@@ -777,6 +777,28 @@ struct StatusCmd: AsyncParsableCommand {
         // Active agent run (the screen-ownership lock).
         let runState = S1Runner.anotherRunActive() ? "in progress (other process)" : "none"
         print("run          \(runState)")
+        // ~/.s1 footprint — the answer to "is s1 eating my disk" at a glance.
+        if let bytes = dirSize(S1Home.path) {
+            print("storage      \(formatBytes(bytes)) in \(S1Home.path) (s1 clean wipes artifacts)")
+        }
+    }
+
+    private func dirSize(_ path: String) -> Int64? {
+        guard let en = FileManager.default.enumerator(
+            at: URL(fileURLWithPath: path), includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]) else { return nil }
+        var total: Int64 = 0
+        for case let url as URL in en {
+            total += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total
+    }
+
+    private func formatBytes(_ b: Int64) -> String {
+        if b < 1024 { return "\(b) B" }
+        if b < 1024 * 1024 { return String(format: "%.0f KB", Double(b) / 1024) }
+        if b < 1024 * 1024 * 1024 { return String(format: "%.1f MB", Double(b) / 1_048_576) }
+        return String(format: "%.2f GB", Double(b) / 1_073_741_824)
     }
 }
 
