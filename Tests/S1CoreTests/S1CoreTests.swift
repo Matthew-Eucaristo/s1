@@ -1442,3 +1442,14 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(m.latest == 0)
     #expect(m.recent.isEmpty)
 }
+
+@Test func launchAgentPlistEscapesArgsAndKeepsCrashes() {
+    // Args with XML specials must not corrupt the plist; KeepAlive must be
+    // crash-only so `s1 stop` stays authoritative (no surprise respawn).
+    let xml = ServeLaunchd.plist(args: ["/opt/s1", "serve", "--vocabulary", "a&b<c>"])
+    #expect(xml.contains("a&b<c>") == false)
+    #expect(xml.contains("a&amp;b&lt;c&gt;"))
+    #expect(xml.contains("<key>SuccessfulExit</key><false/>"))
+    #expect(xml.contains("<key>RunAtLoad</key>"))
+    #expect(!xml.contains("--wake"))
+}

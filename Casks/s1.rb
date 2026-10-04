@@ -11,7 +11,8 @@ cask "s1" do
 
   app "S1.app"
 
-  uninstall quit: "com.matthew.s1.app"
+  uninstall launchctl: "com.matthew.s1.serve",
+            quit:      "com.matthew.s1.app"
 
   # `brew uninstall --zap s1` — the one-command full wipe: app, grants-facing
   # bundle, and every byte of user state s1 ever wrote (config, run
@@ -21,6 +22,7 @@ cask "s1" do
     "~/Library/Application Scripts/com.matthew.s1.app",
     "~/Library/Containers/com.matthew.s1.app",
     "~/Library/HTTPStorages/com.matthew.s1.app",
+    "~/Library/LaunchAgents/com.matthew.s1.serve.plist",
     "~/Library/Preferences/com.matthew.s1.app.plist",
     "~/Library/Saved Application State/com.matthew.s1.app.savedState",
   ]

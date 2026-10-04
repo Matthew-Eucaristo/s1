@@ -113,13 +113,15 @@ cask "s1" do
   depends_on macos: :tahoe
 
   app "S1.app"
-  uninstall quit: "com.matthew.s1.app"
+  uninstall launchctl: "com.matthew.s1.serve",
+            quit:      "com.matthew.s1.app"
 
   zap trash: [
     "~/.s1",
     "~/Library/Application Scripts/com.matthew.s1.app",
     "~/Library/Containers/com.matthew.s1.app",
     "~/Library/HTTPStorages/com.matthew.s1.app",
+    "~/Library/LaunchAgents/com.matthew.s1.serve.plist",
     "~/Library/Preferences/com.matthew.s1.app.plist",
     "~/Library/Saved Application State/com.matthew.s1.app.savedState",
   ]

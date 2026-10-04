@@ -435,8 +435,15 @@ struct ServeCmd: AsyncParsableCommand {
     var vocabulary: String?
     @Flag(help: "Start in listening state immediately (no hotkey press needed).")
     var wake = false
+    @Flag(help: "Install as a launchd agent — starts at login, restarts on crash.")
+    var install = false
+    @Flag(help: "Remove the launchd agent.")
+    var uninstall = false
+
 
     func run() async throws {
+        if uninstall { try manageLaunchAgent(install: false); return }
+        if install { try manageLaunchAgent(install: true); return }
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
@@ -543,6 +550,68 @@ struct ServeCmd: AsyncParsableCommand {
             }
         }
         while true { try await Task.sleep(for: .seconds(3600)) }
+    }
+
+    /// `s1 serve --install` / `--uninstall` — a real launchd agent so the
+    /// listener is always on: launches at login, relaunches after a crash
+    /// (KeepAlive on non-successful exit — a clean `s1 stop`/Ctrl-C is a
+    /// successful exit and stays authoritative).
+    func manageLaunchAgent(install: Bool) throws {
+        let fm = FileManager.default
+        let domain = "gui/\(getuid())"
+        let plistPath = ServeLaunchd.plistPath
+        if !install {
+            _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"])
+            try? fm.removeItem(atPath: plistPath)
+            print("launch agent removed: \(plistPath)")
+            return
+        }
+        try fm.createDirectory(
+            atPath: (plistPath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true)
+        // Armed, not --wake: "always on" means the hotkey is ready at
+        // login — not a mic that comes up live before anyone asks.
+        var args = [s1BinaryPath(), "serve",
+                    "--locale", locale, "--policy", policy,
+                    "--idle-turns", "\(idleTurns)",
+                    "--listen-seconds", "\(listenSeconds)"]
+        if s2 { args.append("--s2") }
+        if speak { args.append("--speak") }
+        if let v = vlmBase { args += ["--vlm-base", v] }
+        if let v = vlmModel { args += ["--vlm-model", v] }
+        if let v = vocabulary { args += ["--vocabulary", v] }
+        try ServeLaunchd.plist(args: args)
+            .write(toFile: plistPath, atomically: true, encoding: .utf8)
+        _ = launchctl(["bootout", "\(domain)/\(ServeLaunchd.label)"])  // replace cleanly
+        guard launchctl(["bootstrap", domain, plistPath]) == 0 else {
+            throw S1Error.aborted("launchctl bootstrap failed — plist at \(plistPath)")
+        }
+        _ = launchctl(["kickstart", "-k", "\(domain)/\(ServeLaunchd.label)"])
+        print("installed + started: \(plistPath)")
+        print("logs: ~/.s1/serve.log · stop now: s1 stop · remove for good: s1 serve --uninstall")
+    }
+
+    /// Absolute path to this very binary (argv[0] may be a bare `s1` —
+    /// resolve it through PATH so the agent survives PATH-less launchd).
+    private func s1BinaryPath() -> String {
+        let arg0 = CommandLine.arguments[0]
+        // launchd execs without our cwd — a relative argv[0] like
+        // `.build/debug/s1` must become absolute or the agent can't start.
+        if arg0.contains("/") { return URL(fileURLWithPath: arg0).path }
+        for dir in (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":") {
+            let p = dir + "/" + arg0
+            if FileManager.default.isExecutableFile(atPath: p) { return p }
+        }
+        return arg0
+    }
+
+    private func launchctl(_ args: [String]) -> Int32 {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        p.arguments = args
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus
     }
 }
 

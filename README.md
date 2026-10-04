@@ -26,6 +26,7 @@ brew install s1             # the s1 CLI
 brew install --cask s1      # the S1 menu-bar app
 
 s1 preflight                # shows which macOS permissions are missing
+s1 serve --install          # optional: always-on listener via launchd (login + crash respawn)
 ```
 
 Remove it cleanly any time (the `--formula`/`--cask` flags disambiguate
@@ -100,6 +101,8 @@ your words rank first, app names fill the rest.
 ```bash
 swift run s1 serve              # daemon: arms the global hotkey, then idles (zero mic/CPU)
 swift run s1 serve --wake       # start listening immediately (for SSH/headless use)
+s1 serve --install              # launchd agent: armed at login, respawns after a crash
+s1 serve --uninstall            # removes the agent (logs at ~/.s1/serve.log)
 ```
 
 Press **⇧⇧** (double-tap either Shift) or **⌃⌥Space** anywhere on the Mac:
