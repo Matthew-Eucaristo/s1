@@ -279,7 +279,13 @@ public struct VLMPolicy: Policy {
         case "open", "buka", "launch":  hint = "openApp"
         case "type", "ketik", "write", "tulis": hint = "typeText (or axSetValue on an [editable] node)"
         case "key", "keys", "hotkey": hint = "keyCombo (e.g. \"cmd+f\")"
-        case "click", "press", "klik", "tekan": hint = "axPress on a [pressable] node (or click by x/y)"
+        case "click", "klik":         hint = "axPress on a [pressable] node (or click by x/y)"
+        case "press", "tekan":
+            // "tekan enter"/"press esc" is a keystroke, not a UI press —
+            // mirror the AXPolicy key-routing so the model emits keyCombo.
+            hint = AXPolicy.keyNames(current.arg) != nil
+                ? "keyCombo (e.g. \"enter\", \"cmd+s\")"
+                : "axPress on a [pressable] node (or click by x/y)"
         case "set", "isi", "fill":            hint = "axSetValue on an [editable] node (or click it, then typeText)"
         case "wait", "tunggu":          hint = "wait"
         case "verify", "cek", "check", "pastikan": hint = "verify"
