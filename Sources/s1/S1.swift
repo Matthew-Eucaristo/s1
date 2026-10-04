@@ -36,7 +36,7 @@ struct RunCmd: AsyncParsableCommand {
 
     @Option(help: "Goal text (logged; policies see it).")
     var goal: String?
-    @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
+    @Option(help: "Task library name — reads tasks/<name>.txt (cwd) or ~/.s1/tasks/<name>.txt as the goal.")
     var task: String?
     @Option(help: "Policy: auto | scripted | dummy | ax | vlm (default: auto; --plan implies scripted)")
     var policy: String?
@@ -102,12 +102,25 @@ struct RunCmd: AsyncParsableCommand {
         }
         let goalText: String
         if let task {
-            // A bare name reads the library (tasks/<name>.txt); an explicit
+            // A bare name searches the task library: cwd's tasks/ first
+            // (repo checkout — devs iterating on a task file), then
+            // ~/.s1/tasks/ (a brew user's persistent library — the cask
+            // ships no tasks/ and works from any directory). An explicit
             // path (contains "/" or ends .txt) is used as-is.
-            let p = (task.contains("/") || task.hasSuffix(".txt")) ? task : "tasks/\(task).txt"
-            guard let g = try? String(contentsOfFile: p, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty else {
-                throw ValidationError("task file not found or empty: \(p)")
+            let explicit = task.contains("/") || task.hasSuffix(".txt")
+            let candidates = explicit
+                ? [task]
+                : ["tasks/\(task).txt", S1Home.path + "/tasks/\(task).txt"]
+            var found: String?
+            for p in candidates {
+                if let g = try? String(contentsOfFile: p, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty {
+                    found = g; break
+                }
+            }
+            guard let g = found else {
+                throw ValidationError(
+                    "task file not found or empty: \(candidates.joined(separator: " or "))")
             }
             goalText = g
         } else if let goal { goalText = goal } else if plan != nil {
@@ -755,20 +768,30 @@ final class LockedBox<Value>: @unchecked Sendable {
 
 struct TasksCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "tasks",
-        abstract: "List the task library (tasks/*.txt) usable with --task.")
-    @Option(help: "Task library directory.")
-    var dir: String = "tasks"
+        abstract: "List the task library usable with --task.")
+    @Option(help: "Task library directory to list instead of the defaults.")
+    var dir: String?
 
     func run() async throws {
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
-            print("no task library at \(dir)/ — create tasks/<name>.txt files")
-            return
+        // Same search order --task uses: cwd tasks/ (repo), then the
+        // persistent per-user library under ~/.s1/tasks/.
+        let dirs = dir.map { [$0] } ?? ["tasks", S1Home.path + "/tasks"]
+        var listed = 0
+        for d in dirs {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: d) else { continue }
+            let txts = names.sorted().filter { $0.hasSuffix(".txt") }
+            guard !txts.isEmpty else { continue }
+            print("\(d)/")
+            for n in txts {
+                let name = String(n.dropLast(4))
+                let first = (try? String(contentsOfFile: "\(d)/\(n)", encoding: .utf8))?
+                    .components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespaces) ?? ""
+                print("  \(name)\(first.isEmpty ? "" : "  —  \(first)")")
+            }
+            listed += txts.count
         }
-        for n in names.sorted() where n.hasSuffix(".txt") {
-            let name = String(n.dropLast(4))
-            let first = (try? String(contentsOfFile: "\(dir)/\(n)", encoding: .utf8))?
-                .components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespaces) ?? ""
-            print("\(name)\(first.isEmpty ? "" : "  —  \(first)")")
+        if listed == 0 {
+            print("no tasks — create tasks/<name>.txt (repo) or \(S1Home.path)/tasks/<name>.txt")
         }
     }
 }
