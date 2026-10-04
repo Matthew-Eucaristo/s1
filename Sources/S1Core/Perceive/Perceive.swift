@@ -158,8 +158,19 @@ public enum AXReader {
     public static let maxNodes = 400
     public static let maxDepth = 8
 
+    /// Bound every AX round-trip so a wedged or unresponsive app can't
+    /// stall the loop indefinitely: a healthy app answers in single-digit
+    /// milliseconds, so ~1.5s only ever trips on real hangs. Elements
+    /// obtained through a timed root inherit the bound, so one call per
+    /// root covers the whole walk.
+    public static let messagingTimeout: Float = 1.5
+    static func bindTimeout(_ el: AXUIElement) {
+        AXUIElementSetMessagingTimeout(el, messagingTimeout)
+    }
+
     public static func snapshotTree(pid: pid_t) -> AXNode? {
         let app = AXUIElementCreateApplication(pid)
+        bindTimeout(app)
         var counter = 0
         return walk(app, depth: 0, counter: &counter)
     }
@@ -333,6 +344,7 @@ public enum AXReader {
     /// the voice-typing path must never fill a password box.
     public static func focusedElementIsSecure(pid: pid_t) -> Bool {
         let app = AXUIElementCreateApplication(pid)
+        bindTimeout(app)
         var v: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &v) == .success,
               let el = v, CFGetTypeID(el) == AXUIElementGetTypeID()
@@ -348,6 +360,7 @@ public enum AXReader {
     static func element(pid: pid_t, ref: String) -> AXUIElement? {
         guard ref.hasPrefix("e"), let target = Int(ref.dropFirst()) else { return nil }
         let app = AXUIElementCreateApplication(pid)
+        bindTimeout(app)
         // One walk that keeps (element, role, title, desc, help, frame) per
         // node — help joins identity so tooltip-named controls re-resolve
         // on drift instead of trusting a stale index.

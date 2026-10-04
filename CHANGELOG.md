@@ -50,6 +50,12 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `throwIfListenerOwnsMic`).
 - **`s1 serve --install` plists the real binary** — resolved the brew
   `binary` symlink so a reinstall can't strand the launchd agent.
+- **AX messaging timeout bounds every observe/act round-trip** — an AX
+  query against a wedged or unresponsive app could stall the run
+  indefinitely (the kill switch can't interrupt a blocking AX call).
+  `AXUIElementSetMessagingTimeout` (1.5s) on each app/system-wide root;
+  elements obtained through a timed root inherit the bound, so healthy
+  apps are untouched and hung ones prune fast.
 - **`auto` probe requires the configured model** — a server answering
   `/models` with 200 but missing the configured model resolved `vlm`
   anyway, then burned every step on "model not found". The probe now

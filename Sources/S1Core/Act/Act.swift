@@ -268,6 +268,7 @@ public struct CGEventActuator: Actuator {
     /// errors the step; the next observe re-gates honestly.
     private func actTimeChecks(payload: String?) throws {
         let sys = AXUIElementCreateSystemWide()
+        AXReader.bindTimeout(sys)
         var v: CFTypeRef?
         if AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
            let el = v, CFGetTypeID(el) == AXUIElementGetTypeID() {
