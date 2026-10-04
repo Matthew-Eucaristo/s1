@@ -67,7 +67,7 @@ swift run s1 demo --dry-run     # full loop, touches nothing
 Then the real run (needs both permissions below):
 
 ```bash
-swift run s1 demo               # opens TextEdit, types, verifies on-screen — logs to artifacts/
+swift run s1 demo               # opens TextEdit, types, verifies on-screen — logs to ~/.s1/artifacts/
 ```
 
 ## Voice

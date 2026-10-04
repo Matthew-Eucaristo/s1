@@ -64,7 +64,7 @@ Real-world checks that can't run in CI (they need TCC grants):
 s1 run --task open-app --policy ax            # deterministic AX policy
 s1 run --policy vlm --task fill-form          # local VLM (Ollama)
 s1 listen --file voice.aiff --locale id-ID    # STT → run → optional TTS
-s1 metrics artifacts/<run-dir>/               # evidence from any run
+s1 metrics                                    # newest run under ~/.s1/artifacts
 ```
 
 Every change to the decision/loop path should keep this invariant: a run
