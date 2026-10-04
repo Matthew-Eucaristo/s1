@@ -202,8 +202,8 @@ conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 
 ```bash
 swift run s1 run --task open-app --policy ax        # goals live in tasks/*.txt
-swift run s1 metrics artifacts/<run-dir>            # decisions/escalations/errors/verify stats
-swift run s1 replay artifacts/<run-dir> --dry-run   # re-execute a recorded run
+swift run s1 metrics                                # stats for the newest run (or pass a run dir)
+swift run s1 replay --dry-run                       # re-execute a recorded run (default: newest)
 swift run s1 tasks                                # list what's in the library
 ```
 
