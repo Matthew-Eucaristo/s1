@@ -33,6 +33,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
   race.
 
 ### Added
+- **Live mic waveform** — `MicLevel` (RMS pushed inside the audio taps, so it
+  only exists while listening — zero idle cost) + `LiveWaveform` (TimelineView
+  + Canvas, renders only while onscreen): menu-bar label, popover header,
+  mic button and notch HUD all show the Siri-style level dance as live proof
+  the mic hears you.
+- **`s1 serve --install` / `--uninstall`** — always-on launchd agent
+  (`com.matthew.s1.serve`): armed at login, `KeepAlive` on non-successful
+  exit only (clean `s1 stop` stays authoritative — verified live).
 - **`brew services start s1`** — the official Homebrew daemon path (`service do`
   block in the formula): launchd agent at login, crash-only respawn,
   `:interactive` for WindowServer/mic. Requires `brew trust` once (brew's
