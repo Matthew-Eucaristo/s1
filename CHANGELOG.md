@@ -5,6 +5,21 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 ## [Unreleased]
 
+### Added
+- **`--policy auto` is the default** — a real decision model when one's
+  reachable (probes the VLM endpoint once per command, 3s budget) and
+  the deterministic `ax` grammar when it isn't. `s1 run`, `s1 listen`,
+  `s1 serve`, and the app's Brain picker all resolve the same way.
+- **Storage bound** — `~/.s1/artifacts` auto-prunes to the newest 50 run
+  dirs before each run (`S1_KEEP_RUNS` overrides; `0` disables). Only
+  run-shaped dirs are touched. New `s1 clean` wipes all run artifacts.
+- **Lifecycle hardening** — lid-close mid-run self-heals (hotkey tap
+  re-enabled on `tapDisabledByTimeout`, audio engine rebuilt per turn,
+  fresh observe on wake); force-kill leaves replayable evidence (JSONL
+  is append-per-line, truncated tails are skipped on read); stale
+  `run.lock`/`serve.pid` self-heal via live-pid checks; companion feed
+  caps at 300 records so serve mode can't grow memory forever.
+
 ### Security
 - **Terminal-aware typing** — text destined for a terminal's command line
   (Terminal, iTerm2, kitty, alacritty, WezTerm, ghostty, Warp, Hyper,
