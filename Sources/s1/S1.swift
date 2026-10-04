@@ -753,15 +753,35 @@ struct TasksCmd: AsyncParsableCommand {
 struct MetricsCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "metrics",
         abstract: "Summarize a run's steps.jsonl: decisions, escalations, errors, verifies.")
-    @Argument(help: "Run directory (contains steps.jsonl).")
-    var runDir: String
+    @Argument(help: "Run directory (contains steps.jsonl). Default: newest run.")
+    var runDir: String?
+
+    /// The explicit dir when given; otherwise the newest run under
+    /// ~/.s1/artifacts (names start with an ISO timestamp, so the
+    /// lexicographically last entry IS the newest). `s1 metrics` with no
+    /// arg means "the run I just did" 95% of the time.
+    static func resolveRunDir(_ dir: String?) throws -> String {
+        if let dir {
+            guard FileManager.default.fileExists(atPath: dir + "/steps.jsonl") else {
+                throw ValidationError("not a run directory (no steps.jsonl): \(dir)")
+            }
+            return dir
+        }
+        let root = S1Home.path + "/artifacts"
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root),
+              let latest = entries.sorted().last else {
+            throw ValidationError("no run dirs under \(root) — run something first")
+        }
+        let dir = root + "/" + latest
+        guard FileManager.default.fileExists(atPath: dir + "/steps.jsonl") else {
+            throw ValidationError("newest entry has no steps.jsonl: \(dir)")
+        }
+        return dir
+    }
 
     func run() async throws {
-        guard FileManager.default.fileExists(
-            atPath: runDir + "/steps.jsonl") else {
-            throw ValidationError("not a run directory (no steps.jsonl): \(runDir)")
-        }
-        let m = try RunReader.metrics(in: URL(fileURLWithPath: runDir))
+        let dir = try Self.resolveRunDir(runDir)
+        let m = try RunReader.metrics(in: URL(fileURLWithPath: dir))
         print("steps        \(m.steps)")
         print("decidedBy    s1: \(m.s1Decisions) · s2: \(m.s2Decisions)")
         print("escalations  \(m.escalations.count)")
@@ -912,8 +932,8 @@ struct StopCmd: AsyncParsableCommand {
 struct ReplayCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "replay",
         abstract: "Re-execute a run's recorded actions against the live screen.")
-    @Argument(help: "Run directory to replay (contains steps.jsonl).")
-    var runDir: String
+    @Argument(help: "Run directory to replay (contains steps.jsonl). Default: newest run.")
+    var runDir: String?
     @Option(help: "Artifacts root for the replay run.")
     var artifacts: String = S1Home.path + "/artifacts"
     @Flag(help: "Log everything, execute nothing.")
@@ -922,11 +942,8 @@ struct ReplayCmd: AsyncParsableCommand {
     var allowIrreversible = false
 
     func run() async throws {
-        guard FileManager.default.fileExists(
-            atPath: runDir + "/steps.jsonl") else {
-            throw ValidationError("not a run directory (no steps.jsonl): \(runDir)")
-        }
-        let src = URL(fileURLWithPath: runDir)
+        let dir = try MetricsCmd.resolveRunDir(runDir)
+        let src = URL(fileURLWithPath: dir)
         let kill = NSTemporaryDirectory() + "s1-stop"
         if !dryRun {
             // Same gate as a live run — replayed clicks/types need trust
@@ -938,7 +955,7 @@ struct ReplayCmd: AsyncParsableCommand {
         defer { if !dryRun { S1Runner.releaseRunLock() } }
         let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
                                    root: URL(fileURLWithPath: artifacts),
-                                   config: ["mode": dryRun ? "dry-run" : "live", "source": runDir],
+                                   config: ["mode": dryRun ? "dry-run" : "live", "source": dir],
                                    onStep: { rec in print(rec.digest) })
         let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
         let gate = SafetyGate(allowIrreversible: allowIrreversible)
