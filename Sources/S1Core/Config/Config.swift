@@ -38,8 +38,8 @@ public struct S1Config: Codable, Sendable {
     public var recent: [String]?
     /// Whether the VLM brain attaches a screenshot per step (app toggle).
     public var vlmScreenshot: Bool?
-    /// The app's chosen System 1 ("ax" | "vlm") — persisted so a restart
-    /// keeps the brain the user picked.
+    /// The app's chosen System 1 ("auto" | "ax" | "vlm") — persisted so a
+    /// restart keeps the brain the user picked.
     public var brain: String?
     /// Whether the app escalates low-confidence steps to S2.
     public var useS2: Bool?
