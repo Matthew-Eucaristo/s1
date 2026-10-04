@@ -462,7 +462,7 @@ struct ContentView: View {
                     .accessibilityLabel("failed")
                 Text(err).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
-                Button("Retry") { status.pull() }.controlSize(.mini)
+                Button("Retry") { status.retry() }.controlSize(.mini)
             case .unreachable:
                 Image(systemName: "bolt.slash").foregroundStyle(.orange)
                     .accessibilityLabel("server down")

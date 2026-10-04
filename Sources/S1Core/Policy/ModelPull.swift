@@ -52,6 +52,8 @@ public enum ModelPull {
               "default — sees screenshots, decent reasoning, ships tested", vision: true),
         .init("qwen2.5vl:3b", "3.1 GB",
               "smallest vision brain — snappier steps, weaker at long goals", vision: true),
+        .init("qwen3-vl:8b", "6.1 GB",
+              "strongest vision brain that fits 16 GB — best grounding, slower per step", vision: true),
         .init("llama3.2:3b", "2.0 GB",
               "text-only featherweight — S2 chats, cannot see screens", vision: false),
         .init("qwen3:8b", "5.2 GB",

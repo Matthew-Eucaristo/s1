@@ -703,6 +703,7 @@ final class ModelPullStatus {
         modelName = e.model
         guard ModelPull.ollamaBinary() != nil else { state = .noOllama; return }
         state = .downloading("starting…")
+        lastAttempt = { [weak self] in self?.pull() }
         pullTask = Task { [weak self] in
             guard let self else { return }
             defer { self.pullTask = nil }
@@ -721,24 +722,81 @@ final class ModelPullStatus {
     }
 
     /// Server down → bring it up. `ollama serve` detached survives the app
-    /// (launchd reparents it); then re-probe until the server answers.
+    /// (launchd reparents it); stderr is kept so an instant crash (port
+    /// taken, binary too old for the OS, missing GPU libs) tells the user
+    /// WHY instead of spinning "checking…" forever.
     func startServer() {
         guard let bin = ModelPull.ollamaBinary() else { state = .noOllama; return }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: bin)
         proc.arguments = ["serve"]
         proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
+        let errTail = LockedTail(capacity: 4)
+        let errPipe = Pipe()
+        proc.standardError = errPipe
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            errTail.append(String(decoding: h.availableData, as: UTF8.self))
+        }
         try? proc.run()
+        lastAttempt = { [weak self] in self?.startServer() }
         state = .checking
         Task { [weak self] in
             // give serve a moment to bind before the first probe
             for _ in 0..<6 {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self, self.pullTask == nil else { return }
+                if !proc.isRunning {
+                    errPipe.fileHandleForReading.readabilityHandler = nil
+                    let tail = errTail.lastLine()
+                    self.state = .failed(
+                        "ollama serve exited" + (tail.map { ": \($0)" } ?? ""))
+                    return
+                }
                 self.refresh()
             }
+            // refresh() probes async — settle before reading the verdict.
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, self.pullTask == nil else { return }
+            if case .unreachable = self.state {
+                self.state = .failed(
+                    "ollama serve didn't come up — check `ollama serve` in Terminal")
+            }
         }
+    }
+
+    /// Redo whatever last failed — a pull or a server start.
+    func retry() {
+        if let lastAttempt { lastAttempt() } else { refresh() }
+    }
+
+    /// Remembered so .failed's Retry re-runs the right op, not always pull.
+    private var lastAttempt: (() -> Void)?
+}
+
+/// Ring of the last N lines — `ollama serve` writes the crash reason to
+/// stderr and we only want its tail for the status row.
+final class LockedTail: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    private let capacity: Int
+    init(capacity: Int) { self.capacity = capacity }
+    func append(_ chunk: String) {
+        lock.lock()
+        for line in chunk.split(whereSeparator: \.isNewline) {
+            let s = line.trimmingCharacters(in: .whitespaces)
+            if !s.isEmpty {
+                lines.append(s)
+                if lines.count > capacity { lines.removeFirst(lines.count - capacity) }
+            }
+        }
+        lock.unlock()
+    }
+    func lastLine() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        // ollama prefixes each log with time= level= source= — keep just the msg.
+        guard let raw = lines.last else { return nil }
+        if let r = raw.range(of: "msg=", options: .backwards) { return String(raw[r.upperBound...]).trimmingCharacters(in: .init(charactersIn: "\"")) }
+        return raw
     }
 }
 
