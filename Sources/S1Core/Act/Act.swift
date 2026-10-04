@@ -109,14 +109,20 @@ public struct CGEventActuator: Actuator {
             for i in 1...steps {
                 let t = Double(i) / Double(steps)
                 let mid = CGPoint(x: fx + (tx - fx) * t, y: fy + (ty - fy) * t)
+                // Trajectory points are cosmetic — a skipped one just makes
+                // the path slightly straighter. Optional is honest here.
                 CGEvent(mouseEventSource: src, mouseType: .leftMouseDragged,
                         mouseCursorPosition: mid, mouseButton: .left)?
                     .post(tap: .cghidEventTap)
                 usleep(20_000)
             }
-            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
-                    mouseCursorPosition: to, mouseButton: .left)?
-                .post(tap: .cghidEventTap)
+            // The release is NOT optional: a nil event here leaves the
+            // button held while the log claims the drag completed.
+            guard let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: to, mouseButton: .left) else {
+                throw S1Error.aborted("cannot create drag release event")
+            }
+            up.post(tap: .cghidEventTap)
             return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
 
         case .typeText(let text):
@@ -140,9 +146,11 @@ public struct CGEventActuator: Actuator {
                 guard v.isFinite else { return 0 }
                 return Int32(max(-32_000, min(32_000, v.rounded())))
             }
-            CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                    wheelCount: 2, wheel1: clamp(-dy), wheel2: clamp(-dx), wheel3: 0)?
-                .post(tap: .cghidEventTap)
+            guard let ev = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                    wheelCount: 2, wheel1: clamp(-dy), wheel2: clamp(-dx), wheel3: 0) else {
+                throw S1Error.aborted("cannot create scroll event")
+            }
+            ev.post(tap: .cghidEventTap)
             return "scroll (\(dx), \(dy))"
 
         case .axPress(let ref):
@@ -159,11 +167,15 @@ public struct CGEventActuator: Actuator {
             }
             let p = CGPoint(x: f.midX, y: f.midY)
             let src = CGEventSource(stateID: .hidSystemState)
-            CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
-                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                    mouseCursorPosition: p, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: p, mouseButton: .left) else {
+                throw S1Error.aborted("cannot create fallback click events")
+            }
+            down.post(tap: .cghidEventTap)
             usleep(60_000)
-            CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
-                    mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
             return "focused+clicked \(ref) @(\(Int(p.x)),\(Int(p.y)))"
 
         case .axSetValue(let ref, let value):
@@ -178,11 +190,15 @@ public struct CGEventActuator: Actuator {
             if let f = AXReader.frameOf(pid: pid, ref: ref) {
                 let p = CGPoint(x: f.midX, y: f.midY)
                 let src = CGEventSource(stateID: .hidSystemState)
-                CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
-                        mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+                guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                        mouseCursorPosition: p, mouseButton: .left),
+                      let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                        mouseCursorPosition: p, mouseButton: .left) else {
+                    throw S1Error.aborted("cannot create fallback click events")
+                }
+                down.post(tap: .cghidEventTap)
                 usleep(60_000)
-                CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
-                        mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
             }
             try actTimeChecks(payload: value)
             try postUnicode(value)
