@@ -115,10 +115,10 @@ double-triggering on the same hotkey. Typing fast capital letters does
 NOT fire ⇧⇧ — any key between the taps resets the gesture.
 
 ```bash
-s1 status      # daemon alive? state? is a run in progress?
+s1 status      # daemon state, run in progress?, ~/.s1 disk footprint
 s1 stop        # abort any in-flight run + stop the listener
                # (SIGTERM for `s1 serve`; the app only sleeps — window survives)
-s1 clean       # wipe all run artifacts (auto-prunes to newest 50 otherwise)
+s1 clean       # wipe all run artifacts + truncate serve.log (runs auto-prune to newest 50)
 ```
 
 `~/.s1/run.pid` marks screen ownership — a second agent run refuses while
