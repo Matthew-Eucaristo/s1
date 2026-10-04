@@ -220,6 +220,15 @@ private func jsonlDecoder() -> JSONDecoder {
     #expect(!Action.axSetAttribute(ref: "e1", attr: "AXValue", value: true).textPayloads.isEmpty)
 }
 
+@Test func nonFiniteCoordinatesRejected() async throws {
+    // Salvaged model JSON ("x":1e999) can carry inf/nan — the actuator must
+    // reject before a CGPoint(inf) reaches CGEvent (undefined behavior).
+    let act = CGEventActuator()
+    await #expect(throws: S1Error.self) { _ = try await act.perform(.click(x: .infinity, y: 0), frontmostPID: nil) }
+    await #expect(throws: S1Error.self) { _ = try await act.perform(.drag(fromX: 0, fromY: 0, toX: .nan, toY: 1), frontmostPID: nil) }
+    await #expect(throws: S1Error.self) { _ = try await act.perform(.moveMouse(x: -.infinity, y: 5), frontmostPID: nil) }
+}
+
 // MARK: - secure text fields
 
 @Test func secureFieldEscalatesTyping() async throws {

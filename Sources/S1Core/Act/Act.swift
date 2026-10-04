@@ -24,9 +24,16 @@ public struct CGEventActuator: Actuator {
     public init() {}
 
     public func perform(_ action: Action, frontmostPID: pid_t?) async throws -> String {
+        // Model output is untrusted: salvaged JSON ("x":1e999) can carry
+        // non-finite coordinates — a CGPoint(inf) posted to CGEvent is
+        // undefined. Reject loudly like the nil-event checks below.
+        func finite(_ v: Double, _ name: String) throws -> Double {
+            guard v.isFinite else { throw S1Error.aborted("non-finite \(name) in action") }
+            return v
+        }
         switch action {
         case .moveMouse(let x, let y):
-            let p = CGPoint(x: x, y: y)
+            let p = CGPoint(x: try finite(x, "x"), y: try finite(y, "y"))
             guard let ev = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
                     mouseCursorPosition: p, mouseButton: .left) else {
                 throw S1Error.aborted("cannot create mouse event")
@@ -35,7 +42,7 @@ public struct CGEventActuator: Actuator {
             return "mouse -> (\(x), \(y))"
 
         case .click(let x, let y):
-            let p = CGPoint(x: x, y: y)
+            let p = CGPoint(x: try finite(x, "x"), y: try finite(y, "y"))
             let src = CGEventSource(stateID: .hidSystemState)
             guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
                     mouseCursorPosition: p, mouseButton: .left),
@@ -51,7 +58,7 @@ public struct CGEventActuator: Actuator {
             return "click (\(x), \(y))"
 
         case .rightClick(let x, let y):
-            let p = CGPoint(x: x, y: y)
+            let p = CGPoint(x: try finite(x, "x"), y: try finite(y, "y"))
             let src = CGEventSource(stateID: .hidSystemState)
             guard let down = CGEvent(mouseEventSource: src, mouseType: .rightMouseDown,
                     mouseCursorPosition: p, mouseButton: .right),
@@ -65,7 +72,7 @@ public struct CGEventActuator: Actuator {
             return "rightClick (\(x), \(y))"
 
         case .doubleClick(let x, let y):
-            let p = CGPoint(x: x, y: y)
+            let p = CGPoint(x: try finite(x, "x"), y: try finite(y, "y"))
             let src = CGEventSource(stateID: .hidSystemState)
             // Click state 1 then 2 — without the second press carrying
             // clickState=2, apps see two singles (Finder won't "open").
@@ -86,7 +93,8 @@ public struct CGEventActuator: Actuator {
             return "doubleClick (\(x), \(y))"
 
         case .drag(let fx, let fy, let tx, let ty):
-            let from = CGPoint(x: fx, y: fy), to = CGPoint(x: tx, y: ty)
+            let from = CGPoint(x: try finite(fx, "fx"), y: try finite(fy, "fy"))
+            let to = CGPoint(x: try finite(tx, "tx"), y: try finite(ty, "ty"))
             let src = CGEventSource(stateID: .hidSystemState)
             guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
                     mouseCursorPosition: from, mouseButton: .left) else {
