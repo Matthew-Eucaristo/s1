@@ -50,6 +50,16 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `throwIfListenerOwnsMic`).
 - **`s1 serve --install` plists the real binary** — resolved the brew
   `binary` symlink so a reinstall can't strand the launchd agent.
+- **`key <name>` resolves voice aliases** — "key panah kiri" posted the
+  raw token "panah" (not a keyCode) and died at the actuator while
+  "tekan panah kiri" worked. The key verb now routes through the same
+  alias table; unresolvable names abstain to S2 instead of erroring.
+- **`set <field>` without a value abstains** — "set username" used to
+  write the field's own name into it; now needs "to/dengan/=…" or S2.
+- **Conjunction splitting covers commandish verbs** — "buka Notes dan
+  tutup" now splits so "tutup" abstains cleanly instead of polluting the
+  first intent's argument ("Notes dan tutup"). Typed-text words
+  (copy/paste/go/…) stay literal deliberately.
 - **AX messaging timeout bounds every observe/act round-trip** — an AX
   query against a wedged or unresponsive app could stall the run
   indefinitely (the kill switch can't interrupt a blocking AX call).

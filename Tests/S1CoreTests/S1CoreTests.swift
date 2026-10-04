@@ -1516,6 +1516,39 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(AXPolicy.keyNames("milk and honey") == nil)
 }
 
+@Test func keyVerbResolvesAliasesAndSetNeedsValue() async throws {
+    // "key panah kiri" must post ArrowLeft via the alias table — the raw
+    // token "panah" isn't a keyCode and used to die at the actuator.
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                       windows: [], axTree: nil, screenshotPath: nil)
+    let pol = AXPolicy()
+    let d = try await pol.decide(observation: obs, goal: "key panah kiri", history: [])
+    #expect(d.action == .keyCombo(keys: ["left"]))
+    // An unresolvable key name abstains rather than posting a guaranteed
+    // failure — S2 gets a shot at interpreting it.
+    let d2 = try await pol.decide(observation: obs, goal: "key blorf", history: [])
+    #expect(d2.action == nil)
+    // "set username" has no separator — writing the field's own name into
+    // it is meaningless; abstain so S2 sees the real ask.
+    let field = AXNode(ref: "e1", role: "AXTextField", title: "Username",
+                       desc: nil, value: nil, frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, value: nil, frame: nil, children: [field])
+    var obs2 = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                        windows: [], axTree: tree, screenshotPath: nil)
+    obs2.secureTextFocused = false
+    let d3 = try await pol.decide(observation: obs2, goal: "set username", history: [])
+    #expect(d3.action == nil)
+    let d4 = try await pol.decide(observation: obs2, goal: "set username to budi", history: [])
+    #expect(d4.action == .axSetValue(ref: "e1", value: "budi"))
+    // Unimplemented-but-commandish verbs split "dan" so the next command
+    // abstains cleanly instead of polluting the previous argument.
+    let its = AXPolicy.intents(of: "buka Notes dan tutup")
+    #expect(its.count == 2)
+    #expect(its[0].verb == "buka" && its[0].arg == "Notes")
+    #expect(its[1].verb == "tutup")
+}
+
 @Test func openAppAcceptsNameField() {
     // Models write {"type":"openApp","name":"Notes"} — seen live in the
     // wild. Before this fix the mapper only read "app"/"text" and the

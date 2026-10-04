@@ -97,6 +97,9 @@ public struct AXPolicy: Policy {
 
     /// Every verb the grammar (and the model hints) understands — used to
     /// decide whether "and"/"dan" starts a new command or is literal text.
+    /// Includes verbs the grammar doesn't implement: "buka Notes dan tutup"
+    /// must still split so the second half abstains cleanly instead of
+    /// polluting the first half's argument ("Notes dan tutup").
     static let verbs: Set<String> = [
         "open", "buka", "launch", "type", "ketik", "write", "tulis",
         "key", "keys", "hotkey", "wait", "tunggu",
@@ -105,6 +108,17 @@ public struct AXPolicy: Policy {
         "verify", "cek", "check", "pastikan", "done", "selesai", "finish",
         "click", "press", "klik", "tekan", "set", "isi",
         "take", "grab", "snap",
+        // Commandish verbs the deterministic grammar doesn't implement —
+        // they abstain to S2, but they must split "dan/and" correctly.
+        // Deliberately excluded: copy/paste/cut/delete/move/go/ke — those
+        // are typed-text words ("type copy and paste") where a false
+        // split costs more than a polluted argument.
+        "tutup", "close", "quit", "keluar", "exit", "matikan", "hide",
+        "sembunyikan", "minimize", "kecilkan", "maximize", "besarkan",
+        "cari", "find", "search", "save", "simpan", "undo", "redo",
+        "zoom", "select", "pilih", "stop", "berhenti", "pause", "jeda",
+        "restart", "mulai", "start", "drag", "seret", "drop", "resize",
+        "ubah", "rename", "ganti",
     ]
 
     /// Split " A and B "/" A dan B " only when B starts with a grammar verb —
@@ -210,11 +224,15 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a combo like cmd+s")
             }
-            // "cmd+s" typed, "cmd s" said — both split into the combo list.
-            let keys = intent.arg.lowercased()
-                .split(separator: "+")
-                .flatMap { $0.split(separator: " ") }
-                .map(String.init)
+            // Route through keyNames: aliases ("panah kiri" → left) resolve
+            // here too — the raw split only knows literal keyCodes, so
+            // "key panah kiri" would otherwise die at the actuator. A nil
+            // means every token already failed validation, so abstain to
+            // S2 instead of posting a guaranteed-error keyCombo.
+            guard let keys = Self.keyNames(intent.arg) else {
+                return Decision(action: nil, confidence: 0.15,
+                                rationale: "unknown key name '\(intent.arg)'")
+            }
             return Decision(action: .keyCombo(keys: keys),
                             confidence: 0.95,
                             rationale: "key combo")
@@ -290,7 +308,14 @@ public struct AXPolicy: Policy {
                         break
                     }
                 }
-                if setValue == nil { setValue = intent.arg }
+                // "set username" alone is meaningless — without a separator
+                // the old fallback would write the field's own name into
+                // it. Abstain so S2 can figure out the real intent.
+                guard let v = setValue, !v.isEmpty else {
+                    return Decision(action: nil, confidence: 0.15,
+                                    rationale: "'\(intent.verb)' needs a value: '\(intent.verb) <field> to <value>'")
+                }
+                setValue = v
             }
             guard !needle.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,
