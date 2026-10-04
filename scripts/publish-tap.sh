@@ -55,7 +55,15 @@ if [[ $RELEASE_URLS == 1 ]]; then
     ZIP_URL="https://github.com/$REPO/releases/download/$TAG/S1-\#{version}-app.zip"
 else
     cp "dist/$ZIP" "$TAP_DIR/releases/$TAG/"
-    ZIP_URL="https://raw.githubusercontent.com/$TAP_REPO/main/releases/$TAG/S1-\#{version}-app.zip"
+    # Commit the artifact FIRST so the cask URL can pin to the commit sha —
+    # raw.githubusercontent.com/.../main/... edge-caches large files and
+    # keeps serving the previous zip long after push.
+    cd "$TAP_DIR"
+    git add "releases/$TAG"
+    git diff --cached --quiet || git commit -m "s1 $VERSION artifact"
+    ART_SHA=$(git rev-parse HEAD)
+    cd - >/dev/null
+    ZIP_URL="https://raw.githubusercontent.com/$TAP_REPO/$ART_SHA/releases/$TAG/S1-\#{version}-app.zip"
 fi
 
 cat > "$TAP_DIR/Casks/s1.rb" <<EOF
@@ -104,7 +112,7 @@ end
 EOF
 
 cd "$TAP_DIR"
-git add Casks/s1.rb releases 2>/dev/null || git add Casks/s1.rb
+git add Casks/s1.rb
 if git diff --cached --quiet; then
     echo "tap already at $VERSION — nothing to publish"
 else
