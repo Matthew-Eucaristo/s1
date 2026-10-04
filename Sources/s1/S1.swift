@@ -318,7 +318,7 @@ struct ListenCmd: AsyncParsableCommand {
             // A live LISTENING daemon owns the mic — refuse only when it
             // is actually listening (idle = mic free).
             try throwIfListenerOwnsMic()
-            print("listening... (speak a command)")
+            FileHandle.standardError.write("listening... (speak a command)\n".data(using: .utf8)!)
             goal = try await stt.transcribeMic(maxSeconds: 20)
         }
         print("heard: \(goal)")
@@ -782,7 +782,7 @@ struct StatusCmd: AsyncParsableCommand {
             // it at the next turn — "stopping" until then. An idle companion
             // ignores the file entirely (wake() clears it), so don't claim
             // it's about to stop.
-            let stopPending = (daemonState == "listening" || daemonState == "running")
+            let stopPending = (daemonState == "listening" || daemonState == "runStart")
                 && (FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-serve-stop")
                     || FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-app-stop"))
             let mode = stopPending ? "stopping"
