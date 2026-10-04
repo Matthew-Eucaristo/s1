@@ -151,7 +151,11 @@ struct ConfigCmd: AsyncParsableCommand {
         print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
         print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
         print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")
-        let vocab = S1Config.load().vocabulary ?? []
+        let cfg = S1Config.load()
+        // The CLI honors these too — surface the values a flag-less run
+        // will actually get (flag → config → default).
+        print("locale → \(cfg.locale ?? "id-ID (default)") · speak → \(cfg.speak ?? false) · notchHUD → \(cfg.notchHUD ?? true)")
+        let vocab = cfg.vocabulary ?? []
         print("vocabulary → \(vocab.count) custom words + installed app names (auto)")
         let assembled = Vocabulary.assemble(custom: vocab)
         print("  resolved: \(assembled.prefix(10).joined(separator: ", "))\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
