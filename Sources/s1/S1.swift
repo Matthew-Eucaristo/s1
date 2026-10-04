@@ -187,7 +187,8 @@ struct ConfigCmd: AsyncParsableCommand {
 /// config.json vocabulary + a `--vocabulary a,b,c` flag → the full
 /// contextual-strings list (installed app names added automatically).
 func sttVocabulary(_ csv: String?) -> [String] {
-    let flag = csv?.split(separator: ",").map { String($0) } ?? []
+    let flag = csv?.split(separator: ",").map {
+        $0.trimmingCharacters(in: .whitespaces) } ?? []
     return Vocabulary.assemble(custom: flag + (S1Config.load().vocabulary ?? []))
 }
 
@@ -321,7 +322,7 @@ struct ListenCmd: AsyncParsableCommand {
             FileHandle.standardError.write("listening... (speak a command)\n".data(using: .utf8)!)
             goal = try await stt.transcribeMic(maxSeconds: 20)
         }
-        print("heard: \(goal)")
+        print("heard: \(goal.terminalSafe)")
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
         let pol: any Policy
@@ -542,7 +543,7 @@ struct ServeCmd: AsyncParsableCommand {
                 throw ValidationError("audio file not found: \(file)")
             }
             let text = try await stt.transcribe(file: URL(fileURLWithPath: file))
-            print("heard: \(text)")
+            print("heard: \(text.terminalSafe)")
             guard !text.isEmpty else { throw ValidationError("nothing transcribed") }
             // A one-shot has no wake() to clear the daemon's kill switch —
             // remove the stale file or this run aborts at step 0.
