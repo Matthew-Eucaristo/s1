@@ -486,20 +486,41 @@ struct ServeCmd: AsyncParsableCommand {
         // shouldn't pay the cold-load cost mid-conversation.
         Task { await stt.warmup() }
 
-        // `auto` resolves ONCE here — a daemon must not re-probe the
-        // endpoint on every utterance (each probe is up to 3s).
-        let useVLM: Bool
+        // `auto` resolves once here — a daemon must not re-probe the
+        // endpoint on every utterance (each probe is up to 3s). But the
+        // daemon also outlives the endpoint: if Ollama comes up AFTER
+        // `s1 serve` started, a once-probe pins it to `ax` forever. So the
+        // flag lives in a box; while it's down a slow background re-probe
+        // upgrades the brain when the endpoint answers (upgrade only — a
+        // dead endpoint mid-run still fails per-step, which is honest).
+        let vlmUp = LockedBox(false)
         if policy == "auto" {
-            useVLM = await AutoPolicy.endpointAlive(Endpoints.vlm(base: vlmBase, model: vlmModel))
+            vlmUp.value = await AutoPolicy.endpointAlive(Endpoints.vlm(base: vlmBase, model: vlmModel))
             FileHandle.standardError.write(
-                (useVLM ? "policy auto → vlm (local decision model)\n"
+                (vlmUp.value ? "policy auto → vlm (local decision model)\n"
                         : "policy auto → ax (model endpoint unreachable — deterministic grammar)\n")
                 .data(using: .utf8)!)
+            if !vlmUp.value {
+                Task.detached {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(60))
+                        if Task.isCancelled { return }
+                        vlmUp.value = await AutoPolicy.endpointAlive(
+                            Endpoints.vlm(base: vlmBase, model: vlmModel))
+                        if vlmUp.value {
+                            FileHandle.standardError.write(
+                                "policy auto → vlm (endpoint came up — brain upgraded)\n"
+                                    .data(using: .utf8)!)
+                            return
+                        }
+                    }
+                }
+            }
         } else {
-            useVLM = policy == "vlm"
+            vlmUp.value = policy == "vlm"
         }
         let makePol: @Sendable () -> any Policy = {
-            guard useVLM else { return AXPolicy() }
+            guard vlmUp.value else { return AXPolicy() }
             return VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
                              useScreenshot: S1Config.load().vlmScreenshot ?? true)
         }
@@ -685,6 +706,18 @@ struct ServeCmd: AsyncParsableCommand {
 private enum KeepAlive {
     /// Filled once before the daemon parks; never touched concurrently.
     nonisolated(unsafe) static var signalSources: [DispatchSourceSignal] = []
+}
+
+/// Lock-protected value readable from @Sendable closures (the auto brain's
+/// upgrade probe lands off the serve loop's thread).
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _v: Value
+    init(_ v: Value) { _v = v }
+    var value: Value {
+        get { lock.lock(); defer { lock.unlock() }; return _v }
+        set { lock.lock(); _v = newValue; lock.unlock() }
+    }
 }
 
 struct TasksCmd: AsyncParsableCommand {
