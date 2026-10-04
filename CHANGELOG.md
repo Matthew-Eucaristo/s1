@@ -33,6 +33,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
   race.
 
 ### Added
+- **`brew services start s1`** — the official Homebrew daemon path (`service do`
+  block in the formula): launchd agent at login, crash-only respawn,
+  `:interactive` for WindowServer/mic. Requires `brew trust` once (brew's
+  gate for service formulas in third-party taps).
+- **`s1 serve --install` competing-listener guard** — refuses with a clear
+  message while a manual `s1 serve`/app listener holds `~/.s1/serve.pid`
+  (the agent would exit non-zero and KeepAlive would respawn-churn forever).
+
 - **Homebrew tap packaging** — `Formula/s1.rb` (binary CLI) + `Casks/s1.rb` (S1.app) + `scripts/publish-tap.sh`: one-command release → GitHub Release → tap publish. Install `brew tap Matthew-Eucaristo/tap && brew install s1` / `--cask s1`; clean removal via `uninstall --cask s1 --zap` (wipes `~/.s1` + Library traces). Both files pass `brew audit --strict` + `brew style`; install/uninstall E2E-verified on a local tap.
 - **`s1 ax` capability markers** — `[pressable] [editable] [scrollable] [adjustable] [secure]` in the tree dump, from the new shared `AXSemantics` (single source of truth also used by prompts/AXPolicy).
 - **Full pointer + AX verb coverage** — `rightClick`, `doubleClick` (real
