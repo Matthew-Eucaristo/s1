@@ -76,7 +76,8 @@ struct RunCmd: AsyncParsableCommand {
         switch policyName {
         case "dummy": pol = DummyPolicy()
         case "ax":    pol = AXPolicy()
-        case "auto":  pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel)
+        case "auto":  pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel,
+                                                    screenshot: vlmScreenshot)
         case "vlm":
             pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
                             useScreenshot: vlmScreenshot ?? S1Config.load().vlmScreenshot ?? true)
@@ -213,8 +214,9 @@ func throwIfListenerOwnsMic() throws {
 
 /// Shared `auto` resolution: probe the VLM endpoint once, log which brain
 /// the run actually got, return the concrete policy.
-func resolveAutoPolicy(vlmBase: String?, vlmModel: String?) async -> any Policy {
-    let useShot = S1Config.load().vlmScreenshot ?? true
+func resolveAutoPolicy(vlmBase: String?, vlmModel: String?,
+                       screenshot: Bool? = nil) async -> any Policy {
+    let useShot = screenshot ?? S1Config.load().vlmScreenshot ?? true
     let (pol, name) = await AutoPolicy.resolve(vlmBase: vlmBase, vlmModel: vlmModel,
                                               useScreenshot: useShot)
     let note = name == "vlm"
