@@ -132,6 +132,10 @@ public final class Serve: @unchecked Sendable {
         emit(.armed)
         if let h = hotkey, !h.isArmed {
             emit(.error, "hotkey monitor not installed — grant Input Monitoring + run in a GUI session")
+        } else if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
+            // TCC can let tapCreate succeed while delivering zero events —
+            // the process would sit "armed" forever with a dead hotkey.
+            emit(.error, "armed but Input Monitoring is NOT granted — hotkey will fire nothing; grant it in System Settings")
         }
     }
 
