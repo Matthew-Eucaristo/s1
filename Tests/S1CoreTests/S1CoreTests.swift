@@ -165,14 +165,14 @@ private func jsonlDecoder() -> JSONDecoder {
               "osascript -e 'tell app \"Finder\" to delete'",
               "tccutil reset Accessibility", "sqlite3 ~/TCC.db 'grant'",
               "xattr -d com.apple.quarantine bad.app"] {
-        if case .needsHuman(let r) = gate.evaluateTerminalPayload(t) {
+        if case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(t) {
             #expect(r.contains("terminal:"), "\(t) should hit the terminal list")
         } else { Issue.record("terminal payload must escalate: \(t)") }
     }
     // Benign shell text stays free — ls/cd/echo are everyday terminal use.
     for ok in ["ls -la", "cd ~/Documents", "echo done", "git status",
                "cat README.md", "npm install"] {
-        #expect(gate.evaluateTerminalPayload(ok) == .allow, "\(ok) must stay free")
+        #expect(SafetyGate.evaluateTerminalPayload(ok) == .allow, "\(ok) must stay free")
     }
 }
 

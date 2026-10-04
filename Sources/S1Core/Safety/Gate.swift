@@ -108,7 +108,9 @@ public struct SafetyGate: Sendable {
 
     /// Extra pass for text destined for a terminal: the payload is a shell
     /// command, so it gets command-level scrutiny on top of `evaluate`.
-    public func evaluateTerminalPayload(_ text: String) -> GateVerdict {
+    /// Static — the actuator re-checks at act time too, since the frontmost
+    /// app can flip to a terminal between observe and the keystroke landing.
+    public static func evaluateTerminalPayload(_ text: String) -> GateVerdict {
         for rule in Self.terminalDenyPatterns {
             if text.range(of: rule.regex, options: .regularExpression) != nil {
                 return .needsHuman(reason: "terminal: \(rule.why)")

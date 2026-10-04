@@ -113,7 +113,7 @@ public enum RunReader {
                     case .axSetValue(_, let v): v
                     default: nil
                     }
-                    if let payload, case .needsHuman(let r) = gate.evaluateTerminalPayload(payload) {
+                    if let payload, case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
                         verdict = .needsHuman(reason: r)
                     }
                 }

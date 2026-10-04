@@ -112,12 +112,12 @@ public struct CGEventActuator: Actuator {
             return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
 
         case .typeText(let text):
-            try refuseIfSecureFocus()
+            try actTimeChecks(payload: text)
             try postUnicode(text)
             return "typed \(text.count) chars"
 
         case .keyCombo(let keys):
-            try refuseIfSecureFocus()
+            try actTimeChecks(payload: nil)
             try postKeyCombo(keys)
             return "keyCombo \(keys.joined(separator: "+"))"
 
@@ -176,7 +176,7 @@ public struct CGEventActuator: Actuator {
                 CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
                         mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
             }
-            try refuseIfSecureFocus()
+            try actTimeChecks(payload: value)
             try postUnicode(value)
             return "focused+typed \(value.count) chars (AXSetValue refused)"
 
@@ -258,22 +258,31 @@ public struct CGEventActuator: Actuator {
         "AXMinimized", "AXFrontmost",
     ]
 
-    /// Act-time secure-focus re-check: the loop gates keystrokes against
-    /// the observe-time snapshot, but a password prompt can grab focus in
-    /// the seconds a model decision takes. Re-reading the live focused
-    /// element right before posting closes that window — the step errors,
-    /// the next observe re-gates, and the run escalates to human.
-    private func refuseIfSecureFocus() throws {
+    /// Act-time re-checks: the loop gates against the observe-time
+    /// snapshot, but the screen can change in the seconds a model decision
+    /// takes. Two things are re-read live right before keystrokes post:
+    /// (a) a password prompt grabbing focus — a secure field errors the
+    /// step rather than swallowing the text; (b) frontmost flipping to a
+    /// terminal — the payload then gets the command-level scan the loop
+    /// applied to whatever was frontmost when it decided. Either refusal
+    /// errors the step; the next observe re-gates honestly.
+    private func actTimeChecks(payload: String?) throws {
         let sys = AXUIElementCreateSystemWide()
         var v: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
-              let el = v, CFGetTypeID(el) == AXUIElementGetTypeID()
-        else { return }
-        var role: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success,
-              (role as? String) == "AXSecureTextField"
-        else { return }
-        throw S1Error.axFailed("secure text field grabbed focus — keystrokes refused")
+        if AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+           let el = v, CFGetTypeID(el) == AXUIElementGetTypeID() {
+            var role: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success,
+               (role as? String) == "AXSecureTextField" {
+                throw S1Error.axFailed("secure text field grabbed focus — keystrokes refused")
+            }
+        }
+        if let payload,
+           let front = NSWorkspace.shared.frontmostApplication?.localizedName,
+           SafetyGate.terminalApps.contains(front),
+           case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
+            throw S1Error.axFailed("keystrokes refused: \(r)")
+        }
     }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).
