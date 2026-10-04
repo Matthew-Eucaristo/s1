@@ -773,14 +773,14 @@ struct MetricsCmd: AsyncParsableCommand {
         }
         let root = S1Home.path + "/artifacts"
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: root),
-              let latest = entries.sorted().last else {
+              // Walk backwards past stray files: an unrelated "zzz.txt"
+              // dropped in artifacts/ must not shadow real run dirs.
+              let latest = entries.sorted().last(where: {
+                  FileManager.default.fileExists(atPath: root + "/" + $0 + "/steps.jsonl")
+              }) else {
             throw ValidationError("no run dirs under \(root) — run something first")
         }
-        let dir = root + "/" + latest
-        guard FileManager.default.fileExists(atPath: dir + "/steps.jsonl") else {
-            throw ValidationError("newest entry has no steps.jsonl: \(dir)")
-        }
-        return dir
+        return root + "/" + latest
     }
 
     func run() async throws {
