@@ -1510,3 +1510,18 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(n == "Notes")
     #expect(d?.confidence == 0.9)
 }
+
+@Test func destructiveKeyCombosEscalate() {
+    // ⌘Q / ⌘⌥⎋ can be emitted by a model with two tokens — both can
+    // destroy unsaved work, so the gate routes them to a human. ⌘S and
+    // plain keys stay free.
+    let g = SafetyGate()
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["cmd", "q"])) else {
+        Issue.record("cmd+q not escalated"); return
+    }
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["cmd", "opt", "esc"])) else {
+        Issue.record("cmd+opt+esc not escalated"); return
+    }
+    #expect(g.evaluate(.keyCombo(keys: ["cmd", "s"])) == .allow)
+    #expect(g.evaluate(.keyCombo(keys: ["return"])) == .allow)
+}

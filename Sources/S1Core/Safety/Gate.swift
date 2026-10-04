@@ -124,6 +124,21 @@ public struct SafetyGate: Sendable {
 
     public func evaluate(_ action: Action) -> GateVerdict {
         // Deny-list first: it applies to every class.
+        if case .keyCombo(let keys) = action {
+            // Destructive shortcuts a model can emit with two tokens: ⌘Q
+            // quits the frontmost app (unsaved work dies with it) and
+            // ⌘⌥⎋ opens force-quit. The user can't have meant these unless
+            // they said them — a scripted goal still says them verbatim.
+            let ks = Set(keys.map { $0.lowercased() })
+            let cmd = !ks.isDisjoint(with: ["cmd", "command"])
+            let opt = !ks.isDisjoint(with: ["opt", "option", "alt"])
+            if cmd && ks.contains("q") {
+                return .needsHuman(reason: "⌘Q quits the app — possible unsaved-work loss")
+            }
+            if cmd && opt && ks.contains("esc") {
+                return .needsHuman(reason: "⌘⌥⎋ opens Force Quit")
+            }
+        }
         for payload in action.textPayloads {
             for rule in Self.denyPatterns {
                 if payload.range(of: rule.regex, options: .regularExpression) != nil {
