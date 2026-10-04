@@ -359,6 +359,10 @@ public final class Serve: @unchecked Sendable {
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
+        // Other control chars (tab, BEL, …) are also invalid raw inside a
+        // JSON string — the file must stay parseable no matter what a
+        // transcript or model reply carried.
+        e = e.terminalSafe
         e = String(e.prefix(120))
         // Truncation can slice a "\\" pair in half — a trailing lone
         // backslash would escape the closing quote and corrupt the file.
