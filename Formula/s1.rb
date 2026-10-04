@@ -1,23 +1,16 @@
-# Homebrew formula for the s1 CLI — installs the prebuilt universal binary.
+# Homebrew formula for the s1 CLI — signed universal binary (arm64+x86_64).
 #
-# Lives in the tap repo Matthew-Eucaristo/homebrew-tap as Formula/s1.rb.
-# scripts/publish-tap.sh regenerates it with real version + sha256 on
-# every release — do not hand-edit values here.
-#
-# A binary formula, deliberately: `brew install s1` drops the signed
-# arm64+x86_64 binary into brew's bin — no Xcode/Swift toolchain needed
-# and `brew uninstall` leaves zero residue. (homebrew-core would require
-# a source build; our own tap gets to choose the friendlier option.)
+# `brew install s1` drops the binary into brew's bin; `brew uninstall s1`
+# removes every byte it installed. Run output lives in ~/.s1 — wipe it with
+# `rm -rf ~/.s1` for a full reset.
 class S1 < Formula
   desc "Voice-first agent — fast System 1 + LLM System 2, accessibility-driven"
   homepage "https://github.com/Matthew-Eucaristo/s1"
-  url "https://github.com/Matthew-Eucaristo/s1/releases/download/v0.2.0/s1-0.2.0-macos.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000" # filled at release
+  url "https://raw.githubusercontent.com/Matthew-Eucaristo/homebrew-tap/main/releases/v0.2.0/s1-0.2.0-macos.tar.gz"
+  sha256 "dee2921a68f851f12a5405c9bf1b51b546c70a224f76a9a955a51111706efac2"
   license "MIT"
 
-  # The binary is signed (stable TCC identity); Gatekeeper may still want a
-  # one-time `xattr -dr com.apple.quarantine` until we ship Developer ID.
-  depends_on macos: :sequoia
+  depends_on macos: :tahoe
 
   def install
     bin.install "s1"
@@ -28,8 +21,9 @@ class S1 < Formula
       s1 drives your Mac via Accessibility, Screen Recording, and Speech —
       macOS prompts your terminal app on first use; `s1 preflight` lists
       what's still missing.
-      Menu-bar companion:  brew install --cask s1
-      Local model brain:   brew install ollama && ollama pull gemma3:4b
+      Menu-bar app + notch HUD:  brew install --cask s1
+      Local model brain:         brew install ollama && ollama pull gemma3:4b
+      Full reset:                brew uninstall s1 && rm -rf ~/.s1
     EOS
   end
 

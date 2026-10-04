@@ -1,27 +1,21 @@
-# Homebrew cask for the S1 menu-bar app.
-#
-# Lives in the tap repo Matthew-Eucaristo/homebrew-tap as Casks/s1.rb.
-# scripts/publish-tap.sh regenerates it with real version + sha256 on
-# every release — do not hand-edit values here.
 cask "s1" do
   version "0.2.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000" # filled at release
+  sha256 "a223d6fd0a902196b8de6806181a5f1bb9113d7ba239ddddd63d7c5a1037a0bc"
 
-  url "https://github.com/Matthew-Eucaristo/s1/releases/download/v#{version}/S1-#{version}-app.zip"
+  url "https://raw.githubusercontent.com/Matthew-Eucaristo/homebrew-tap/main/releases/v#{version}/S1-#{version}-app.zip"
   name "S1"
-  desc "Voice-first agent — menu-bar companion (System 1 + System 2)"
+  desc "Voice-first agent — fast System 1 + LLM System 2, accessibility-driven"
   homepage "https://github.com/Matthew-Eucaristo/s1"
 
-  # ScreenCaptureKit/AX/CGEvent need macOS 15+; on-device STT wants 26.
-  depends_on macos: :sequoia
+  depends_on macos: :tahoe
 
   app "S1.app"
 
-  # `brew uninstall --cask s1`        -> quits the app + removes /Applications/S1.app
-  # `brew uninstall --cask s1 --zap`  -> also removes every trace below
   uninstall quit: "com.matthew.s1.app"
 
-  # config, pid locks, run artifacts, screenshots
+  # `brew uninstall --zap s1` — the one-command full wipe: app, grants-facing
+  # bundle, and every byte of user state s1 ever wrote (config, run
+  # artifacts, serve pid/state, screenshots).
   zap trash: [
     "~/.s1",
     "~/Library/Application Scripts/com.matthew.s1.app",
@@ -32,10 +26,10 @@ cask "s1" do
   ]
 
   caveats <<~EOS
-    First launch asks for Accessibility, Screen Recording, and (for voice)
-    Microphone — System Settings prompts; `s1 preflight` lists any gaps.
-    Builds ship self-signed (not notarized): if Gatekeeper blocks the first
-    launch, `brew reinstall --cask s1 --no-quarantine` or
-    `xattr -dr com.apple.quarantine /Applications/S1.app`.
+    Ad-hoc signed → Gatekeeper will block the first open. Either install
+    with `brew install --cask --no-quarantine s1`, or once:
+      xattr -dr com.apple.quarantine /Applications/S1.app
+    Then open S1 and grant Accessibility + Screen Recording + Microphone
+    when it asks — `s1 preflight` (from `brew install s1`) shows the score.
   EOS
 end
