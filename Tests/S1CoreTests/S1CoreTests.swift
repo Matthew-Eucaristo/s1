@@ -1468,6 +1468,21 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(pol.name == "ax")
 }
 
+@Test func autoPolicyProbeRequiresTheConfiguredModel() {
+    // A server that answers 200 but never pulled our model is NOT usable —
+    // auto would resolve vlm and burn every step on "model not found".
+    // Both wire shapes: OpenAI {"data":[{"id"}]}, Ollama {"models":[{"name"}]}.
+    let openai = #"{"data":[{"id":"gemma3:4b"},{"id":"llama3.2:3b"}]}"#.data(using: .utf8)!
+    let ollama = #"{"models":[{"name":"gemma3:4b"}]}"#.data(using: .utf8)!
+    #expect(AutoPolicy.modelListed("gemma3:4b", in: openai))
+    #expect(AutoPolicy.modelListed("gemma3", in: openai))      // tag-suffix match
+    #expect(AutoPolicy.modelListed("gemma3:4b", in: ollama))
+    #expect(!AutoPolicy.modelListed("qwen3-vl:4b", in: openai))
+    #expect(AutoPolicy.modelListed("anything", in: #"{"weird":true}"#.data(using: .utf8)!))
+    #expect(AutoPolicy.modelListed("anything", in: #"{"data":[]}"#.data(using: .utf8)!))
+    #expect(AutoPolicy.modelListed("anything", in: Data("not json".utf8)))
+}
+
 @Test func artifactPruneKeepsNewestAndNonRunDirs() throws {
     // Storage bound: oldest run dirs go first, non-run dirs survive, and
     // `cleanAll` empties the whole root. Sort order = name = time.

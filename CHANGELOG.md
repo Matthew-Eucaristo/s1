@@ -50,6 +50,11 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `throwIfListenerOwnsMic`).
 - **`s1 serve --install` plists the real binary** — resolved the brew
   `binary` symlink so a reinstall can't strand the launchd agent.
+- **`auto` probe requires the configured model** — a server answering
+  `/models` with 200 but missing the configured model resolved `vlm`
+  anyway, then burned every step on "model not found". The probe now
+  parses the model list (OpenAI `data[].id` and Ollama `models[].name`)
+  and counts the endpoint usable only when our model is in it.
 - **`auto` brain upgrades mid-life** — the daemon and the app companion
   probed the local model endpoint once at start; an Ollama that comes up
   later left them pinned to the grammar. A slow re-probe (60s while down)
