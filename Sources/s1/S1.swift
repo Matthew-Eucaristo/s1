@@ -722,6 +722,16 @@ struct CleanCmd: AsyncParsableCommand {
     func run() async throws {
         let n = ArtifactStore.cleanAll(root: URL(fileURLWithPath: artifacts))
         print("removed \(n) run dir\(n == 1 ? "" : "s") from \(artifacts)")
+        // serve.log never rotates (launchd appends forever) — truncate it
+        // here too so `s1 clean` is the one-stop "reclaim ~/.s1" command.
+        // Truncating is safe: launchd keeps the fd, writes continue at 0.
+        let log = S1Home.path + "/serve.log"
+        if FileManager.default.fileExists(atPath: log),
+           let h = try? FileHandle(forWritingTo: URL(fileURLWithPath: log)) {
+            try? h.truncate(atOffset: 0)
+            try? h.close()
+            print("truncated \(log)")
+        }
     }
 }
 
