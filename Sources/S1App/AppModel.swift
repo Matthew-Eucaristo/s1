@@ -76,7 +76,20 @@ final class AppModel {
         Task {
             let names = await Task.detached { ModelPull.installed() }.value
             self.installedModels = names
+            self.adoptPulledBrainIfUnset(names)
         }
+    }
+
+    /// A terminal `ollama pull` never reaches pullModel(), so the endpoint
+    /// can keep asking for a model that isn't there. When the user never
+    /// picked a brain (still on the default) and exactly one catalog-vision
+    /// model is installed, adopt it — the pull's intent was obvious.
+    private func adoptPulledBrainIfUnset(_ installed: [String]) {
+        guard vlmModel == "gemma3:4b", !installed.contains("gemma3:4b") else { return }
+        let vision = installed.filter { n in
+            ModelPull.catalog.first { $0.name == n }?.vision == true
+        }
+        if vision.count == 1, let only = vision.first { useAsBrain(only) }
     }
 
     /// One tap: pull a catalog/model name into Ollama. On finish the model
@@ -306,7 +319,9 @@ final class AppModel {
                     if let dir = ev.dir { self.runDir = dir }
                 case .sleeping: self.serveState = .idle; self.serveStatus = "idle (sleeping)"
                 case .stopped: self.serveState = .idle; self.serveStatus = "stopped"
-                case .error: self.serveStatus = "error: \(ev.text)"
+                // "last run" framing: the line lingers until the next event —
+                // "error:" alone looked like a live stuck state.
+                case .error: self.serveStatus = "last run failed: \(ev.text)"
                 case .idle: self.serveState = .idle
                 }
             }
