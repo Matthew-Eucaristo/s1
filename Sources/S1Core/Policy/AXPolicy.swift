@@ -89,7 +89,13 @@ public struct AXPolicy: Policy {
             .map { part -> Intent in
                 let words = part.split(separator: " ", maxSplits: 1)
                 let verb = words.first?.lowercased() ?? ""
-                let arg = words.count > 1 ? String(words[1]) : ""
+                var arg = words.count > 1 ? String(words[1]) : ""
+                // A trailing conjunction can't open a new command — "buka
+                // notes lalu" must not hunt for an app literally called
+                // "notes lalu". Text verbs are exempt: their arg is literal.
+                if !["type", "ketik", "write", "tulis"].contains(verb) {
+                    arg = stripTrailingConjunction(arg)
+                }
                 return Intent(verb: verb, arg: arg)
             }
     }
@@ -119,6 +125,26 @@ public struct AXPolicy: Policy {
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
         "ubah", "rename", "ganti",
     ]
+
+    /// Drop a dangling conjunction at the end of a part ("buka notes lalu"
+    /// → "buka notes"). Repeated in case transcription chains them
+    /// ("… dan lalu").
+    static func stripTrailingConjunction(_ s: String) -> String {
+        let conjs = ["dan", "and", "lalu", "then", "terus", "trus", "lantas",
+                     "kemudian", "setelah itu", "habis itu", "abis itu", "and then"]
+        var out = s.trimmingCharacters(in: .whitespaces)
+        var changed = true
+        while changed {
+            changed = false
+            for c in conjs where out.lowercased().hasSuffix(" " + c) {
+                out = String(out.dropLast(c.count + 1))
+                    .trimmingCharacters(in: .whitespaces)
+                changed = true
+                break
+            }
+        }
+        return out
+    }
 
     /// Split " A <conj> B " only when B starts with a grammar verb —
     /// otherwise the conjunction is literal text the user wants typed.

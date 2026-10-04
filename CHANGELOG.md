@@ -21,6 +21,10 @@ this project is pre-1.0 — breaking changes land in minor versions.
   caps at 300 records so serve mode can't grow memory forever.
 
 ### Fixed
+- **Dangling conjunctions stripped from args** — "buka notes lalu" (STT
+  hesitation) used to hunt for an app called "notes lalu"; the trailing
+  word can't open a new command so it's dropped. Literal-text verbs
+  (`type`/`ketik`) keep theirs.
 - **Secure-field coverage extended** — `axPress`/`axAction`/`axSetAttribute`
   targeting an `AXSecureTextField` now escalate to a human like `axSetValue`
   already did: an AXConfirm or press can submit a login form, not just inject

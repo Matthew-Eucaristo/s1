@@ -1033,6 +1033,13 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(takeBreak.action == nil && takeBreak.confidence < 0.6)
     // "and take" is a verb boundary for conjunction splits.
     #expect(AXPolicy.intents(of: "open Notes and take a screenshot").count == 2)
+    // A dangling conjunction can't start a command — strip it instead of
+    // letting it pollute the arg ("buka notes lalu" → app "notes lalu").
+    #expect(AXPolicy.intents(of: "buka notes lalu").first?.arg == "notes")
+    #expect(AXPolicy.intents(of: "open Notes and").first?.arg == "Notes")
+    #expect(AXPolicy.intents(of: "klik Save dan").first?.arg == "Save")
+    // Literal text args keep their trailing conjunctions.
+    #expect(AXPolicy.intents(of: "type milk and").first?.arg == "milk and")
 }
 
 @Test func axPolicyAbstainsWhenPreviousStepErrored() async throws {
