@@ -36,6 +36,20 @@ this project is pre-1.0 — breaking changes land in minor versions.
   the drain is now bounded (3s) and keeps whatever already landed.
 - **Destructive key combos escalate** — ⌘Q / ⌘⌥⎋ in a model's `keyCombo`
   route to a human (unsaved-work / force-quit surface).
+- **"matikan wifi" is a command, not a sleep phrase** — stop phrases that
+  double as ordinary verbs (matikan/tidur/istirahat/sleep) must now be the
+  whole utterance; "stop dong"-style prefixes still work for stop/berhenti.
+- **Untrusted-model crash surface closed** — `scroll` wheel values and
+  `wait` durations from model JSON could trap the process on NaN/1e30;
+  both are clamped (wheel ±32k px, wait capped at 300s everywhere).
+- **`s1 status` shows mid-run "stopping"** — it looked for a daemon state
+  called `running`; the daemon publishes `runStart`, so a queued `s1 stop`
+  during a run was invisible.
+- **`s1 transcribe` shares the mic-ownership rule** — refuses while a
+  LISTENING daemon holds the input, same as `s1 listen` (shared
+  `throwIfListenerOwnsMic`).
+- **`s1 serve --install` plists the real binary** — resolved the brew
+  `binary` symlink so a reinstall can't strand the launchd agent.
 
 ### Security
 - **Terminal-aware typing** — text destined for a terminal's command line
