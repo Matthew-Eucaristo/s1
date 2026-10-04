@@ -78,6 +78,29 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 - **`--no-vlm-screenshot` honored under `auto`** — the flag reached only
   the explicit `--policy vlm` branch; the default path read config only.
+- **Non-finite coordinates can't reach CGEvent** — salvaged model JSON
+  (`"x": 1e999`) decoded to `inf`/`nan`, and a `CGPoint(x: .infinity)`
+  posted to `CGEvent` is undefined behaviour. The actuator rejects
+  non-finite move/click/drag arguments loudly instead.
+- **Word conjunctions can't split typed text** — "ketik aku lalu pergi"
+  typed only "aku" because `lalu`/`then`/`terus`/`kemudian`/`lantas`/
+  `habis itu`/`setelah itu`/`abis itu`/`lalu`/`trus` split
+  unconditionally. Like "dan"/"and", they now split only when the next
+  word is a known verb; a non-verb keeps the text intact.
+- **Ambiguous `keyCombo` throws** — `["cmd","x","y"]` isn't a chord;
+  posting only the last key logs a combo that never ran.
+- **`s1 metrics`/`s1 replay` default to the newest run** — bare
+  `s1 metrics` used to print a usage error; without an arg it now means
+  "the run I just did" (same for `s1 replay`).
+- **`s1 capture --out` creates missing parent dirs** — it used to exit 1
+  silently when the directory didn't exist; now it creates it and
+  reports a real `ValidationError` when the write genuinely can't land.
+- **`s1 ax` accepts bundle ids** — `s1 ax com.apple.Notes` resolves the
+  running app by `bundleIdentifier` before name matching.
+- **Terminal escape injection closed** — action args, outcomes, `s1 ax`
+  labels, `s1 status` details and `heard:` transcripts are control-strip-
+  sanitized, so model output or a hostile app's AX title can't inject
+  ANSI/OSC escape sequences into the CLI feed or serve.log.
 ### Security
 - **Act-time secure-focus re-check** — the loop gates keystrokes against
   the observe-time snapshot, but a password prompt appearing between
