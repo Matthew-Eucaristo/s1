@@ -1,0 +1,30 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app bundle (carries the CLI)
+        run: |
+          [ -f assets/AppIcon.icns ] || ./scripts/make-icon.sh
+          # make-app builds BOTH binaries universal and embeds the CLI at
+          # Contents/Resources/s1 — one zip is the whole distribution.
+          ./scripts/make-app.sh release
+          # Same filename + zip format the cask downloads (ditto, keepParent)
+          # so a release asset can serve brew installs directly.
+          ditto -c -k --sequesterRsrc --keepParent dist/S1.app "S1-${GITHUB_REF_NAME#v}-app.zip"
+          shasum -a 256 "S1-${GITHUB_REF_NAME#v}-app.zip" > "S1-${GITHUB_REF_NAME#v}-app.zip.sha256"
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            S1-*-app.zip
+            S1-*-app.zip.sha256

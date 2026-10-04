@@ -1,0 +1,1 @@
+open TextEdit, wait 1500, type s1 wrote this, verify s1 wrote this, done

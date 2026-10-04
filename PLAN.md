@@ -2,7 +2,7 @@
 
 Voice-first macOS agent. Dua lapis: **System 1** (cepat, lokal, bisa diganti-ganti di balik protokol) menangani mayoritas langkah; **System 2** (LLM, lokal atau cloud) hanya dipanggil saat S1 tidak yakin. Swift native. MIT. Public OSS.
 
-> Status: **rencana untuk review** — belum ada kode ditulis.
+> Status: **terimplementasi** — P0–P6 + companion always-on + app Liquid Glass, semua diverifikasi live di macOS 26. Dokumen ini dipertahankan sebagai catatan riset/keputusan; README.md adalah sumber fitur terkini.
 
 ---
 
@@ -33,7 +33,7 @@ Voice-first macOS agent. Dua lapis: **System 1** (cepat, lokal, bisa diganti-gan
 
 ### 1.1 Bahasa & kemasan
 - **Swift 6 + SwiftPM** multi-target. Logika inti di library `S1Core` (testable, `swift test` di CI), executable tipis `s1` (CLI), target `S1App` (menu bar, LSUIElement) di fase suara.
-- `.app` bundle dibuat via `scripts/package-app.sh` (Info.plist + binary SwiftPM) — tidak perlu `.xcodeproj` yang dikomit. XcodeGen opsional kalau nanti app-nya besar.
+- `.app` bundle dibuat via `scripts/make-app.sh` (Info.plist + binary SwiftPM) — tidak perlu `.xcodeproj` yang dikomit. XcodeGen opsional kalau nanti app-nya besar.
 - **Tidak sandboxed.** Distribusi: unsigned dulu untuk dev → Developer ID + notarize saat rilis.
 
 ### 1.2 Modul (semua di balik `protocol`, bisa di-mock)
@@ -73,7 +73,7 @@ Implementasi berurutan (semua bisa dipakai user):
 Confidence hibrida (model tidak kalibrated): skor match AX + confidence verbal model + **verify-after-act** (re-perceive, cek perubahan yang diharapkan). Di bawah ambang `conf_threshold` → eskalasi S2, dicatat `reason` di log.
 
 ### 1.4 System 2
-`protocol Reasoner` dengan dua adapter: **OpenAI-compatible** (satu endpoint menutupi Ollama, LM Studio, mlx server, OpenRouter, OpenAI) dan **Anthropic**. API key di **Keychain** (`SecItem`), config non-rahasia di `~/.config/s1/config.json`. Nol kredensial di repo.
+`protocol Reasoner` — terimplementasi satu adapter **OpenAI-compatible** (satu endpoint menutupi Ollama, LM Studio, mlx server, OpenRouter, OpenAI). API key via env/config file `~/.s1/config.json` (ditulis chmod 600 bila berisi key). Nol kredensial di repo. Adapter Anthropic native tetap ide roadmap.
 
 ### 1.5 Perception: AX-first, screenshot on-demand
 - Jalur utama = **AX tree** (struktur, role, label, position) + window list. Murah, cepat, bisa offline.
@@ -84,6 +84,7 @@ Confidence hibrida (model tidak kalibrated): skor match AX + confidence verbal m
 - **STT default: `SpeechAnalyzer`/`SpeechTranscriber`** — built-in, on-device, 63 locale terverifikasi termasuk `id-ID`. Gratis, tanpa download model, paling native.
 - Opsional: **FluidAudio Parakeet** (Apache; p50 ~182 ms, tapi v3 hanya bahasa Eropa → untuk English-first low latency) dan **WhisperKit** (MIT; large-v3 multilingual termasuk Indonesia).
 - **VAD**: FluidAudio Silero VAD (sudah satu paket) atau endpointing bawaan SpeechTranscriber; mode **push-to-talk** via hotkey global (Carbon `RegisterEventHotKey`, tidak butuh AX).
+- **TERBANGUN — always-on companion (di luar fase P, permintaan owner)**: `Serve` daemon `idle ⇄ listening` (hear → run → speak → hear, stop-phrase, auto-sleep; idle = 0 mic/CPU) + global hotkey **⇧⇧ / ⌃⌥Space** via `CGEvent.tapCreate` listen-only (NSEvent monitor tidak pernah deliver di host CLI — fakta platform) + app `MenuBarExtra` (badge state, Listen, Launch at login `SMAppService`). Perception membawa `AppState[]` semua app + window titles; `open X` resolve via Spotlight `mdfind`. Catatan: hotkey pakai CGEvent tap (butuh Accessibility + Input Monitoring), bukan Carbon — Carbon hanya menangkap keyDown target dan tidak bisa double-tap modifier.
 - **TTS**: `AVSpeechSynthesizer` on-device (ada voice Indonesia) — default, sejalan "TTS belum wajib". Opsional Kokoro via FluidAudio (English).
 
 ### 1.7 Dependensi OSS (diputuskan dari lisensi + integrasi)
@@ -102,7 +103,7 @@ Prinsip: **kode inti sendiri dulu** (AX/CGEvent/SCK tipis ~ratusan baris — sej
 ### 1.8 Safety model (non-negotiable, dari konsep)
 - Kelas aksi: `read` (selalu) · `reversible` (boleh, dicatat) · `irreversible` (butuh `--allow-irreversible` + konfirmasi).
 - Deny-list keras: password/OTP/CVC, pembelian, kirim pesan tanpa konfirmasi → selalu `needs_human`.
-- Kill switch: global hotkey (mis. `⌃⌘.` ) dicek **tiap langkah** + `stop` file sentinel.
+- Kill switch: file sentinel per-run (`s1-stop`/`s1-app-stop`) dicek **tiap langkah** — dipicu dari app, `s1 stop`, atau kill file manual.
 - Tiap run → `artifacts/<timestamp>/` : `steps.jsonl`, `screens/`, `meta.json` (config, versi, policy yang dipakai).
 - Dry-run default aman: loop jalan penuh, Act dimatikan (`--dry-run`).
 
@@ -122,7 +123,7 @@ s1/
 │   └── S1App/                   # menu bar app (mulai P4)
 ├── Tests/S1CoreTests/           # gate, jsonl format, policy mock, replay
 ├── scripts/package-app.sh       # bikin S1.app dari binary
-└── docs/                        # architecture.md · permissions.md · providers.md · safety.md
+└── docs/                        # adding-a-brain.md (guide menulis Policy/Reasoner)
 ```
 Deps SwiftPM (kept minimal): `swift-argument-parser` (CLI), `FluidAudio` (opsional, P4), `WhisperKit` (opsional). Tachikoma tidak perlu — provider HTTP tipis sendiri (~150 baris) sudah cukup.
 
@@ -158,8 +159,24 @@ Deps SwiftPM (kept minimal): `swift-argument-parser` (CLI), `FluidAudio` (opsion
 - **P4 (suara)**: 1 sesi.
 - Selebihnya incremental.
 
-## 6. Yang belum diputuskan (butuh oke dari kamu)
+## 6. Yang belum diputuskan (diputuskan 2026-10-03)
 
-1. Mulai **P0+P1 sekarang** di sesi ini? (Kode + uji nyata di VM ini.)
-2. Default driver: `cua-driver` dijadikan adapter opsional sejak P2, atau tunda sampai core stabil?
-3. App bundle menubar (P4) — cukup `package-app.sh`, atau mau XcodeGen dari awal?
+1. ~~Mulai **P0+P1 sekarang**~~ → **YA** — dikerjakan dan terverifikasi di VM.
+2. ~~`cua-driver` adapter~~ → **ditunda** — CGEvent/AX native cukup; adapter tetap di tabel §1.7 sebagai opsi.
+3. ~~App bundle~~ → `make-app.sh` cukup — tidak perlu XcodeGen.
+
+---
+
+## 7. Cakupan platform (diputuskan 2026-10-03)
+
+**Target: macOS penuh, Apple-stack dulu.** Semua fitur memakai API resmi Apple
+(ScreenCaptureKit, AXUIElement, CGEvent, SpeechAnalyzer, App Intents,
+SMAppService) — tanpa shim pihak ketiga di jalur utama.
+
+**iPhone/iOS: bukan target kontrol-penuh** — Apple tidak memberi app pihak
+ketiga Accessibility API lintas-app, injeksi event (CGEvent), atau AX tree
+app lain di iOS; model "operasikan semua hal visual" memang tidak mungkin
+secara platform (kontrol penuh di iOS hanya milik Siri/Shortcuts). Yang
+bisa dibawa ke iOS suatu hari: SpeechAnalyzer STT, App Intents, dan
+protokol S1/S2 — misalnya app iPhone *remote* yang meneruskan goal ke
+daemon s1 di Mac. Dicatat sebagai ide roadmap, bukan scope sekarang.
