@@ -199,6 +199,20 @@ func validatedSTTPolicy(_ policy: String) throws -> String {
     return policy
 }
 
+/// Refuse a mic grab while the listener daemon is mid-turn: two audio
+/// engines on one input device fails cryptically (or silently starves
+/// both). Idle daemon = mic free.
+func throwIfListenerOwnsMic() throws {
+    guard let data = FileManager.default.contents(atPath: Serve.statePath),
+          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          (obj["state"] as? String) == "listening",
+          let pid = (obj["pid"] as? Int).map(pid_t.init),
+          S1Runner.pidLooksLikeS1(pid) else { return }
+    throw ValidationError(
+        "the s1 listener is actively listening (pid \(pid)) — it owns the mic; " +
+        "say your command to it, or `s1 stop` first")
+}
+
 /// Shared `auto` resolution: probe the VLM endpoint once, log which brain
 /// the run actually got, return the concrete policy.
 func resolveAutoPolicy(vlmBase: String?, vlmModel: String?) async -> any Policy {
@@ -237,6 +251,11 @@ struct TranscribeCmd: AsyncParsableCommand {
             }
             text = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
+            // Same ownership rule as `s1 listen`: a LISTENING daemon
+            // holds the mic — two audio engines fail cryptically.
+            try throwIfListenerOwnsMic()
+            // stderr, not stdout — piped output must be the transcript alone.
+            FileHandle.standardError.write("listening... (speak)\n".data(using: .utf8)!)
             text = try await stt.transcribeMic(maxSeconds: maxSeconds)
         }
         print(text)
@@ -296,18 +315,9 @@ struct ListenCmd: AsyncParsableCommand {
             }
             goal = try await stt.transcribe(file: URL(fileURLWithPath: file))
         } else {
-            // A live LISTENING daemon owns the mic — two audio engines
-            // grabbing it at once fails cryptically. Refuse only when the
-            // daemon is actually listening (idle = mic free).
-            if let data = FileManager.default.contents(atPath: Serve.statePath),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               (obj["state"] as? String) == "listening",
-               let pid = (obj["pid"] as? Int).map(pid_t.init),
-               S1Runner.pidLooksLikeS1(pid) {
-                throw ValidationError(
-                    "the s1 listener is actively listening (pid \(pid)) — it owns the mic; " +
-                    "say your command to it, or `s1 stop` first")
-            }
+            // A live LISTENING daemon owns the mic — refuse only when it
+            // is actually listening (idle = mic free).
+            try throwIfListenerOwnsMic()
             print("listening... (speak a command)")
             goal = try await stt.transcribeMic(maxSeconds: 20)
         }
