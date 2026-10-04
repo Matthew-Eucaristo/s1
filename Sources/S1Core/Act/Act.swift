@@ -123,8 +123,15 @@ public struct CGEventActuator: Actuator {
             // Convention: positive dy scrolls content DOWN (like a browser's
             // scrollY), documented in the decision prompt. CGEvent wheel1 is
             // the opposite sign — positive wheel1 moves content up.
+            // Model output is untrusted: Int32() traps on NaN/1e30 — clamp
+            // to a sane wheel range so a weird reply scrolls oddly instead
+            // of crashing the run.
+            func clamp(_ v: Double) -> Int32 {
+                guard v.isFinite else { return 0 }
+                return Int32(max(-32_000, min(32_000, v.rounded())))
+            }
             CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                    wheelCount: 2, wheel1: Int32(-dy), wheel2: Int32(-dx), wheel3: 0)?
+                    wheelCount: 2, wheel1: clamp(-dy), wheel2: clamp(-dx), wheel3: 0)?
                 .post(tap: .cghidEventTap)
             return "scroll (\(dx), \(dy))"
 
@@ -196,8 +203,14 @@ public struct CGEventActuator: Actuator {
             return "opened \(name)"
 
         case .wait(let s):
-            try await Task.sleep(for: .seconds(s))
-            return "waited \(s)s"
+            // Model output is untrusted: .seconds(NaN) traps. The loop and
+            // replay cap before calling, but a direct perform must be safe.
+            guard s.isFinite, s > 0 else { return "wait skipped (invalid \(s)s)" }
+            // Same 5-min ceiling the loop applies — a scripted absurdity
+            // shouldn't park a run for days either.
+            let capped = min(s, 300)
+            try await Task.sleep(for: .seconds(capped))
+            return "waited \(capped)s"
 
         case .captureScreenshot(let r):
             return "captured screenshot (\(r))"
