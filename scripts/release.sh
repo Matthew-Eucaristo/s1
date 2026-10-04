@@ -2,7 +2,7 @@
 # Build the release artifacts for GitHub Releases:
 #   s1-<version>-macos.tar.gz   universal CLI (arm64 + x86_64)
 #   S1-<version>-app.zip        universal signed S1.app bundle
-# Prints the sha256 of each — paste them into the tap's Formula/Cask,
+# Prints the sha256 of each — paste them into the tap's Cask,
 # or let scripts/publish-tap.sh do the whole dance.
 #
 # Usage: ./scripts/release.sh 0.2.0
@@ -37,4 +37,4 @@ echo "sha256: $(shasum -a 256 "$ZIP" | awk '{print $1}')"
 
 echo
 echo "next: ./scripts/publish-tap.sh $VERSION   # or attach both files to the"
-echo "      GitHub Release manually + fill Formula/s1.rb and Casks/s1.rb"
+echo "      GitHub Release manually + update Casks/s1.rb"
