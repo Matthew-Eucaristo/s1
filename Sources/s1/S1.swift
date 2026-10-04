@@ -14,7 +14,7 @@ struct S1: AsyncParsableCommand {
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
-                      TasksCmd.self, StatusCmd.self, StopCmd.self])
+                      TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -38,7 +38,7 @@ struct RunCmd: AsyncParsableCommand {
     var goal: String?
     @Option(help: "Task library name — reads tasks/<name>.txt as the goal.")
     var task: String?
-    @Option(help: "Policy: scripted | dummy | ax | vlm (default: ax; --plan implies scripted)")
+    @Option(help: "Policy: auto | scripted | dummy | ax | vlm (default: auto; --plan implies scripted)")
     var policy: String?
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
@@ -710,6 +710,18 @@ struct MetricsCmd: AsyncParsableCommand {
         print("verified     ok: \(m.verifiedOK) · fail: \(m.verifiedFail)")
         print("screenshots  \(m.screenshots)")
         print(String(format: "duration     %.1fs", m.durationSeconds))
+    }
+}
+
+struct CleanCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "clean",
+        abstract: "Delete run artifacts (~/.s1/artifacts). Runs auto-prune to the newest 50; this wipes all.")
+    @Option(help: "Artifacts root directory.")
+    var artifacts: String = S1Home.path + "/artifacts"
+
+    func run() async throws {
+        let n = ArtifactStore.cleanAll(root: URL(fileURLWithPath: artifacts))
+        print("removed \(n) run dir\(n == 1 ? "" : "s") from \(artifacts)")
     }
 }
 

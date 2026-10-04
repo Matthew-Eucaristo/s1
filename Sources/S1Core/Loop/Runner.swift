@@ -190,6 +190,9 @@ public enum S1Runner {
 
         let root = URL(fileURLWithPath: artifacts)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Storage bound: screenshot-heavy runs pile up silently otherwise.
+        // Bounded BEFORE the run so the new dir is never the one deleted.
+        ArtifactStore.prune(root: root)
 
         let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
 
