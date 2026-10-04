@@ -440,6 +440,10 @@ struct AXCmd: AsyncParsableCommand {
         if let pid = pid_t(target),
            let app = NSRunningApplication(processIdentifier: pid) { return app }
         let running = ws.runningApplications.filter { $0.localizedName != nil }
+        // Bundle id first — `s1 ax com.apple.Notes` is the developer-facing
+        // spelling, and a name substring could hit the wrong sibling app.
+        if let byId = running.first(where: {
+            $0.bundleIdentifier?.caseInsensitiveCompare(target) == .orderedSame }) { return byId }
         if let exact = running.first(where: {
             $0.localizedName?.caseInsensitiveCompare(target) == .orderedSame }) { return exact }
         return running.first { $0.localizedName?.localizedCaseInsensitiveContains(target) ?? false }
