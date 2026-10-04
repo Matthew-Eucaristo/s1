@@ -248,7 +248,10 @@ enum LLMDecisionCodec {
                           return .openApp(name: n)
         case "wait":      return .wait(seconds: a.ms.map { $0 / 1000 } ?? a.seconds ?? 0.5)
         case "captureScreenshot": return .captureScreenshot(reason: a.expect ?? "requested by model")
-        case "verify":    return .verify(expectation: a.expect ?? "")
+        // verify("") would vacuously PASS — "" is contained in every
+        // AX string. An expectation the model didn't give can't be checked.
+        case "verify":    guard let e = a.expect, !e.isEmpty else { return nil }
+                          return .verify(expectation: e)
         case "done":      return .done(summary: a.expect ?? a.text ?? "done")
         default:          return nil
         }
