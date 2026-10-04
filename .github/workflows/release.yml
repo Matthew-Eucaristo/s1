@@ -24,13 +24,15 @@ jobs:
         run: |
           [ -f assets/AppIcon.icns ] || ./scripts/make-icon.sh
           ./scripts/make-app.sh release
-          tar -czf "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz" -C dist S1.app
-          shasum -a 256 "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz" > "S1.app-${GITHUB_REF_NAME}-macos-universal.tar.gz.sha256"
+          # Same filename + zip format the cask downloads (ditto, keepParent)
+          # so a release asset can serve brew installs directly.
+          ditto -c -k --sequesterRsrc --keepParent dist/S1.app "S1-${GITHUB_REF_NAME#v}-app.zip"
+          shasum -a 256 "S1-${GITHUB_REF_NAME#v}-app.zip" > "S1-${GITHUB_REF_NAME#v}-app.zip.sha256"
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             s1-*-macos-universal.tar.gz
             s1-*-macos-universal.tar.gz.sha256
-            S1.app-*-macos-universal.tar.gz
-            S1.app-*-macos-universal.tar.gz.sha256
+            S1-*-app.zip
+            S1-*-app.zip.sha256
