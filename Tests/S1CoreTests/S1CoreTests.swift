@@ -1493,6 +1493,24 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(obj["detail"] is String)
 }
 
+@Test func terminalSafeStripsEveryControlChar() {
+    // Anything a window title, transcript, or model reply could smuggle
+    // into `heard:`/status/digest output must not reach the tty: ESC opens
+    // ANSI/OSC sequences, C1 CSI is an 8-bit introducer, BEL rings,
+    // NUL/C1/DEL corrupt pipes and logs.
+    let hostile = "\u{1B}[31mred\u{1B}[0m \u{9B}31m8bit\u{7}bell\u{0}nul\u{7F}del \u{85}nel\u{1B}]8;;http://x\u{7}link\u{1B}\\"
+    let safe = hostile.terminalSafe
+    // The introducers die; their printable payloads stay as inert text.
+    #expect(safe == "[31mred[0m 31m8bitbellnuldel nel]8;;http://xlink\\")
+    for s in safe.unicodeScalars {
+        #expect(!CharacterSet.controlCharacters.contains(s))
+    }
+    // Clean text survives untouched; newlines/tabs count as controls too
+    // (digest/status lines must stay single-line).
+    #expect("hello world".terminalSafe == "hello world")
+    #expect("a\nb\tc".terminalSafe == "abc")
+}
+
 @Test func micLevelEnvelopeDecaysAndClamps() {
     let m = MicLevel()
     m.push(1.5)                       // clamps to 1
