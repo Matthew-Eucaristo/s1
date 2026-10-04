@@ -422,7 +422,8 @@ struct AXCmd: AsyncParsableCommand {
         }
         let flat = tree.flattened
         for n in flat.prefix(250) {
-            let label = n.title ?? n.desc ?? n.help ?? n.value ?? ""
+            // App-controlled text straight to a terminal: strip escapes.
+            let label = (n.title ?? n.desc ?? n.help ?? n.value ?? "").terminalSafe
             var loc = ""
             if let f = n.frame {
                 loc = String(format: "  @(%.0f,%.0f %.0fx%.0f)", f.x, f.y, f.w, f.h)
@@ -838,7 +839,8 @@ struct StatusCmd: AsyncParsableCommand {
             daemonAlive = true
             daemonState = obj["state"] as? String
             let ev = (obj["event"] as? String) ?? "?"
-            let detail = (obj["detail"] as? String) ?? ""
+            // `detail` carries transcript/model text — terminal-safe it.
+            let detail = ((obj["detail"] as? String) ?? "").terminalSafe
             let st = daemonState ?? "?"
             print("state        \(st) · \(ev)\(detail.isEmpty ? "" : " · \(detail)")")
             if let at = obj["updated"] as? String { print("updated      \(at)") }

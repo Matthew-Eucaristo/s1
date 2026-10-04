@@ -32,14 +32,27 @@ public struct StepRecord: Codable, Sendable {
 
     /// One-line human digest shared by the CLI feed, the serve log, and
     /// anywhere a step needs to read plainly: "[3] s1:ax 0.95 typeText → typed".
+    /// Action args and outcomes are model/app-derived — sanitised so an
+    /// escape sequence embedded in them can't inject ANSI/OSC into the
+    /// terminal or log showing this line. (steps.jsonl keeps raw values:
+    /// JSON escaping already makes it terminal-safe.)
     public var digest: String {
         var s = "[\(index)] \(decidedBy)"
         if let c = confidence { s += String(format: " %.2f", c) }
-        if let a = action { s += " \(a)" }
-        if let o = outcome { s += " → \(o)" }
+        if let a = action { s += " \(String(describing: a).terminalSafe)" }
+        if let o = outcome { s += " → \(o.terminalSafe)" }
         if let v = verified { s += v ? " ✓" : " ✗verify" }
         if let e = escalation { s += " ⚑→\(e.to)" }
         return s
+    }
+}
+
+extension String {
+    /// Strip C0/C1/DEL control characters (incl. ESC) so text derived from
+    /// models, apps, or audio transcripts can't inject ANSI/OSC escape
+    /// sequences when printed to a terminal or written into serve.log.
+    public var terminalSafe: String {
+        String(unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
     }
 }
 
