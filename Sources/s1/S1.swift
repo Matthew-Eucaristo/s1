@@ -642,12 +642,20 @@ struct ServeCmd: AsyncParsableCommand {
         let arg0 = CommandLine.arguments[0]
         // launchd execs without our cwd — a relative argv[0] like
         // `.build/debug/s1` must become absolute or the agent can't start.
-        if arg0.contains("/") { return URL(fileURLWithPath: arg0).path }
-        for dir in (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":") {
-            let p = dir + "/" + arg0
-            if FileManager.default.isExecutableFile(atPath: p) { return p }
+        let found: String
+        if arg0.contains("/") {
+            found = URL(fileURLWithPath: arg0).path
+        } else {
+            found = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+                .split(separator: ":")
+                .map { $0 + "/" + arg0 }
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+                ?? arg0
         }
-        return arg0
+        // Resolve the symlink: brew cask installs link `s1` → the app
+        // bundle's Resources binary — the plist should point at the real
+        // file, not at a link that can move with a reinstall.
+        return URL(fileURLWithPath: found).resolvingSymlinksInPath().path
     }
 
     private func launchctl(_ args: [String], quiet: Bool = false) -> Int32 {
