@@ -1099,6 +1099,24 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(S1Config.load(from: path).vocabulary == nil)
 }
 
+@Test func configWithKeySaves0600() throws {
+    // A config carrying API keys must land owner-only — like ~/.ssh/config.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1cfg-\(UUID().uuidString)")
+    let path = dir.appendingPathComponent("config.json").path
+    var c = S1Config()
+    c.vlm = .init(base: "https://api.openai.com/v1", model: "gpt-5", key: "sk-test")
+    try c.save(to: path)
+    let perms = try #require(
+        (try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue)
+    #expect(perms & 0o777 == 0o600)
+    // Keyless configs don't get forced (any existing perms stand).
+    var plain = S1Config()
+    plain.locale = "id-ID"
+    let path2 = dir.appendingPathComponent("plain.json").path
+    try plain.save(to: path2)
+    #expect(FileManager.default.fileExists(atPath: path2))
+}
+
 // MARK: - all-app perception
 
 @Test func appStatesJoinsWorkspaceAndWindowTitles() {
