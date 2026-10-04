@@ -28,10 +28,19 @@ public struct Endpoint: Sendable {
     /// A local server tolerates Ollama-only request keys (`think`,
     /// `options`) — a strict OpenAI-spec endpoint (OpenAI, OpenRouter, Groq)
     /// 400s on unknown fields, so the wire body keeps them local-only.
+    /// Match the HOST, not the URL text: "api.x.com/?next=localhost" or
+    /// "mylocalhost.evil.com" are remote servers, not loopback.
     public var isLocal: Bool {
-        let b = baseURL.lowercased()
-        return b.contains("localhost") || b.contains("127.0.0.1")
-            || b.contains("[::1]") || b.contains(".local")
+        guard let host = URLComponents(string: baseURL)?.host?.lowercased(),
+              !host.isEmpty else {
+            // Unparseable base → substring heuristic, same as before.
+            let b = baseURL.lowercased()
+            return b.contains("localhost") || b.contains("127.0.0.1")
+                || b.contains("[::1]")
+        }
+        let h = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return h == "localhost" || h == "127.0.0.1" || h == "::1"
+            || h.hasSuffix(".local") || h.hasSuffix(".localhost")
     }
 }
 

@@ -1416,6 +1416,22 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(e.baseURL == "http://x/v1")
 }
 
+@Test func endpointIsLocalMatchesHostNotSubstring() {
+    // isLocal gates Ollama-only wire keys (`think`, `options`) — a false
+    // positive sends non-spec fields to a strict remote and 400s.
+    func ep(_ base: String) -> Endpoint { Endpoint(baseURL: base, model: "m") }
+    #expect(ep("http://localhost:11434/v1").isLocal)
+    #expect(ep("http://127.0.0.1:11434").isLocal)
+    #expect(ep("http://[::1]:11434/v1").isLocal)
+    #expect(ep("http://nas.local:1234/v1").isLocal)   // Bonjour host
+    #expect(ep("https://gpu.localhost").isLocal)      // RFC 6761
+    #expect(!ep("https://api.openai.com/v1").isLocal)
+    #expect(!ep("https://mylocalhost.evil.com").isLocal)
+    #expect(!ep("https://api.x.com/v1?next=localhost").isLocal)
+    #expect(!ep("https://127.0.0.1.evil.com").isLocal)
+    #expect(!ep("https://alocalhost.com").isLocal)
+}
+
 // MARK: - RunLogger dirs
 
 @Test func runLoggerSlugCleansGoalAndUniquifies() throws {
