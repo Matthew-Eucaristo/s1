@@ -1699,6 +1699,10 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     guard case .needsHuman = g.evaluate(.keyCombo(keys: ["ctrl", "cmd", "q"])) else {
         Issue.record("lock-screen chord not escalated"); return
     }
+    // ⇧⌘Q ends the session outright — heavier than quitting an app.
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["cmd", "shift", "q"])) else {
+        Issue.record("log-out chord not escalated"); return
+    }
     // Near-misses stay free: wrong modifier, or space without both.
     #expect(g.evaluate(.keyCombo(keys: ["ctrl", "space"])) == .allow)
     #expect(g.evaluate(.keyCombo(keys: ["cmd", "space"])) == .allow)

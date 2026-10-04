@@ -136,6 +136,11 @@ public struct SafetyGate: Sendable {
             let opt = !ks.isDisjoint(with: ["opt", "option", "alt"])
             let ctrl = !ks.isDisjoint(with: ["ctrl", "control"])
             if cmd && ks.contains("q") {
+                // ⇧⌘Q logs the user OUT entirely — quitting the frontmost
+                // app is reversible-ish, ending the session is not.
+                if !ks.isDisjoint(with: ["shift"]) {
+                    return .needsHuman(reason: "⇧⌘Q logs out — it would end the whole session")
+                }
                 return .needsHuman(reason: "⌘Q quits the app — possible unsaved-work loss")
             }
             // Key aliases matter: "escape" posts the same keyCode as "esc".
