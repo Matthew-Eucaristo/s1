@@ -30,4 +30,4 @@ echo "== dry-run demo (touches nothing) =="
 echo "== scripted dry-run =="
 "$S1" run --task open-app --policy ax --dry-run
 
-echo "smoke done — artifacts in ./artifacts/"
+echo "smoke done — artifacts in ~/.s1/artifacts/"
