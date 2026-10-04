@@ -713,7 +713,28 @@ struct ServeCmd: AsyncParsableCommand {
             throw S1Error.aborted("launchctl bootstrap failed — plist at \(plistPath)")
         }
         _ = launchctl(["kickstart", "-k", "\(domain)/\(ServeLaunchd.label)"])
-        print("installed + started: \(plistPath)")
+        // Don't just claim "started": the agent proves itself by claiming
+        // ~/.s1/serve.pid. A job that never claims it (blocked in dyld,
+        // a bad plist arg, a crash loop) leaves nothing listening — the
+        // lock check above only guarded against a live holder, not a
+        // dead-on-arrival agent. Poll briefly and report honestly.
+        var claimed = false
+        for _ in 0 ..< 50 {
+            if S1Runner.livePidHolder(
+                of: NSHomeDirectory() + "/.s1/serve.pid") != nil {
+                claimed = true
+                break
+            }
+            usleep(100_000)
+        }
+        print(claimed ? "installed + started: \(plistPath)"
+                      : "installed: \(plistPath)")
+        if !claimed {
+            FileHandle.standardError.write(
+                ("warning: listener hasn't come up within 5s — the agent " +
+                 "is installed and will retry via launchd; check " +
+                 "`s1 status` and ~/.s1/serve.log\n").data(using: .utf8)!)
+        }
         print("logs: ~/.s1/serve.log · stop now: s1 stop · remove for good: s1 serve --uninstall")
     }
 
@@ -914,7 +935,16 @@ struct StatusCmd: AsyncParsableCommand {
                 : "running"
             print("listener     \(mode) (pid \(pid))")
         } else {
-            print("listener     not running")
+            // Nothing listening — but an installed launchd agent may be
+            // mid-retry or dead-on-arrival. Surface it so "not running"
+            // never reads as "nothing was ever set up".
+            let la = NSHomeDirectory() + "/Library/LaunchAgents"
+            let agentInstalled = FileManager.default.fileExists(
+                atPath: ServeLaunchd.plistPath)
+                || FileManager.default.fileExists(
+                    atPath: la + "/sh.brew.s1.plist")
+            print("listener     not running"
+                + (agentInstalled ? " · launch agent installed" : ""))
         }
         // Active agent run (the screen-ownership lock).
         let runState = S1Runner.anotherRunActive() ? "in progress (other process)" : "none"
