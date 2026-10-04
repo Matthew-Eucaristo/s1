@@ -271,9 +271,21 @@ public struct SpeechToText: Sendable {
         continuation.finish()
         try await inputTask?.value
         try await analyzer.finalizeAndFinishThroughEndOfInput()
-        // The results stream terminates once the analyzer finishes — awaiting
-        // it is what lands the final transcript chunk.
-        try await resultsTask?.value
+        // The results stream SHOULD terminate once the analyzer finishes —
+        // but that contract is unverified on macOS 26, and a stream that
+        // never ends wedges this turn forever (serve would never time out).
+        // Bound the drain: after finalize, a straggler stream is cancelled
+        // and we take whatever transcript already landed.
+        let watchdog = Task { [resultsTask] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            resultsTask?.cancel()
+        }
+        do {
+            try await resultsTask?.value
+        } catch is CancellationError {
+            // Watchdog fired — the results that already landed are still good.
+        }
+        watchdog.cancel()
         return await collected.value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
