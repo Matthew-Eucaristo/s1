@@ -55,7 +55,10 @@ struct S1App: App {
                         .accessibilityLabel("s1, idle")
                 }
             case .listening:
-                Image(systemName: "waveform")
+                // The Siri tell Matthew asked for: live bars in the menu
+                // bar itself — if his voice reaches the mic, they dance.
+                LiveWaveform(barCount: 6, barWidth: 2.5, gap: 1.5)
+                    .frame(width: 18, height: 15)
                     .accessibilityLabel("s1, listening")
             case .running:
                 Image(systemName: "brain")
@@ -76,6 +79,11 @@ private struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("s1").font(.headline)
+                if model.serveState == .listening {
+                    LiveWaveform(barCount: 10)
+                        .frame(width: 44, height: 14)
+                        .accessibilityHidden(true)
+                }
                 Spacer()
                 stateBadge
             }
