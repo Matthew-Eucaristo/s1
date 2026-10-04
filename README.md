@@ -201,11 +201,15 @@ conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 ## Task library & run tooling
 
 ```bash
-swift run s1 run --task open-app --policy ax        # goals live in tasks/*.txt
+swift run s1 run --task open-app --policy ax        # goals live in tasks/*.txt — or ~/.s1/tasks/*.txt
 swift run s1 metrics                                # stats for the newest run (or pass a run dir)
 swift run s1 replay --dry-run                       # re-execute a recorded run (default: newest)
 swift run s1 tasks                                # list what's in the library
 ```
+
+A bare `--task name` searches `tasks/<name>.txt` in the current directory
+first, then `~/.s1/tasks/<name>.txt` — drop files there for a persistent
+library that works from anywhere.
 
 Notes on the library: `download-file` expects a local server — run
 `python3 -m http.server 8000` in a folder containing `test.zip` first
