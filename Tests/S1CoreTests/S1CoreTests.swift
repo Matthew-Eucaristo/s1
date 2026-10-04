@@ -1485,3 +1485,15 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(ArtifactStore.cleanAll(root: root) == 2)
     #expect((try fm.contentsOfDirectory(atPath: root.path)) == ["my-notes"])
 }
+
+@Test func tekanKeyNamesRouteToCombo() {
+    // "tekan enter" is the most common follow-up after typing — it must
+    // press Return, not search the AX tree for a node named "enter".
+    #expect(AXPolicy.keyNames("enter") == ["return"])
+    #expect(AXPolicy.keyNames("spasi") == ["space"])
+    #expect(AXPolicy.keyNames("panah kiri") == ["left"])
+    #expect(AXPolicy.keyNames("cmd s") == ["cmd", "s"])
+    #expect(AXPolicy.keyNames("cmd+s") == ["cmd", "s"])
+    #expect(AXPolicy.keyNames("Save") == nil)        // UI text, not a key
+    #expect(AXPolicy.keyNames("milk and honey") == nil)
+}

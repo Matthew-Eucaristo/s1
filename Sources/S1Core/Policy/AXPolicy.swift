@@ -142,6 +142,39 @@ public struct AXPolicy: Policy {
     /// prompts advertise as [pressable]; one source of truth.
     static let pressableRoles: Set<String> = AXSemantics.pressable
 
+    /// Voice-friendly key aliases — Indonesian + English — mapped onto the
+    /// names CGEventActuator.keyCodes understands. Only multi-word phrases
+    /// and locale words need entries; single English key names pass through.
+    static let keyAliases: [String: String] = [
+        "enter": "return", "spasi": "space", "spacebar": "space",
+        "hapus": "delete", "backspace": "delete",
+        "escape": "esc",
+        "panah kiri": "left", "panah kanan": "right",
+        "panah atas": "up", "panah bawah": "down",
+        "arrow left": "left", "arrow right": "right",
+        "arrow up": "up", "arrow down": "down",
+        "left arrow": "left", "right arrow": "right",
+        "up arrow": "up", "down arrow": "down",
+        "page up": "pageup", "page down": "pagedown",
+    ]
+
+    static let keyModifiers: Set<String> =
+        ["cmd", "command", "shift", "opt", "option", "alt", "ctrl", "control"]
+
+    /// Interpret "enter" / "cmd s" / "panah kiri" as a keyCombo when every
+    /// token is a modifier or a known key — nil when it's UI text instead.
+    static func keyNames(_ arg: String) -> [String]? {
+        if let alias = keyAliases[arg.lowercased()] { return [alias] }
+        let keys = arg.lowercased()
+            .split(separator: "+")
+            .flatMap { $0.split(separator: " ") }
+            .map(String.init)
+        guard !keys.isEmpty,
+              keys.allSatisfy({ keyModifiers.contains($0)
+                                || CGEventActuator.keyCodes[$0] != nil }) else { return nil }
+        return keys
+    }
+
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let intents = AXPolicy.intents(of: goal)
         guard history.count < intents.count else {
@@ -232,6 +265,17 @@ public struct AXPolicy: Policy {
             guard !intent.arg.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a target")
+            }
+            // "tekan enter" / "press return" / "press cmd s" — when the arg
+            // is a key name (or combo), it's a keystroke, not an AX click.
+            // Without this the policy searches the tree for a node literally
+            // named "enter" and abstains on the most common follow-up a user
+            // says after typing. Only the keystroke verbs route here —
+            // "klik a" still means click the element named "a".
+            if ["tekan", "press"].contains(intent.verb),
+               let combo = Self.keyNames(intent.arg) {
+                return Decision(action: .keyCombo(keys: combo), confidence: 0.95,
+                                rationale: "key press \(intent.arg)")
             }
             // "isi <field> dengan <value>" / "set <field> to <value>" —
             // the needle is the field name; the value is what lands in it.
