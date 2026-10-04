@@ -440,7 +440,16 @@ final class AppModel {
         runDir = nil
         status = "running"
 
-        let pol: any Policy = brain == .vlm
+        // Honor `.auto` here too — the companion probes vlmAlive when it
+        // arms, but a window run can happen before (or without) arming, so
+        // kick a probe when the answer is unknown rather than silently
+        // degrading to the grammar.
+        if brain == .auto && vlmAlive.value == nil {
+            let box = vlmAlive
+            Task { box.value = await AutoPolicy.endpointAlive(vlmEndpoint()) }
+        }
+        let wantsModel = brain == .vlm || (brain == .auto && vlmAlive.value == true)
+        let pol: any Policy = wantsModel
             ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot)
             : AXPolicy()
         let reasoner: (any Reasoner)? = useS2
