@@ -58,6 +58,16 @@ behind an env var so CI stays clean.
 version, preflight, tasks, config, status, then dry-run demo + a scripted
 run (touches nothing). Run it after a fresh clone to sanity-check a machine.
 
+### Republishing the cask artifact (maintainers)
+
+Every change that lands on `main` also ships to the tap:
+`./scripts/republish-tap.sh` rebuilds the app, re-zips, commits the
+artifact into `releases/v<version>/` in `Matthew-Eucaristo/homebrew-tap`,
+pins the cask url to that artifact commit, rewrites sha256, and pushes.
+`--no-build` reuses `dist/S1.app`; `--dry-run` prints what it would do.
+Users pick up same-version republishes with
+`brew update && brew reinstall --cask s1`.
+
 Real-world checks that can't run in CI (they need TCC grants):
 
 ```sh
