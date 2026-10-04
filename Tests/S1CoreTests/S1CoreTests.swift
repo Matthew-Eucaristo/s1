@@ -1497,3 +1497,16 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(AXPolicy.keyNames("Save") == nil)        // UI text, not a key
     #expect(AXPolicy.keyNames("milk and honey") == nil)
 }
+
+@Test func openAppAcceptsNameField() {
+    // Models write {"type":"openApp","name":"Notes"} — seen live in the
+    // wild. Before this fix the mapper only read "app"/"text" and the
+    // step abstained despite a confident reply.
+    let d = LLMDecisionCodec.parse(
+        #"{"action":{"type":"openApp","name":"Notes"},"confidence":0.9}"#)
+    guard case .openApp(let n)? = d?.action else {
+        Issue.record("openApp name field not mapped"); return
+    }
+    #expect(n == "Notes")
+    #expect(d?.confidence == 0.9)
+}

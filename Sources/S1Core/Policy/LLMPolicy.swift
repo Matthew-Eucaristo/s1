@@ -176,7 +176,7 @@ enum LLMDecisionCodec {
         case "axPress":   a = field("ref").map { .axPress(ref: $0) }
         case "axSetValue": a = field("ref").map { .axSetValue(ref: $0, value: field("value") ?? field("text") ?? "") }
         case "typeText":  a = field("text").map { .typeText($0) }
-        case "openApp":   a = (field("app") ?? field("text")).map { .openApp(name: $0) }
+        case "openApp":   a = (field("app") ?? field("name") ?? field("text")).map { .openApp(name: $0) }
         case "click":     a = .click(x: num("x") ?? 0, y: num("y") ?? 0)
         case "rightClick": a = .rightClick(x: num("x") ?? 0, y: num("y") ?? 0)
         case "doubleClick": a = .doubleClick(x: num("x") ?? 0, y: num("y") ?? 0)
@@ -233,7 +233,7 @@ enum LLMDecisionCodec {
         case "keyCombo":  guard !a.keys.isEmpty else { return nil }
                           return .keyCombo(keys: a.keys.map { $0.lowercased() })
         case "scroll":    return .scroll(dx: a.dx ?? 0, dy: a.dy ?? 0)
-        case "openApp":   guard let n = a.app ?? a.text, !n.isEmpty else { return nil }
+        case "openApp":   guard let n = a.app ?? a.name ?? a.text, !n.isEmpty else { return nil }
                           return .openApp(name: n)
         case "wait":      return .wait(seconds: a.ms.map { $0 / 1000 } ?? a.seconds ?? 0.5)
         case "captureScreenshot": return .captureScreenshot(reason: a.expect ?? "requested by model")
