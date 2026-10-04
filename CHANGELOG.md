@@ -52,6 +52,25 @@ this project is pre-1.0 — breaking changes land in minor versions.
   the drain is now bounded (3s) and keeps whatever already landed.
 - **Destructive key combos escalate** — ⌘Q / ⌘⌥⎋ in a model's `keyCombo`
   route to a human (unsaved-work / force-quit surface).
+- **`s1 serve --install` verifies startup** — it used to report
+  "installed" the moment `launchctl kickstart` returned, even when the
+  daemon never came up (a `dyld`-wedged binary leaves no trace for 5s).
+  It now polls `serve.pid` for ~5s and says "installed + started" only
+  when the agent actually claimed it — plus an `s1 status` hint that
+  distinguishes "agent installed but not running" from a dead listener.
+- **`wake()` re-entrancy guard** — `emit(.listening)` runs handlers
+  synchronously; one that toggled back to sleep left the fresh listen
+  task grabbing the mic anyway (a zombie engine holding the input). The
+  task now re-checks `state == .listening` at run time.
+- **One mic lock across every consumer** — `~/.s1/mic.pid`: daemon wake,
+  the app's mic button, and foreground `s1 transcribe`/`s1 listen` all
+  claim it for their audio session, so a daemon waking mid-capture (or
+  two foreground captures) can no longer open two engines on one input.
+  `--file` transcription is exempt (no mic).
+- **In-process pid claims are idempotent** — `claimPidFile` treated a
+  file holding our own pid as "stale" and deleted it, which two parallel
+  in-process claims used to race on (each deleting the other's lock).
+  An own-pid file now short-circuits as "already owned".
 - **"matikan wifi" is a command, not a sleep phrase** — stop phrases that
   double as ordinary verbs (matikan/tidur/istirahat/sleep) must now be the
   whole utterance; "stop dong"-style prefixes still work for stop/berhenti.
@@ -141,6 +160,17 @@ this project is pre-1.0 — breaking changes land in minor versions.
   prints all three. Verified: config `{en-US, speak:true}` → plist args
   `--locale en-US --speak`.
 ### Security
+- **Endpoint locality parses the URL host** — `Endpoint.isLocal` used to
+  substring-match the whole URL text, so `api.evil.com/?next=localhost`
+  or `127.0.0.1.evil.com` counted as "local" and got Ollama-only request
+  keys (`think`/`options`) a strict remote 400s on. The host is parsed
+  and compared against loopback names/IPs now.
+- **keyCombo alias bypasses closed** — `"escape"` slipped past the
+  ⌘⌥⎋ Force-Quit deny, and three dangerous chords were unguarded:
+  ⌃⌥Space (s1's own wake chord — toggles the agent's listener mid-run),
+  ⌃⌘Q (locks the screen — a locked screen stalls the agent blind), and
+  ⇧⌘Q (logs the user out entirely). All route to a human now, with
+  normalized modifier aliases (`command`/`option`/`alt`/`ctrl`/`spacebar`).
 - **Act-time secure-focus re-check** — the loop gates keystrokes against
   the observe-time snapshot, but a password prompt appearing between
   observe and act (model decisions take seconds) would still get typed
