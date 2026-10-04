@@ -74,9 +74,19 @@ struct ContentView: View {
                                         Text("S2").font(.caption.weight(.semibold))
                                             .foregroundStyle(.purple)
                                     }
+                                    if name == model.grounderModel {
+                                        Text("⌖").font(.caption.weight(.semibold))
+                                            .foregroundStyle(.orange)
+                                            .accessibilityLabel("click grounder")
+                                    }
                                     Menu {
                                         Button("Use as brain (S1)") { model.useAsBrain(name) }
                                         Button("Use as reasoner (S2)") { model.useAsS2(name) }
+                                        if name == model.grounderModel {
+                                            Button("Stop using as click grounder") { model.grounderModel = "" }
+                                        } else {
+                                            Button("Use as click grounder") { model.useAsGrounder(name) }
+                                        }
                                     } label: {
                                         Image(systemName: "ellipsis.circle")
                                             .accessibilityLabel("Assign \(name)")
@@ -93,7 +103,12 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 1) {
                                     HStack(spacing: 4) {
                                         Text(entry.name).font(.callout)
-                                        if entry.vision {
+                                        if entry.grounding {
+                                            Image(systemName: "scope")
+                                                .font(.caption2)
+                                                .foregroundStyle(.orange)
+                                                .accessibilityLabel("click grounding model")
+                                        } else if entry.vision {
                                             Image(systemName: "eye")
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
@@ -112,7 +127,8 @@ struct ContentView: View {
                                         .frame(maxWidth: 110)
                                 } else {
                                     Button {
-                                        model.pullModel(entry.name, vision: entry.vision)
+                                        model.pullModel(entry.name, vision: entry.vision,
+                                                        grounding: entry.grounding)
                                     } label: {
                                         Image(systemName: "arrow.down.circle")
                                     }
@@ -123,7 +139,7 @@ struct ContentView: View {
                             }
                         }
                     }
-                    Text("One tap downloads the model and wires it in — vision models become the S1 brain, text models become S2.")
+                    Text("One tap downloads the model and wires it in — vision models become the S1 brain, text models become S2, ⌖ grounders aim clicks.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

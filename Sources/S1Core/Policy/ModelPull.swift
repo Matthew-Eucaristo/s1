@@ -39,9 +39,12 @@ public enum ModelPull {
         /// One line on why you'd pick it.
         public let blurb: String
         public let vision: Bool
-        public init(_ name: String, _ size: String, _ blurb: String, vision: Bool) {
+        /// GUI-grounding specialist — wired as the click grounder, not the brain.
+        public let grounding: Bool
+        public init(_ name: String, _ size: String, _ blurb: String, vision: Bool,
+                    grounding: Bool = false) {
             self.name = name; self.size = size; self.blurb = blurb
-            self.vision = vision
+            self.vision = vision; self.grounding = grounding
         }
     }
 
@@ -62,6 +65,12 @@ public enum ModelPull {
               "heaviest brain — best plans on Apple Silicon, needs the RAM", vision: false),
         .init("llava:7b", "4.7 GB",
               "classic vision agent — fallback when gemma3 stumbles", vision: true),
+        // Community GGUF packaging of H Company's Holo-3.1 (Apache 2.0).
+        .init("ahmadwaqar/holo-3.1:0.8b", "1.3 GB",
+              "click grounder — GUI-trained, finds buttons from a screenshot, tiny", vision: true,
+              grounding: true),
+        .init("ahmadwaqar/holo-3.1:4b", "5.8 GB",
+              "click grounder — sharper GUI grounding, heavier", vision: true, grounding: true),
     ]
 
     /// Models already pulled — parses `ollama list` ("NAME  ID  SIZE  MODIFIED").

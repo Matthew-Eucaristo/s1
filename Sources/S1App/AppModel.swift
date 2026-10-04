@@ -50,6 +50,9 @@ final class AppModel {
     /// VLM brains see a screenshot every step when on (richer grounding,
     /// more tokens + Screen Recording needed); off = AX-tree-only prompts.
     var vlmScreenshot = true { didSet { scheduleRearm() } }
+    /// Optional GUI-grounding model for click targets ("" = none). Read
+    /// from config by VLMPolicy at run time, so a save is enough.
+    var grounderModel = "" { didSet { scheduleSave() } }
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
@@ -87,7 +90,8 @@ final class AppModel {
     private func adoptPulledBrainIfUnset(_ installed: [String]) {
         guard vlmModel == "gemma3:4b", !installed.contains("gemma3:4b") else { return }
         let vision = installed.filter { n in
-            ModelPull.catalog.first { $0.name == n }?.vision == true
+            guard let e = ModelPull.catalog.first(where: { $0.name == n }) else { return false }
+            return e.vision && !e.grounding
         }
         if vision.count == 1, let only = vision.first { useAsBrain(only) }
     }
@@ -95,7 +99,7 @@ final class AppModel {
     /// One tap: pull a catalog/model name into Ollama. On finish the model
     /// auto-assigns — a vision model becomes the S1 brain, a text-only
     /// model becomes S2 — matching how the catalog describes them.
-    func pullModel(_ name: String, vision: Bool) {
+    func pullModel(_ name: String, vision: Bool, grounding: Bool = false) {
         guard pullProgress[name] == nil else { return }
         pullProgress[name] = "starting…"
         Task {
@@ -105,7 +109,9 @@ final class AppModel {
                 }
                 pullProgress[name] = nil
                 refreshModels()
-                if vision {
+                if grounding {
+                    useAsGrounder(name)
+                } else if vision {
                     vlmModel = name; brain = .vlm
                 } else {
                     s2Model = name; useS2 = true
@@ -120,6 +126,12 @@ final class AppModel {
     /// Installed row → wire it into the matching slot without re-downloading.
     func useAsBrain(_ name: String) { vlmModel = name; brain = .vlm }
     func useAsS2(_ name: String) { s2Model = name; useS2 = true }
+    /// Grounding only runs on the VLM brain's click steps — pick it too
+    /// unless the user already chose a model brain.
+    func useAsGrounder(_ name: String) {
+        grounderModel = name
+        if brain == .ax { brain = .auto }
+    }
 
     private(set) var steps: [StepRecord] = [] { didSet { syncHUD() } }
     private(set) var status = "idle" { didSet { syncHUD() } }
@@ -186,6 +198,7 @@ final class AppModel {
         if let b = cfg.brain, let kind = Brain(rawValue: b) { brain = kind }
         if let u = cfg.useS2 { useS2 = u }
         if let n = cfg.notchHUD { notchHUD = n }
+        if let g = cfg.grounder?.model { grounderModel = g }
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
@@ -372,6 +385,9 @@ final class AppModel {
         cfg.brain = brain.rawValue
         cfg.useS2 = useS2
         cfg.notchHUD = notchHUD
+        cfg.grounder = grounderModel.isEmpty ? nil
+            : .init(base: cfg.grounder?.base, model: grounderModel,
+                    key: cfg.grounder?.key, numCtx: cfg.grounder?.numCtx)
         try? cfg.save()
     }
 

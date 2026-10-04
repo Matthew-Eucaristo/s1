@@ -45,12 +45,15 @@ public struct S1Config: Codable, Sendable {
     public var useS2: Bool?
     /// The app's floating notch HUD (status pill under the camera notch).
     public var notchHUD: Bool?
+    /// Optional GUI-grounding specialist for click targets (see `Grounder`).
+    public var grounder: ModelEndpoint?
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
                 vocabulary: [String]? = nil, recent: [String]? = nil,
                 vlmScreenshot: Bool? = nil, brain: String? = nil,
-                useS2: Bool? = nil, notchHUD: Bool? = nil) {
+                useS2: Bool? = nil, notchHUD: Bool? = nil,
+                grounder: ModelEndpoint? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
         self.vocabulary = vocabulary
         self.recent = recent
@@ -58,6 +61,7 @@ public struct S1Config: Codable, Sendable {
         self.brain = brain
         self.useS2 = useS2
         self.notchHUD = notchHUD
+        self.grounder = grounder
     }
 
     public static var path: String { NSHomeDirectory() + "/.s1/config.json" }
@@ -83,7 +87,7 @@ public struct S1Config: Codable, Sendable {
         try enc.encode(self).write(to: url, options: .atomic)
         // The file can carry API keys — keep it owner-only (600), like
         // ~/.ssh/config. Non-destructive: silently skip if chmod fails.
-        if vlm?.key != nil || s2?.key != nil {
+        if vlm?.key != nil || s2?.key != nil || grounder?.key != nil {
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
@@ -111,5 +115,20 @@ public enum Endpoints {
             model: env["S1_S2_MODEL"] ?? config.s2?.model ?? "gemma3:4b",
             apiKey: env["S1_S2_KEY"] ?? config.s2?.key,
             numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.s2?.numCtx ?? 8192)
+    }
+
+    /// Grounder endpoint, or nil when no grounding model is configured —
+    /// opt-in: a model the user never pulled must not sit in the click path.
+    /// Base defaults to the VLM's server (same Ollama, one more model).
+    public static func grounder(env: [String: String] = ProcessInfo.processInfo.environment,
+                                config: S1Config = .load()) -> Endpoint? {
+        guard let model = env["S1_GROUNDER_MODEL"] ?? config.grounder?.model,
+              !model.isEmpty else { return nil }
+        return Endpoint(
+            baseURL: env["S1_GROUNDER_BASE"] ?? config.grounder?.base
+                ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1",
+            model: model,
+            apiKey: env["S1_GROUNDER_KEY"] ?? config.grounder?.key,
+            numCtx: config.grounder?.numCtx ?? 4096)
     }
 }

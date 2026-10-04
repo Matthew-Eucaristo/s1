@@ -6,6 +6,12 @@ this project is pre-1.0 — breaking changes land in minor versions.
 ## [Unreleased]
 
 ### Added
+- **Click grounder role** — optional GUI-grounding model (Holo-3.1 etc.,
+  normalized [0,1000] replies; parses `(x,y)`, `click(start_box=…)`,
+  `<point>`, `{"x","y"}`, `bbox_2d`) aims click steps. Order: exact AX
+  label (no model) → grounder → general VLM. `config.grounder` /
+  `S1_GROUNDER_*`; catalog entries + "Use as click grounder" in the app;
+  `s1 config` shows and probes it.
 - **VLM fast path** — grounding-free intents (open app, type, named keys,
   wait, screenshot, scroll, done) resolve through the grammar with zero
   model calls; only click/set/verify/free-form steps pay for the VLM.

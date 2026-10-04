@@ -265,13 +265,16 @@ public struct VLMPolicy: Policy {
     public let name: String
     public let useScreenshot: Bool
     let client: ChatClient
+    let grounder: Grounder?
 
-    public var wantsScreenshot: Bool { useScreenshot }
+    public var wantsScreenshot: Bool { useScreenshot || grounder != nil }
 
-    public init(endpoint: Endpoint, useScreenshot: Bool = true) {
+    public init(endpoint: Endpoint, useScreenshot: Bool = true,
+                grounder: Grounder? = Grounder.configured()) {
         self.name = "vlm:\(endpoint.model)"
         self.client = ChatClient(endpoint: endpoint)
         self.useScreenshot = useScreenshot
+        self.grounder = grounder
     }
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
@@ -291,6 +294,7 @@ public struct VLMPolicy: Policy {
         if let fast = await Self.fastPath(current, observation: observation) {
             return fast
         }
+        if let g = await ground(current, observation: observation) { return g }
         let hint: String
         switch current.verb {
         case "open", "buka", "launch":  hint = "openApp"
@@ -366,12 +370,29 @@ public struct VLMPolicy: Policy {
                                                    history: []),
               let action = d.action, d.confidence >= 0.9 else { return nil }
         switch action {
-        case .openApp, .typeText, .keyCombo, .wait, .captureScreenshot, .scroll, .done:
+        // axPress at ≥0.9 = an exact AX label hit: the element itself, no
+        // pixels involved — strictly better than any model's guess.
+        case .openApp, .typeText, .keyCombo, .wait, .captureScreenshot, .scroll, .done, .axPress:
             return Decision(action: action, confidence: d.confidence,
                             rationale: "fast path (no model): \(d.rationale)")
         default:
             return nil
         }
+    }
+
+    /// Click-type intents with a grounding specialist configured: one small
+    /// call returns the point. nil → no grounder, no screenshot, not a click,
+    /// the model found nothing, or its endpoint failed — the general VLM
+    /// prompt takes over.
+    func ground(_ intent: AXPolicy.Intent, observation: Snapshot) async -> Decision? {
+        guard let grounder, !intent.arg.isEmpty,
+              ["click", "klik", "press", "tekan", "tap"].contains(intent.verb),
+              AXPolicy.keyNames(intent.arg) == nil,
+              let path = observation.screenshotPath,
+              let img = Self.downscaledJPEG(path: path),
+              let p = try? await grounder.locate(intent.arg, screenshotBase64: img) ?? nil else { return nil }
+        return Decision(action: .click(x: p.x, y: p.y), confidence: 0.8,
+                        rationale: "grounded '\(intent.arg)' via \(grounder.endpoint.model)")
     }
 
     /// Which intent to ground next: the count of consumed intents, capped.

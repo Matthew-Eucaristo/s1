@@ -1746,7 +1746,7 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
 @Test func vlmFastPathSkipsModelForGroundingFreeIntents() async throws {
     // Port 9 (discard) — any model call would throw; fast-path intents never make one.
     let pol = VLMPolicy(endpoint: Endpoints.vlm(base: "http://127.0.0.1:9/v1", model: "none"),
-                        useScreenshot: false)
+                        useScreenshot: false, grounder: nil)
     let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
                        windows: [], axTree: nil, screenshotPath: nil)
     let d = try await pol.decide(observation: obs, goal: "buka Notes lalu ketik halo", history: [])
@@ -1754,4 +1754,25 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(d.rationale.hasPrefix("fast path"))
     let slow = await VLMPolicy.fastPath(.init(verb: "klik", arg: "Save"), observation: obs)
     #expect(slow == nil)
+}
+
+@Test func grounderParsesCommonReplyShapes() {
+    func pt(_ s: String) -> [Double]? { Grounder.parsePoint(s).map { [$0.x, $0.y] } }
+    #expect(pt("(412, 88)") == [412, 88])
+    #expect(pt("[500,500]") == [500, 500])
+    #expect(pt("Thought: the 2nd icon.\nAction: click(start_box='(197,525)')") == [197, 525])
+    #expect(pt("<point>10 990</point>") == [10, 990])
+    #expect(pt(#"{"x": 300, "y": 700}"#) == [300, 700])
+    #expect(pt(#"{"bbox_2d": [100, 200, 300, 400], "label": "Save"}"#) == [200, 300])
+    #expect(pt("<think>at (5,5)?</think>(640, 360)") == [640, 360])
+    #expect(pt("(1920, 1080)") == nil)   // pixel space, not [0,1000] — refuse
+    #expect(pt("not found") == nil)
+}
+
+@Test func grounderIsOptIn() {
+    #expect(Endpoints.grounder(env: [:], config: S1Config()) == nil)
+    let e = Endpoints.grounder(env: ["S1_GROUNDER_MODEL": "holo"],
+                               config: S1Config(vlm: .init(base: "http://h:1/v1")))
+    #expect(e?.model == "holo")
+    #expect(e?.baseURL == "http://h:1/v1")
 }

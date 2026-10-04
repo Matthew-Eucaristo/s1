@@ -164,7 +164,9 @@ struct ConfigCmd: AsyncParsableCommand {
         }
         print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
         print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
-        print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_NUM_CTX")
+        let grounder = Endpoints.grounder()
+        print("grounder → \(grounder.map { "\($0.baseURL) model=\($0.model)" } ?? "none (VLM grounds clicks itself)")")
+        print("env overrides: S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_GROUNDER_BASE/S1_GROUNDER_MODEL/S1_GROUNDER_KEY, S1_NUM_CTX")
         let cfg = S1Config.load()
         // The CLI honors these too — surface the values a flag-less run
         // will actually get (flag → config → default).
@@ -177,7 +179,7 @@ struct ConfigCmd: AsyncParsableCommand {
         // Reachability: a misconfigured brain is the #1 user-facing failure —
         // say it plainly instead of failing mid-run.
         print("endpoints:")
-        for (label, ep) in [("vlm", vlm), ("s2", s2)] {
+        for (label, ep) in [("vlm", vlm), ("s2", s2)] + (grounder.map { [("grounder", $0)] } ?? []) {
             print("  \(label) \(await endpointStatus(ep))")
         }
     }

@@ -218,6 +218,24 @@ resolved and where to edit; the app writes the same file, so GUI settings
 apply to the CLI too. To write a custom brain (a `Policy` or `Reasoner`
 conformance — swap internals, not the loop), see `docs/adding-a-brain.md`.
 
+### Three roles, any models
+
+| Role | What it does | Good picks on a 16 GB Mac |
+| --- | --- | --- |
+| **S1 brain** (`vlm`) | one decision per step; grammar-only steps (open/type/keys/wait) skip it entirely | `qwen3-vl:8b`, `qwen3-vl:4b`, `gemma3:4b` |
+| **Click grounder** (optional) | GUI-trained model that turns "click Save" + screenshot into a point — asked only for click steps the AX tree can't resolve | `ahmadwaqar/holo-3.1:0.8b` / `:4b` (Holo-3.1, Apache 2.0) — any model answering in normalized `[0,1000]` coords works (MAI-UI, GUI-Owl, Qwen3-VL) |
+| **S2 reasoner** | escalation on low confidence | local `qwen3:8b`, or any cloud OpenAI-compatible API |
+
+Click order: exact AX label match (no model) → grounder → general VLM.
+Grounder config: `"grounder": {"model": "ahmadwaqar/holo-3.1:0.8b"}` in
+`~/.s1/config.json` (base defaults to the VLM's server) or
+`S1_GROUNDER_MODEL`/`S1_GROUNDER_BASE`/`S1_GROUNDER_KEY`.
+
+S2 is plain OpenAI `/chat/completions`, so subscriptions with a compatible
+endpoint drop in by URL + key — e.g. OpenCode Go
+(`"s2": {"base": "https://opencode.ai/zen/go/v1", "model": "glm-5.3", "key": "…"}`),
+OpenRouter, Groq, OpenAI.
+
 ### Getting a model
 
 Nothing to download for the `ax` brain — it's fully deterministic. For
