@@ -175,6 +175,10 @@ public final class Serve: @unchecked Sendable {
         let prev = listenTask
         listenTask = Task { [weak self] in
             _ = await prev?.value
+            // emit(.listening) handlers run synchronously — one that
+            // toggled back to sleep leaves state idle while this task
+            // would grab the mic anyway. Re-check at run time.
+            guard self?.state == .listening else { return }
             await self?.listenLoop()
         }
     }
