@@ -1742,3 +1742,16 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
         "verifying sha256 digest")
     #expect(ModelPull.stripANSI("clean line") == "clean line")
 }
+
+@Test func vlmFastPathSkipsModelForGroundingFreeIntents() async throws {
+    // Port 9 (discard) — any model call would throw; fast-path intents never make one.
+    let pol = VLMPolicy(endpoint: Endpoints.vlm(base: "http://127.0.0.1:9/v1", model: "none"),
+                        useScreenshot: false)
+    let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
+                       windows: [], axTree: nil, screenshotPath: nil)
+    let d = try await pol.decide(observation: obs, goal: "buka Notes lalu ketik halo", history: [])
+    if case .openApp(let n)? = d.action { #expect(n == "Notes") } else { Issue.record("expected openApp") }
+    #expect(d.rationale.hasPrefix("fast path"))
+    let slow = await VLMPolicy.fastPath(.init(verb: "klik", arg: "Save"), observation: obs)
+    #expect(slow == nil)
+}

@@ -6,6 +6,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
 ## [Unreleased]
 
 ### Added
+- **VLM fast path** — grounding-free intents (open app, type, named keys,
+  wait, screenshot, scroll, done) resolve through the grammar with zero
+  model calls; only click/set/verify/free-form steps pay for the VLM.
+  "buka Notes" with a vision brain is now instant.
+- **Live transcript** (volatile partials), **SpeechDetector VAD**, run
+  phase status (observing/thinking/reasoning), `keep_alive=30m` +
+  JPEG screenshots + 4k ctx for local models, STT locale follows the
+  system language.
 - **`--policy auto` is the default** — a real decision model when one's
   reachable (probes the VLM endpoint once per command, 3s budget) and
   the deterministic `ax` grammar when it isn't. `s1 run`, `s1 listen`,

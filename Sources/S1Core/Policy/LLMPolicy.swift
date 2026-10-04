@@ -288,6 +288,9 @@ public struct VLMPolicy: Policy {
                             rationale: "all \(intents.count) intents consumed")
         }
         let current = intents[cursor]
+        if let fast = await Self.fastPath(current, observation: observation) {
+            return fast
+        }
         let hint: String
         switch current.verb {
         case "open", "buka", "launch":  hint = "openApp"
@@ -350,6 +353,25 @@ public struct VLMPolicy: Policy {
         }
         d?.rawReply = String(reply.prefix(800))
         return d!
+    }
+
+    /// Intents whose action needs no screen grounding — open an app, type
+    /// text, a named keystroke, wait, screenshot, scroll, done — resolve
+    /// deterministically through the grammar in microseconds. Only intents
+    /// that must find something ON screen (click/set/verify/free-form) pay
+    /// for a model call.
+    static func fastPath(_ intent: AXPolicy.Intent, observation: Snapshot) async -> Decision? {
+        guard let d = try? await AXPolicy().decide(observation: observation,
+                                                   goal: "\(intent.verb) \(intent.arg)",
+                                                   history: []),
+              let action = d.action, d.confidence >= 0.9 else { return nil }
+        switch action {
+        case .openApp, .typeText, .keyCombo, .wait, .captureScreenshot, .scroll, .done:
+            return Decision(action: action, confidence: d.confidence,
+                            rationale: "fast path (no model): \(d.rationale)")
+        default:
+            return nil
+        }
     }
 
     /// Which intent to ground next: the count of consumed intents, capped.
