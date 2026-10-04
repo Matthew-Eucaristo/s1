@@ -20,6 +20,23 @@ this project is pre-1.0 — breaking changes land in minor versions.
   `run.lock`/`serve.pid` self-heal via live-pid checks; companion feed
   caps at 300 records so serve mode can't grow memory forever.
 
+### Fixed
+- **`openApp` accepts `"name"`** — models emit `{"type":"openApp","name":"X"}`
+  (seen live in the wild); the codec only read `"app"`/`"text"` and the
+  confident step abstained. Both the decoder and the salvage path fixed.
+- **"tekan enter" presses Return** — it used to search the AX tree for a
+  node named "enter" and abstain on the most common follow-up a user says
+  after typing. `tekan`/`press` args that are key names or combos
+  ("enter", "spasi", "panah kiri", "cmd s") now emit `keyCombo`; "klik a"
+  still clicks the element named "a".
+- **Window Run honors `auto` brain** — the picker's Auto choice only
+  applied to the companion; the Run button silently used the grammar.
+- **Results-drain watchdog** — a `SpeechTranscriber.results` stream that
+  never terminates after finalize would wedge a serve turn forever;
+  the drain is now bounded (3s) and keeps whatever already landed.
+- **Destructive key combos escalate** — ⌘Q / ⌘⌥⎋ in a model's `keyCombo`
+  route to a human (unsaved-work / force-quit surface).
+
 ### Security
 - **Terminal-aware typing** — text destined for a terminal's command line
   (Terminal, iTerm2, kitty, alacritty, WezTerm, ghostty, Warp, Hyper,
