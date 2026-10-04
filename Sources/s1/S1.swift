@@ -102,7 +102,9 @@ struct RunCmd: AsyncParsableCommand {
         }
         let goalText: String
         if let task {
-            let p = "tasks/\(task).txt"
+            // A bare name reads the library (tasks/<name>.txt); an explicit
+            // path (contains "/" or ends .txt) is used as-is.
+            let p = (task.contains("/") || task.hasSuffix(".txt")) ? task : "tasks/\(task).txt"
             guard let g = try? String(contentsOfFile: p, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty else {
                 throw ValidationError("task file not found or empty: \(p)")

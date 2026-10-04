@@ -101,9 +101,15 @@ public enum RunReader {
                 if case .keyCombo = action, liveObs?.secureTextFocused == true {
                     verdict = .needsHuman(reason: "focused field is a secure text field")
                 }
-                if case .axSetValue(let ref, _) = action,
-                   S1SecureField.isSecure(ref, in: liveObs?.axTree) {
-                    verdict = .needsHuman(reason: "target is a secure text field")
+                // Same secure-field coverage as the live loop: any targeted
+                // write/perform on a password box escalates.
+                switch action {
+                case .axPress(let ref), .axSetValue(let ref, _), .axAction(let ref, _),
+                     .axSetAttribute(let ref, _, _):
+                    if S1SecureField.isSecure(ref, in: liveObs?.axTree) {
+                        verdict = .needsHuman(reason: "target is a secure text field")
+                    }
+                default: break
                 }
                 // Replay of text into a terminal gets the command scan too —
                 // a recorded "ls" is fine, a recorded "rm file" isn't.

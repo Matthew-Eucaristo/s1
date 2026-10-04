@@ -228,8 +228,15 @@ public struct AgentLoop {
         if case .keyCombo = action, obs.secureTextFocused {
             verdict = .needsHuman(reason: "focused field is a secure text field")
         }
-        if case .axSetValue(let ref, _) = action, isSecureField(ref, in: obs.axTree) {
-            verdict = .needsHuman(reason: "target is a secure text field")
+        // Any targeted write/perform on a secure field escalates too — not
+        // just the text-carrying axSetValue.
+        switch action {
+        case .axPress(let ref), .axSetValue(let ref, _), .axAction(let ref, _),
+             .axSetAttribute(let ref, _, _):
+            if isSecureField(ref, in: obs.axTree) {
+                verdict = .needsHuman(reason: "target is a secure text field")
+            }
+        default: break
         }
         // Keystrokes into a terminal become commands on Return — text
         // headed there is scanned with the command-level list, so a plain

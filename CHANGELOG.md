@@ -21,6 +21,14 @@ this project is pre-1.0 — breaking changes land in minor versions.
   caps at 300 records so serve mode can't grow memory forever.
 
 ### Fixed
+- **Secure-field coverage extended** — `axPress`/`axAction`/`axSetAttribute`
+  targeting an `AXSecureTextField` now escalate to a human like `axSetValue`
+  already did: an AXConfirm or press can submit a login form, not just inject
+  text. Replay applies the same widened check against live trees.
+- **`--task` accepts literal paths** — `--task tasks/open-app.txt` (or any
+  path containing `/` / ending `.txt`) now resolves as given instead of
+  looking for `tasks/tasks/open-app.txt.txt`; bare names still read the
+  library.
 - **`openApp` accepts `"name"`** — models emit `{"type":"openApp","name":"X"}`
   (seen live in the wild); the codec only read `"app"`/`"text"` and the
   confident step abstained. Both the decoder and the salvage path fixed.

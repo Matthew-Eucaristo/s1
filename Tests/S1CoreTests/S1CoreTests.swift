@@ -281,6 +281,28 @@ private func jsonlDecoder() -> JSONDecoder {
     #expect(rep2.status == .done)
 }
 
+@Test func secureFieldPressAndAttributeEscalate() async throws {
+    // AXPress/AXConfirm/AXSelected on a password box must reach a human too —
+    // a press or confirm can submit the form, not just inject text.
+    let field = AXNode(ref: "e5", role: "AXSecureTextField", title: "Password",
+                       desc: nil, value: nil, frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
+                      desc: nil, value: nil, frame: nil, children: [field])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    for a: Action in [.axPress(ref: "e5"),
+                      .axAction(ref: "e5", name: "AXConfirm"),
+                      .axSetAttribute(ref: "e5", attr: "AXSelected", value: true)] {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+        let logger = try RunLogger(goal: "test", root: dir, config: [:])
+        let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(observation: obs),
+                             actuator: DryRunActuator(), gate: SafetyGate())
+        let plan = ScriptedPolicy(steps: [.init(action: a, confidence: 1.0)])
+        let report = try await loop.run(goal: "g", policy: plan, logger: logger)
+        #expect(report.status == .needsHuman)
+    }
+}
+
 // MARK: - steps.jsonl format
 
 @Test func stepRecordSerializesToSingleJSONLine() throws {
