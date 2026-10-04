@@ -35,8 +35,18 @@ s1 serve --install          # optional: always-on listener (launchd, armed at lo
 Or grab the signed zip straight from
 [**Releases**](https://github.com/Matthew-Eucaristo/s1/releases/latest)
 (`S1-*-app.zip` — drag `S1.app` into /Applications; the `s1` CLI is inside
-`Contents/Resources/`). It's ad-hoc signed, so first launch needs the usual
-**right-click → Open** to pass Gatekeeper.
+`Contents/Resources/`).
+
+**First launch (beta, ad-hoc signed):** macOS 26 blocks unnotarized apps
+with "Apple could not verify S1 is free of malware" and no Open button.
+Either way works once:
+- **System Settings → Privacy & Security** → scroll down → "S1 was blocked"
+  → **Open Anyway**;
+- or remove the quarantine flag: `xattr -d com.apple.quarantine /Applications/S1.app`
+- or reinstall with `brew install --cask s1 --no-quarantine`.
+
+Proper notarization (Developer ID + `xcrun notarytool`) is on the roadmap
+for the 1.0 release.
 
 Remove it cleanly any time (one cask carries everything — `--zap` is the full wipe):
 
