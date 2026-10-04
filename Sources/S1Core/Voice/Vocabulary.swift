@@ -13,6 +13,7 @@ public enum Vocabulary {
     static let grammarWords = [
         "buka", "ketik", "klik", "tulis", "tunggu", "gulir", "geser",
         "tangkap", "tangkapan", "cek", "pastikan", "selesai", "tekan", "isi",
+        "spasi", "panah", "hapus",
         "lalu", "kemudian", "terus", "open", "type", "click", "write",
         "wait", "scroll", "screenshot", "verify", "done", "press", "key",
     ]
