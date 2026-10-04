@@ -113,6 +113,21 @@ this project is pre-1.0 — breaking changes land in minor versions.
   labels, `s1 status` details and `heard:` transcripts are control-strip-
   sanitized, so model output or a hostile app's AX title can't inject
   ANSI/OSC escape sequences into the CLI feed or serve.log.
+- **Unguarded CGEvent posts can't fake success** — drag's mouse-up, the
+  focus+click fallbacks (axPress/axSetValue), and scroll wheel events
+  used optional chaining: a failed event creation logged "clicked"/
+  "drag done"/"scroll" while posting nothing (a missing drag release
+  also left the button held). All now throw; interpolated mid-drag
+  points stay optional (cosmetic only).
+- **`serve-state.json` strips control chars** — a transcript or model
+  reply carrying tab/BEL landed raw in the state file's JSON string and
+  made `s1 status` unparseable.
+- **`s1 run --policy <bad>` error is honest** — it printed
+  `Optional("bad")`; now prints the name and lists valid policies.
+- **`s1 metrics`/`s1 replay` skip non-run entries** — a stray file or
+  folder in the artifacts root used to shadow the newest run (sorted-last
+  picked it and failed with "not a run dir"); default selection now
+  requires a `steps.jsonl` inside.
 ### Security
 - **Act-time secure-focus re-check** — the loop gates keystrokes against
   the observe-time snapshot, but a password prompt appearing between
