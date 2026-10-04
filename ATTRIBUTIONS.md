@@ -4,10 +4,18 @@ s1 builds in the open on public OSS. Components we depend on directly:
 
 | Project | License | Used for |
 |---|---|---|
-| [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) | Apache-2.0 | CLI |
-| [FluidInference/FluidAudio](https://github.com/FluidInference/FluidAudio) | Apache-2.0 | VAD (Silero), Parakeet STT, on-device TTS (optional, P4) |
-| [argmaxinc/WhisperKit](https://github.com/argmaxinc/WhisperKit) | MIT | multilingual on-device STT (optional, P4) |
-| [trycua/cua](https://github.com/trycua/cua) (`cua-driver`) | MIT | optional Act backend via MCP/subprocess (P2+) |
+| [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) | Apache-2.0 | CLI — the only package dependency |
+
+Evaluated for the voice/act layers and **not vendored** (s1 uses Apple's
+native SpeechAnalyzer + AVSpeech + CGEvent instead — same on-device
+privacy, zero extra deps). Listed so future contributors know the
+alternatives and where they'd slot in:
+
+| Project | License | Where it would slot |
+|---|---|---|
+| [FluidInference/FluidAudio](https://github.com/FluidInference/FluidAudio) | Apache-2.0 | VAD (Silero), Parakeet STT, on-device TTS |
+| [argmaxinc/WhisperKit](https://github.com/argmaxinc/WhisperKit) | MIT | multilingual on-device STT |
+| [trycua/cua](https://github.com/trycua/cua) (`cua-driver`) | MIT | optional Act backend via MCP/subprocess |
 | [steipete/Peekaboo](https://github.com/steipete/Peekaboo) + [AXorcist](https://github.com/steipete/AXorcist) | MIT | design reference; optional adapter for Perceive/Act |
 
 Model weights (downloaded by the user, never vendored):
