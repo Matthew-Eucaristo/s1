@@ -771,11 +771,17 @@ struct CleanCmd: AsyncParsableCommand {
     func run() async throws {
         let n = ArtifactStore.cleanAll(root: URL(fileURLWithPath: artifacts))
         print("removed \(n) run dir\(n == 1 ? "" : "s") from \(artifacts)")
-        // serve.log never rotates (launchd appends forever) — truncate it
-        // here too so `s1 clean` is the one-stop "reclaim ~/.s1" command.
-        // Truncating is safe: launchd keeps the fd, writes continue at 0.
+        // serve.log never rotates (launchd appends forever) — reclaim it
+        // here too so `s1 clean` is the one-stop `~/.s1` reset. But only
+        // when NO live daemon holds it: launchd's stdout fd keeps its own
+        // offset, so truncating under a running agent leaves the next
+        // write landing at the old offset — a sparse file of NULs.
         let log = S1Home.path + "/serve.log"
-        if FileManager.default.fileExists(atPath: log),
+        let daemonAlive = S1Runner.livePidHolder(
+            of: NSHomeDirectory() + "/.s1/serve.pid") != nil
+        if daemonAlive {
+            print("kept \(log) — a live listener holds it (`s1 stop` first)")
+        } else if FileManager.default.fileExists(atPath: log),
            let h = try? FileHandle(forWritingTo: URL(fileURLWithPath: log)) {
             try? h.truncate(atOffset: 0)
             try? h.close()
@@ -813,9 +819,13 @@ struct StatusCmd: AsyncParsableCommand {
             // it at the next turn — "stopping" until then. An idle companion
             // ignores the file entirely (wake() clears it), so don't claim
             // it's about to stop.
+            // The daemon only watches ITS kill file (the app watches
+            // s1-app-stop, the CLI watches s1-serve-stop) — a stale file
+            // for the other context must not claim "stopping".
+            let isApp = S1Runner.pidExePath(pid)?.contains(".app/") ?? false
+            let stopFile = NSTemporaryDirectory() + (isApp ? "s1-app-stop" : "s1-serve-stop")
             let stopPending = (daemonState == "listening" || daemonState == "runStart")
-                && (FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-serve-stop")
-                    || FileManager.default.fileExists(atPath: NSTemporaryDirectory() + "s1-app-stop"))
+                && FileManager.default.fileExists(atPath: stopFile)
             let mode = stopPending ? "stopping"
                 : daemonAlive && daemonState != nil ? "\(daemonState!)"
                 : "running"
