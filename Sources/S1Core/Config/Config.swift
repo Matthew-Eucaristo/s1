@@ -41,8 +41,6 @@ public struct S1Config: Codable, Sendable {
     /// The app's chosen System 1 ("auto" | "ax" | "vlm") — persisted so a
     /// restart keeps the brain the user picked.
     public var brain: String?
-    /// Whether the app escalates low-confidence steps to S2.
-    public var useS2: Bool?
     /// The app's floating notch HUD (status pill under the camera notch).
     public var notchHUD: Bool?
     /// Optional GUI-grounding specialist for click targets (see `Grounder`).
@@ -86,14 +84,13 @@ public struct S1Config: Codable, Sendable {
                 locale: String? = nil, speak: Bool? = nil,
                 vocabulary: [String]? = nil, recent: [String]? = nil,
                 vlmScreenshot: Bool? = nil, brain: String? = nil,
-                useS2: Bool? = nil, notchHUD: Bool? = nil,
+                notchHUD: Bool? = nil,
                 grounder: ModelEndpoint? = nil) {
         self.vlm = vlm; self.s2 = s2; self.locale = locale; self.speak = speak
         self.vocabulary = vocabulary
         self.recent = recent
         self.vlmScreenshot = vlmScreenshot
         self.brain = brain
-        self.useS2 = useS2
         self.notchHUD = notchHUD
         self.grounder = grounder
     }
@@ -126,7 +123,6 @@ public struct S1Config: Codable, Sendable {
         }
         if let s = s2, Endpoints.isLocal(s.base ?? "http://localhost:11434/v1"), (s.model ?? "gemma3:4b") == "gemma3:4b" {
             s2 = .init(base: Endpoints.defaultS2Base, model: Endpoints.defaultS2Model, key: s.key, numCtx: s.numCtx)
-            if useS2 == false { useS2 = true }
         }
     }
 

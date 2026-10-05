@@ -37,7 +37,7 @@ final class AppModel {
     var ttsVoice = "" { didSet { rearmServe() } }
     /// Hard steps always escalate to S2 — the safety design, not a toggle.
     /// Left as a var so model-assignment helpers can set it harmlessly.
-    var useS2 = true
+
     var speakReply = true { didSet { rearmServe() } }
     /// Voice interrupt (barge-in): talk over a run or the reply to stop it.
     var voiceInterrupt = true { didSet { rearmServe() } }
@@ -157,7 +157,7 @@ final class AppModel {
     }
 
     /// Installed row → wire it into the matching slot without re-downloading.
-    func useAsS2(_ name: String) { s2Model = name; useS2 = true }
+    func useAsS2(_ name: String) { s2Model = name }
     func useAsDecision(_ name: String) {
         decisionBase = "http://localhost:11434"; decisionModel = name
         rearmServe()   // the judge endpoint is resolved when serve arms
@@ -458,7 +458,7 @@ final class AppModel {
         cfg.recent = recentGoals
         cfg.vlmScreenshot = vlmScreenshot
         cfg.brain = brain.rawValue
-        cfg.useS2 = useS2
+
         cfg.notchHUD = notchHUD
         cfg.grounder = grounderModel.isEmpty ? nil
             : .init(base: cfg.grounder?.base, model: grounderModel,

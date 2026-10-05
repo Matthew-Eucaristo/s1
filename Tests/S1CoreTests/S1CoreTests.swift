@@ -2107,11 +2107,11 @@ private struct StubJudge: DecisionJudge {
 @Test func oldLocalDefaultsMigrateToHostedOnce() throws {
     let path = NSTemporaryDirectory() + "cfg-\(UUID().uuidString).json"
     defer { try? FileManager.default.removeItem(atPath: path) }
-    var old = S1Config(s2: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"), useS2: false)
+    var old = S1Config(s2: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"))
     old.decision = .init(base: "http://localhost:11434", model: "nimble")
     try old.save(to: path)
     let m = S1Config.load(from: path)
-    #expect(m.decision?.model == "jev-latest" && m.s2?.model == "deepseek-v4.1-flash" && m.useS2 == true)
+    #expect(m.decision?.model == "jev-latest" && m.s2?.model == "deepseek-v4.1-flash")
     // A user's own local pick after migration is left alone.
     var mine = m; mine.s2 = .init(base: "http://localhost:11434/v1", model: "gemma3:4b")
     try mine.save(to: path)
