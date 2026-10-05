@@ -53,6 +53,9 @@ public struct S1Config: Codable, Sendable {
     public var decision: ModelEndpoint?
     /// TTS voice identifier ("" / nil = best installed voice per language).
     public var voice: String?
+    /// Which built-in defaults this file was written under (nil = pre-hosted).
+    public var defaultsVersion: Int?
+    public static let currentDefaults = 2
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
@@ -76,10 +79,27 @@ public struct S1Config: Codable, Sendable {
     /// config is a convenience, not a gate.
     public static func load(from path: String = S1Config.path) -> S1Config {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let c = try? JSONDecoder().decode(S1Config.self, from: data) else {
+              var c = try? JSONDecoder().decode(S1Config.self, from: data) else {
             return S1Config()
         }
+        c.migrateToHostedDefaults()
         return c
+    }
+
+    /// Files written before the hosted defaults pinned the old local ones
+    /// (the app always saves every field). Move only untouched old defaults
+    /// — local nimble judge, local gemma3:4b S2, S2 off — to Jev + OpenCode
+    /// Go; anything the user picked themselves stays. Keys are kept.
+    public mutating func migrateToHostedDefaults() {
+        guard (defaultsVersion ?? 0) < Self.currentDefaults else { return }
+        defaultsVersion = Self.currentDefaults
+        if let d = decision, Endpoints.isLocal(d.base ?? "http://localhost:11434"), d.model == "nimble" {
+            decision = .init(base: Endpoints.defaultDecisionBase, model: Endpoints.defaultDecisionModel, key: d.key)
+        }
+        if let s = s2, Endpoints.isLocal(s.base ?? "http://localhost:11434/v1"), (s.model ?? "gemma3:4b") == "gemma3:4b" {
+            s2 = .init(base: Endpoints.defaultS2Base, model: Endpoints.defaultS2Model, key: s.key, numCtx: s.numCtx)
+            if useS2 == false { useS2 = true }
+        }
     }
 
     public func save(to path: String = S1Config.path) throws {

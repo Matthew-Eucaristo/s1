@@ -130,7 +130,7 @@ private struct KeyRow: View {
         let saved = model.keyRevision >= 0 && model.hasKey(role)
         LabeledContent("API key") {
             HStack {
-                SecureField(saved ? "saved in Keychain — type to replace" : "none (local servers need none)",
+                SecureField(saved ? "saved in Keychain — type to replace" : "paste API key",
                             text: $draft)
                     .textFieldStyle(.roundedBorder)
                 Button("Save") { model.saveKey(draft, for: role); draft = "" }

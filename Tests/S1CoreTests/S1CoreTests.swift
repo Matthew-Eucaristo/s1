@@ -2087,3 +2087,23 @@ private struct StubJudge: DecisionJudge {
     for _ in 0 ..< 9 { e.feed(dB: -40, seconds: 0.1) }
     #expect(e.state == .ended)
 }
+
+@Test func oldLocalDefaultsMigrateToHostedOnce() throws {
+    let path = NSTemporaryDirectory() + "cfg-\(UUID().uuidString).json"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    var old = S1Config(s2: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"), useS2: false)
+    old.decision = .init(base: "http://localhost:11434", model: "nimble")
+    try old.save(to: path)
+    let m = S1Config.load(from: path)
+    #expect(m.decision?.model == "jev-latest" && m.s2?.model == "deepseek-v4.1-flash" && m.useS2 == true)
+    // A user's own local pick after migration is left alone.
+    var mine = m; mine.s2 = .init(base: "http://localhost:11434/v1", model: "gemma3:4b")
+    try mine.save(to: path)
+    #expect(S1Config.load(from: path).s2?.model == "gemma3:4b")
+    // Custom choices pre-migration are kept too.
+    var custom = S1Config(s2: .init(base: "https://openrouter.ai/api/v1", model: "x"))
+    custom.decision = .init(base: "http://localhost:11434", model: "tev1")
+    try custom.save(to: path)
+    let c = S1Config.load(from: path)
+    #expect(c.s2?.model == "x" && c.decision?.model == "tev1")
+}
