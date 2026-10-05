@@ -316,12 +316,12 @@ public struct SpeechToText: Sendable {
     /// `onPartial` receives the live best-guess transcript while the user is
     /// still speaking — the volatile results Apple emits between finals —
     /// so a UI can show words landing instead of looking dead mid-utterance.
-    public func transcribeMic(maxSeconds: Double = 30,
+    public func transcribeMic(maxSeconds: Double = 30, control: MicControl? = nil,
                             onPartial: (@Sendable (String) -> Void)? = nil) async throws -> String {
-        try await transcribeMicDetailed(maxSeconds: maxSeconds, onPartial: onPartial).text
+        try await transcribeMicDetailed(maxSeconds: maxSeconds, control: control, onPartial: onPartial).text
     }
 
-    public func transcribeMicDetailed(maxSeconds: Double = 30,
+    public func transcribeMicDetailed(maxSeconds: Double = 30, control: MicControl? = nil,
                                       onPartial: (@Sendable (String) -> Void)? = nil) async throws -> Heard {
         // No input device at all → clean error. Without this, installTap throws
         // an NSException (uncatchable from Swift) and kills the whole process —
@@ -332,17 +332,17 @@ public struct SpeechToText: Sendable {
         let lanes = await lanes(reportingOptions: [.volatileResults])
         if !lanes.isEmpty {
             return try await transcribeMicAnalyzer(maxSeconds: maxSeconds, lanes: lanes,
-                                                  onPartial: onPartial)
+                                                  control: control, onPartial: onPartial)
         }
         let l = legacyMicLocale
-        return Heard(text: try await transcribeMicLegacy(maxSeconds: maxSeconds, locale: l, onPartial: onPartial),
+        return Heard(text: try await transcribeMicLegacy(maxSeconds: maxSeconds, locale: l, control: control, onPartial: onPartial),
                      locale: l)
     }
 
     /// Seconds of unchanged transcript after words arrived that end a turn.
     static let textSettle = 1.2
 
-    private func transcribeMicLegacy(maxSeconds: Double, locale: Locale,
+    private func transcribeMicLegacy(maxSeconds: Double, locale: Locale, control: MicControl?,
                                      onPartial: (@Sendable (String) -> Void)?) async throws -> String {
         guard let rec = SFSpeechRecognizer(locale: locale), rec.isAvailable else {
             throw S1Error.aborted("no speech recognizer for \(locale.identifier)")
@@ -407,8 +407,11 @@ public struct SpeechToText: Sendable {
         while waited < maxSeconds {
             if failure.value != nil { endReason = "error"; break }
             if finished.get { endReason = "final"; break }
-            if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
-            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
+            if control?.stopped == true { endReason = "released"; break }
+            if control?.holding != true {
+                if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
+                if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
+            }
             try await Task.sleep(nanoseconds: 100_000_000)
             waited += 0.1
         }
@@ -428,6 +431,7 @@ public struct SpeechToText: Sendable {
     /// One mic tap feeds every candidate-language analyzer the same
     /// converted buffers; the VAD rides on the first lane only.
     private func transcribeMicAnalyzer(maxSeconds: Double, lanes: [(Locale, SpeechTranscriber)],
+                                       control: MicControl?,
                                        onPartial: (@Sendable (String) -> Void)?) async throws -> Heard {
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -547,6 +551,9 @@ public struct SpeechToText: Sendable {
         while waited < maxSeconds {
             try await Task.sleep(nanoseconds: 150_000_000)
             waited += 0.15
+            if control?.stopped == true { endReason = "released"; break }
+            // Hold-to-talk: the key, not the VAD, ends the turn.
+            if control?.holding == true { continue }
             if speechEnded.get { endReason = "speechDetector"; break }
             if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
             // The recognizer is a VAD too: words stopped changing → turn over.
@@ -776,4 +783,18 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         finished = nil
         lock.unlock()
     }
+}
+
+/// External control over a mic turn — hold-to-talk and push-to-stop.
+/// `holding` suspends VAD end-of-turn; `stopped` ends the turn now.
+public final class MicControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _holding = false, _stopped = false
+    public init(holding: Bool = false) { _holding = holding }
+    public var holding: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _holding }
+        set { lock.lock(); _holding = newValue; lock.unlock() }
+    }
+    public var stopped: Bool { lock.lock(); defer { lock.unlock() }; return _stopped }
+    public func stop() { lock.lock(); _stopped = true; lock.unlock() }
 }

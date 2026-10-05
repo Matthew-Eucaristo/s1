@@ -707,6 +707,55 @@ final class AppModel {
         }
     }
 
+    // ---- dictation (⌃⌥D): speech → text pasted into the focused app ----
+    private var dictation: MicControl?
+    private var dictationDownAt = Date.distantPast
+
+    /// Hold ⌃⌥D to talk (release ends the turn); a quick tap starts a
+    /// VAD-ended turn, and a second tap stops it early.
+    func dictationKeyDown() {
+        if let d = dictation { d.stop(); return }
+        let control = MicControl(holding: true)
+        dictation = control
+        dictationDownAt = Date()
+        let target = NSWorkspace.shared.frontmostApplication
+        Task { await dictate(control, into: target) }
+    }
+
+    func dictationKeyUp() {
+        guard let d = dictation else { return }
+        if Date().timeIntervalSince(dictationDownAt) > 0.4 { d.stop() } else { d.holding = false }
+    }
+
+    private func dictate(_ control: MicControl, into target: NSRunningApplication?) async {
+        defer { dictation = nil }
+        guard !listening, !running, serve?.state == .idle || serve == nil else {
+            status = "busy — stop the current listen/run before dictating"; return
+        }
+        do { try S1Runner.claimMic() } catch { status = "mic is in use"; return }
+        defer { S1Runner.releaseMic() }
+        listening = true
+        transcript = ""
+        defer { listening = false }
+        do {
+            let text = try await stt.transcribeMic(maxSeconds: 120, control: control) { p in
+                Task { @MainActor in self.transcript = p }
+            }.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { status = "heard nothing"; return }
+            transcript = text
+            if AXIsProcessTrusted() {
+                LauncherController.shared.paste(text, restore: true, into: target)
+                status = "dictated \(text.count) chars"
+            } else {
+                let pb = NSPasteboard.general
+                pb.clearContents(); pb.setString(text, forType: .string)
+                status = "dictation copied — press ⌘V (grant Accessibility to paste automatically)"
+            }
+        } catch {
+            status = "mic: \(error.localizedDescription)"
+        }
+    }
+
     /// Goals the user has run, newest first — offered back for quick reruns.
     private(set) var recentGoals: [String] = []
 

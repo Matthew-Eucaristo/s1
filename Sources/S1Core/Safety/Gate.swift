@@ -158,6 +158,12 @@ public struct SafetyGate: Sendable {
                 return .needsHuman(
                     reason: "⌃⌥Space is s1's own wake hotkey — it would toggle the agent's listener")
             }
+            if ctrl && opt && ks.contains("d") {
+                return .needsHuman(reason: "⌃⌥D is s1's dictation hotkey — it would open the mic mid-run")
+            }
+            if opt && !ctrl && !cmd && !ks.isDisjoint(with: ["space", "spacebar"]) {
+                return .needsHuman(reason: "⌥Space is s1's launcher hotkey — it would steal focus mid-run")
+            }
         }
         for payload in action.textPayloads {
             for rule in Self.denyPatterns {

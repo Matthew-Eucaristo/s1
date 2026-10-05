@@ -14,19 +14,37 @@ final class LauncherController: NSObject, NSWindowDelegate {
     let state = LauncherState()
     private var panel: LauncherPanel?
     private var hotKeyRef: EventHotKeyRef?
+    private var dictationRef: EventHotKeyRef?
     private var clipTask: Task<Void, Never>?
     private var lastChange = NSPasteboard.general.changeCount
     private var ownChange = -1
 
     func install() {
         guard hotKeyRef == nil else { return }
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            Task { @MainActor in LauncherController.shared.toggle() }
+        var specs = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+                     EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+            let which = hk.id
+            Task { @MainActor in
+                switch (which, pressed) {
+                case (1, true): LauncherController.shared.toggle()
+                case (2, true): AppModel.shared.dictationKeyDown()
+                case (2, false): AppModel.shared.dictationKeyUp()
+                default: break
+                }
+            }
             return noErr
-        }, 1, &spec, nil, nil)
-        let id = EventHotKeyID(signature: OSType(0x7331_6C63 /* s1lc */), id: 1)
-        RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        }, 2, &specs, nil, nil)
+        let sig = OSType(0x7331_6C63 /* s1lc */)
+        RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), EventHotKeyID(signature: sig, id: 1),
+                            GetApplicationEventTarget(), 0, &hotKeyRef)
+        // ⌃⌥D dictation: hold to talk, or tap to start and let VAD end it.
+        RegisterEventHotKey(UInt32(kVK_ANSI_D), UInt32(controlKey | optionKey), EventHotKeyID(signature: sig, id: 2),
+                            GetApplicationEventTarget(), 0, &dictationRef)
         startClipboardWatch()
     }
 
@@ -104,7 +122,7 @@ final class LauncherController: NSObject, NSWindowDelegate {
     }
 
     /// Paste into the app you came from; snippets put your clipboard back.
-    private func paste(_ text: String, restore: Bool, into app: NSRunningApplication?) {
+    func paste(_ text: String, restore: Bool, into app: NSRunningApplication?) {
         let pb = NSPasteboard.general
         let previous = restore ? pb.string(forType: .string) : nil
         setClipboard(text)

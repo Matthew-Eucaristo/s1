@@ -2260,3 +2260,24 @@ private struct DelegatingReasoner: Reasoner {
     #expect(!Snippets.expand("{date}").contains("{"))
     #expect(Snippets.expand("x") == "x")
 }
+
+@Test func gateBlocksOwnLauncherAndDictationHotkeys() {
+    let g = SafetyGate()
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["ctrl", "opt", "d"])) else {
+        Issue.record("dictation hotkey not escalated"); return
+    }
+    guard case .needsHuman = g.evaluate(.keyCombo(keys: ["opt", "space"])) else {
+        Issue.record("launcher hotkey not escalated"); return
+    }
+    if case .needsHuman = g.evaluate(.keyCombo(keys: ["cmd", "space"])) {
+        Issue.record("Spotlight chord wrongly blocked")
+    }
+}
+
+@Test func micControlHoldAndStop() {
+    let c = MicControl(holding: true)
+    #expect(c.holding && !c.stopped)
+    c.holding = false
+    c.stop()
+    #expect(!c.holding && c.stopped)
+}

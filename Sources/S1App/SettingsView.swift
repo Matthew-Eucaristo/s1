@@ -43,6 +43,8 @@ private struct GeneralSettings: View {
                     set: { _ in model.toggleLoginItem() }))
                 Toggle("Notch status pill", isOn: $model.notchHUD)
                 LabeledContent("Wake") { Text("⇧⇧  or  ⌃⌥Space  ·  ⌘⇧L in the app").foregroundStyle(.secondary) }
+                LabeledContent("Launcher") { Text("⌥Space").foregroundStyle(.secondary) }
+                LabeledContent("Dictate") { Text("⌃⌥D — hold to talk, or tap; text pastes where you type").foregroundStyle(.secondary) }
             }
         }
         .formStyle(.grouped)
