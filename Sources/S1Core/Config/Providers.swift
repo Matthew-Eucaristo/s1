@@ -19,14 +19,38 @@ public struct ProviderPreset: Codable, Sendable, Equatable {
     /// Provider-side voice name for TTS presets ("troy", "alloy") —
     /// unrelated to the local Apple voice picker. nil elsewhere.
     public var voice: String?
+    /// Provider family id ("groq", "openai", "gemini") — presets sharing a
+    /// family appear as one provider in the Connect list, with a pill per
+    /// role they cover. nil = its own single-role family.
+    public var family: String?
 
     public init(id: String, label: String, role: String, base: String,
                 model: String, note: String? = nil, recommended: Bool? = nil,
-                voice: String? = nil) {
+                voice: String? = nil, family: String? = nil) {
         self.id = id; self.label = label; self.role = role
         self.base = base; self.model = model
         self.note = note; self.recommended = recommended
-        self.voice = voice
+        self.voice = voice; self.family = family
+    }
+}
+
+/// A provider as the user thinks of it: one account, one API key, several
+/// roles it can fill. Derived by grouping presets on `family` — the
+/// Connect list in Settings renders these with a pill per covered role.
+public struct ProviderFamily: Sendable, Equatable {
+    public var id: String
+    /// Display name — "Groq", "OpenAI". Derived from the first preset's
+    /// label (text before " · "), or titlecased id when that's empty.
+    public var name: String
+    /// Setup hint lifted from the family's most informative note.
+    public var note: String?
+    /// Every preset in the family — the "Connect" action applies them all.
+    public var presets: [ProviderPreset]
+    /// Role tags for the pills, in fixed display order.
+    public var roles: [String] {
+        let order = ["decision", "vlm", "grounder", "s2", "stt", "tts"]
+        let have = Set(presets.map(\.role))
+        return order.filter { have.contains($0) }
     }
 }
 
@@ -52,89 +76,133 @@ public enum Providers {
         .init(id: "typesafe-jev", label: "TypeSafe · Jev (recommended)",
               role: "decision", base: Endpoints.defaultDecisionBase,
               model: Endpoints.defaultDecisionModel,
-              note: "get a key at typesafe.ai", recommended: true),
+              note: "get a key at typesafe.ai", recommended: true,
+              family: "typesafe"),
         .init(id: "liquid-d1-free", label: "Liquid AI · d1 free tier (vision)",
               role: "decision", base: "https://api.liquid.ai/decisions",
-              model: "d1:free", note: "console.liquid.ai, `liquid_…` key"),
+              model: "d1:free", note: "console.liquid.ai, `liquid_…` key",
+              family: "liquid"),
         .init(id: "liquid-d1", label: "Liquid AI · d1 (vision)",
               role: "decision", base: "https://api.liquid.ai/decisions", model: "d1",
-              note: "console.liquid.ai, `liquid_…` key"),
+              note: "console.liquid.ai, `liquid_…` key", family: "liquid"),
         .init(id: "cf-clef-flash", label: "Cloudflare · Clef Flash (Workers AI, vision)",
               role: "decision",
               base: "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef-flash",
-              model: "clef-flash", note: "API token; replace <ACCOUNT_ID>"),
+              model: "clef-flash", note: "API token; replace <ACCOUNT_ID>",
+              family: "cloudflare"),
         .init(id: "cf-clef", label: "Cloudflare · Clef (Workers AI, vision)",
               role: "decision",
               base: "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef",
-              model: "clef", note: "API token; replace <ACCOUNT_ID>"),
+              model: "clef", note: "API token; replace <ACCOUNT_ID>",
+              family: "cloudflare"),
+        .init(id: "cf-llama", label: "Cloudflare · Workers AI Llama (OpenAI-compat)",
+              role: "s2",
+              base: "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1",
+              model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+              note: "API token; replace <ACCOUNT_ID>", family: "cloudflare"),
         .init(id: "ollama-nimble", label: "Local · Ollama nimble 9B (advanced)",
-              role: "decision", base: "http://localhost:11434", model: "nimble"),
+              role: "decision", base: "http://localhost:11434", model: "nimble",
+              family: "ollama"),
         .init(id: "ollama-tev1", label: "Local · Ollama tev1 4B (advanced)",
-              role: "decision", base: "http://localhost:11434", model: "tev1"),
+              role: "decision", base: "http://localhost:11434", model: "tev1",
+              family: "ollama"),
         .init(id: "ollama-clef-flash", label: "Local · Ollama clef-flash 9B (advanced)",
-              role: "decision", base: "http://localhost:11434", model: "clef-flash"),
+              role: "decision", base: "http://localhost:11434", model: "clef-flash",
+              family: "ollama"),
         .init(id: "off", label: "Off (AX-only decisions)", role: "decision",
-              base: Endpoints.defaultDecisionBase, model: ""),
+              base: Endpoints.defaultDecisionBase, model: "", family: "builtin"),
 
         // S2 reasoning.
         .init(id: "opencode-flash", label: "OpenCode Go · DeepSeek V4.1 Flash (recommended)",
               role: "s2", base: Endpoints.defaultS2Base,
               model: Endpoints.defaultS2Model,
-              note: "subscription key from opencode.ai", recommended: true),
+              note: "subscription key from opencode.ai", recommended: true,
+              family: "opencode"),
         .init(id: "opencode-pro", label: "OpenCode Go · DeepSeek V4 Pro",
               role: "s2", base: Endpoints.defaultS2Base, model: "deepseek-v4-pro",
-              note: "subscription key from opencode.ai"),
+              note: "subscription key from opencode.ai", family: "opencode"),
         .init(id: "deepseek-flash", label: "DeepSeek API · V4.1 Flash",
-              role: "s2", base: "https://api.deepseek.com", model: "deepseek-flash"),
+              role: "s2", base: "https://api.deepseek.com", model: "deepseek-flash",
+              family: "deepseek"),
         .init(id: "openrouter", label: "OpenRouter", role: "s2",
-              base: "https://openrouter.ai/api/v1", model: "openai/gpt-oss-120b"),
+              base: "https://openrouter.ai/api/v1", model: "openai/gpt-oss-120b",
+              note: "openrouter.ai key — any model id works", family: "openrouter"),
+        .init(id: "openrouter-claude", label: "OpenRouter · Claude", role: "s2",
+              base: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-4.5",
+              note: "OpenRouter key — Claude has no OpenAI-compatible API of its own",
+              family: "openrouter"),
+        .init(id: "openrouter-gpt", label: "OpenRouter · GPT", role: "s2",
+              base: "https://openrouter.ai/api/v1", model: "openai/gpt-5",
+              family: "openrouter"),
+        .init(id: "openrouter-gemini", label: "OpenRouter · Gemini", role: "s2",
+              base: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash",
+              family: "openrouter"),
         .init(id: "openai", label: "OpenAI", role: "s2",
-              base: "https://api.openai.com/v1", model: "gpt-5-mini"),
+              base: "https://api.openai.com/v1", model: "gpt-5-mini",
+              note: "platform.openai.com API key", family: "openai"),
+        .init(id: "gemini", label: "Google · Gemini (AI Studio)", role: "s2",
+              base: "https://generativelanguage.googleapis.com/v1beta/openai",
+              model: "gemini-2.5-flash", note: "aistudio.google.com API key",
+              family: "gemini"),
+        .init(id: "xai", label: "xAI · Grok", role: "s2",
+              base: "https://api.x.ai/v1", model: "grok-4-fast",
+              note: "console.x.ai API key", family: "xai"),
         .init(id: "groq", label: "Groq", role: "s2",
-              base: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b"),
+              base: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b",
+              family: "groq"),
         .init(id: "ollama-gemma", label: "Local · Ollama (advanced)", role: "s2",
-              base: "http://localhost:11434/v1", model: "gemma3:4b"),
+              base: "http://localhost:11434/v1", model: "gemma3:4b",
+              family: "ollama"),
 
         // S1 vision brain (advanced — off is recommended).
         .init(id: "vlm-off", label: "Off (recommended)", role: "vlm",
-              base: "", model: "", recommended: true),
+              base: "", model: "", recommended: true, family: "builtin"),
         .init(id: "opencode-vision", label: "OpenCode Go · DeepSeek V4 Flash Vision",
               role: "vlm", base: Endpoints.defaultS2Base,
               model: "deepseek-v4-flash-vision-exp",
-              note: "reuses the S2 key on the same provider"),
+              note: "reuses the S2 key on the same provider", family: "opencode"),
         .init(id: "openrouter-vlm", label: "OpenRouter", role: "vlm",
-              base: "https://openrouter.ai/api/v1", model: ""),
+              base: "https://openrouter.ai/api/v1", model: "",
+              family: "openrouter"),
+        .init(id: "gemini-vlm", label: "Google · Gemini vision", role: "vlm",
+              base: "https://generativelanguage.googleapis.com/v1beta/openai",
+              model: "gemini-2.5-flash", family: "gemini"),
+        .init(id: "xai-vlm", label: "xAI · Grok vision", role: "vlm",
+              base: "https://api.x.ai/v1", model: "grok-4", family: "xai"),
         .init(id: "ollama-vlm", label: "Local · Ollama gemma3:4b", role: "vlm",
-              base: "http://localhost:11434/v1", model: "gemma3:4b"),
+              base: "http://localhost:11434/v1", model: "gemma3:4b",
+              family: "ollama"),
 
         // STT — OpenAI-compatible /v1/audio/transcriptions.
         .init(id: "stt-apple", label: "Off · on-device Apple (default)", role: "stt",
-              base: "", model: "", recommended: true),
+              base: "", model: "", recommended: true, family: "builtin"),
         .init(id: "stt-groq-turbo", label: "Groq · Whisper Large v3 Turbo (fast)", role: "stt",
               base: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo",
-              note: "console.groq.com key"),
+              note: "console.groq.com key", family: "groq"),
         .init(id: "stt-groq", label: "Groq · Whisper Large v3 (most accurate)", role: "stt",
               base: "https://api.groq.com/openai/v1", model: "whisper-large-v3",
-              note: "console.groq.com key"),
+              note: "console.groq.com key", family: "groq"),
         .init(id: "stt-openai", label: "OpenAI · gpt-4o-mini-transcribe", role: "stt",
-              base: "https://api.openai.com/v1", model: "gpt-4o-mini-transcribe"),
+              base: "https://api.openai.com/v1", model: "gpt-4o-mini-transcribe",
+              family: "openai"),
         .init(id: "stt-local", label: "Local · OpenAI-compatible server (Speaches, NVIDIA NIM…)",
               role: "stt", base: "http://localhost:8000/v1",
-              model: "Systran/faster-whisper-large-v3"),
+              model: "Systran/faster-whisper-large-v3", family: "local"),
 
         // TTS — OpenAI-compatible /v1/audio/speech.
         .init(id: "tts-apple", label: "Off · Apple voices (default)", role: "tts",
-              base: "", model: "", recommended: true),
+              base: "", model: "", recommended: true, family: "builtin"),
         .init(id: "tts-groq", label: "Groq · Orpheus English", role: "tts",
               base: "https://api.groq.com/openai/v1", model: "canopylabs/orpheus-v1-english",
-              note: "console.groq.com key", voice: "troy"),
+              note: "console.groq.com key", voice: "troy", family: "groq"),
         .init(id: "tts-groq-id", label: "Groq · Orpheus Indonesian", role: "tts",
               base: "https://api.groq.com/openai/v1", model: "canopylabs/orpheus-v1-indonesian",
-              note: "console.groq.com key", voice: "troy"),
+              note: "console.groq.com key", voice: "troy", family: "groq"),
         .init(id: "tts-openai", label: "OpenAI · gpt-4o-mini-tts", role: "tts",
-              base: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy"),
+              base: "https://api.openai.com/v1", model: "gpt-4o-mini-tts", voice: "alloy",
+              family: "openai"),
         .init(id: "tts-local", label: "Local · OpenAI-compatible server", role: "tts",
-              base: "http://localhost:8000/v1", model: "tts-1"),
+              base: "http://localhost:8000/v1", model: "tts-1", family: "local"),
     ]
 
     /// Builtin ∪ user file. User entries sharing a builtin `id` replace it
@@ -167,6 +235,31 @@ public enum Providers {
     /// Presets for one role — what the settings menus render.
     public static func presets(role: ModelRole) -> [ProviderPreset] {
         all().filter { $0.role == role.rawValue }
+    }
+
+    /// Providers grouped for the Connect list — one row per family, pills
+    /// for the roles it covers. First-seen order follows the catalog, so
+    /// recommended providers float to the top. "builtin" (the on-device /
+    /// off rows) is excluded — there's nothing to connect.
+    public static func families() -> [ProviderFamily] {
+        var order: [String] = []
+        var grouped: [String: [ProviderPreset]] = [:]
+        for p in all() {
+            let f = p.family ?? p.id
+            if grouped[f] == nil { order.append(f); grouped[f] = [] }
+            grouped[f]?.append(p)
+        }
+        return order.compactMap { id in
+            guard id != "builtin", let ps = grouped[id] else { return nil }
+            // Display name = text before " · " in the first real label,
+            // falling back to a titlecased id.
+            let name = ps.lazy.map(\.label)
+                .first { !$0.isEmpty }?
+                .components(separatedBy: " · ").first ?? id.capitalized
+            return ProviderFamily(id: id, name: name,
+                                  note: ps.lazy.compactMap(\.note).first,
+                                  presets: ps)
+        }
     }
 
     /// Raw user file entries (empty when the file is absent/malformed).

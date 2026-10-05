@@ -95,6 +95,45 @@ public struct SpeechToText: Sendable {
     /// Apple's "contextual strings" on both the legacy and Analyzer paths.
     public var vocabulary: [String]
 
+    /// Turn-end detector: `.auto` adds Apple's SpeechDetector module to the
+    /// Analyzer path (with the energy endpointer as a second opinion);
+    /// `.energy` runs the RMS endpointer alone — deterministic, no detector
+    /// heuristics, and the only choice when the legacy recognizer runs.
+    public enum VadMode: String, Sendable { case auto, energy }
+
+    /// How eagerly turns end. `.low` tolerates thinking pauses (higher
+    /// speech margin, longer trailing silence); `.high` cuts the turn fast.
+    public enum VadSensitivity: String, Sendable {
+        case low, medium, high
+
+        var endpointerConfig: Endpointer.Config {
+            var c = Endpointer.Config()
+            switch self {
+            case .low:
+                c.margin = 13; c.minSpeech = 0.3; c.trailingSilence = 1.1; c.peakDrop = 24
+            case .high:
+                c.margin = 8; c.minSpeech = 0.15; c.trailingSilence = 0.55; c.peakDrop = 18
+            case .medium:
+                break
+            }
+            return c
+        }
+    }
+
+    public var vadMode: VadMode
+    public var vadSensitivity: VadSensitivity
+
+    /// config.json `vad`/`vadSensitivity` with `S1_VAD`/`S1_VAD_SENSITIVITY`
+    /// env overrides — resolved here so every SpeechToText construction
+    /// site (app, serve, CLI) hears the same setting without plumbing.
+    static func configuredVad(env: [String: String] = ProcessInfo.processInfo.environment,
+                              config: S1Config = .load()) -> (VadMode, VadSensitivity) {
+        let mode = VadMode(rawValue: (env["S1_VAD"] ?? config.vad ?? "auto").lowercased()) ?? .auto
+        let sens = VadSensitivity(rawValue: (env["S1_VAD_SENSITIVITY"]
+                                             ?? config.vadSensitivity ?? "medium").lowercased()) ?? .medium
+        return (mode, sens)
+    }
+
     public static var preferredLocale: Locale {
         Locale(identifier: Locale.preferredLanguages.first ?? "id-ID")
     }
@@ -103,9 +142,13 @@ public struct SpeechToText: Sendable {
         self.init(locales: [locale], vocabulary: vocabulary)
     }
 
-    public init(locales: [Locale], vocabulary: [String] = []) {
+    public init(locales: [Locale], vocabulary: [String] = [],
+                vadMode: VadMode? = nil, vadSensitivity: VadSensitivity? = nil) {
         self.locales = locales.isEmpty ? [SpeechToText.preferredLocale] : locales
         self.vocabulary = vocabulary
+        let (mode, sens) = Self.configuredVad()
+        self.vadMode = vadMode ?? mode
+        self.vadSensitivity = vadSensitivity ?? sens
     }
 
     /// The text heard plus the language it was heard in.
@@ -412,7 +455,7 @@ public struct SpeechToText: Sendable {
             req.endAudio()
             MicLevel.shared.reset()
         }
-        let endpointer = Endpointer()
+        let endpointer = Endpointer(config: vadSensitivity.endpointerConfig)
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             endpointer.feed(buffer: buffer, dB: MicLevel.push(buffer: buffer))
             req.append(buffer)
@@ -462,11 +505,20 @@ public struct SpeechToText: Sendable {
         }
         // SpeechDetector is Apple's VAD module — its results tell us when
         // speech actually ended rather than guessing from transcript-idle
-        // timeouts, so a mid-word pause can't cut the turn early.
-        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium),
-                                      reportResults: true)
+        // timeouts, so a mid-word pause can't cut the turn early. In
+        // `.energy` VAD mode it stays out of the pipeline entirely and the
+        // RMS endpointer is the only arbiter.
+        let detectorOptions: SpeechDetector.DetectionOptions
+        switch vadSensitivity {
+        case .low: detectorOptions = .init(sensitivityLevel: .low)
+        case .high: detectorOptions = .init(sensitivityLevel: .high)
+        case .medium: detectorOptions = .init(sensitivityLevel: .medium)
+        }
+        let detector = vadMode == .auto
+            ? SpeechDetector(detectionOptions: detectorOptions, reportResults: true)
+            : nil
         let analyzers = lanes.enumerated().map { i, lane in
-            SpeechAnalyzer(modules: i == 0 ? [lane.1, detector] : [lane.1])
+            SpeechAnalyzer(modules: i == 0 && detector != nil ? [lane.1, detector!] : [lane.1])
         }
         if let ctx = analysisContext {
             for a in analyzers { try? await a.setContext(ctx) }
@@ -474,7 +526,8 @@ public struct SpeechToText: Sendable {
         // Apple doc pattern: feed the analyzer its best available format —
         // the mic's native rate may differ, and odd hardware (8 kHz devices)
         // would otherwise hand the analyzer a format it can't use.
-        let modules: [any SpeechModule] = lanes.map(\.1) + [detector]
+        var modules: [any SpeechModule] = lanes.map(\.1)
+        if let detector { modules.append(detector) }
         let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules)
         let converter = best.flatMap { AVAudioConverter(from: format, to: $0) }
         let streams = lanes.map { _ in AsyncStream<AnalyzerInput>.makeStream() }
@@ -503,7 +556,7 @@ public struct SpeechToText: Sendable {
         if needsConversion, converter == nil {
             throw S1Error.aborted("cannot convert mic audio to the speech analyzer's format")
         }
-        let endpointer = Endpointer()
+        let endpointer = Endpointer(config: vadSensitivity.endpointerConfig)
         let recorder = record.flatMap { TurnRecorder(url: $0, format: format) }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             endpointer.feed(buffer: buffer, dB: MicLevel.push(buffer: buffer))
@@ -528,14 +581,17 @@ public struct SpeechToText: Sendable {
         let lastText = Locked<Date?>(nil)
         // VAD: speechDetected true→false means the utterance is over —
         // close the turn promptly even when the final segment lags.
-        detectorTask = Task {
-            var spoke = false
-            do {
-                for try await r in detector.results {
-                    if r.speechDetected { spoke = true }
-                    else if spoke { speechEnded.set(); break }
-                }
-            } catch { /* detector stream dying shouldn't kill the turn */ }
+        // `.energy` mode has no detector — the stream just never runs.
+        if let detector {
+            detectorTask = Task {
+                var spoke = false
+                do {
+                    for try await r in detector.results {
+                        if r.speechDetected { spoke = true }
+                        else if spoke { speechEnded.set(); break }
+                    }
+                } catch { /* detector stream dying shouldn't kill the turn */ }
+            }
         }
         for (i, (_, transcriber)) in lanes.enumerated() {
             let collected = collectors[i]
@@ -813,10 +869,16 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         if await speakCloud(text, language: language, timeout: timeout) { return }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
+                let gen = lock.withLock { generation }
                 let u = AVSpeechUtterance(string: text)
                 u.voice = Self.voice(for: language, pinned: voice)
                 await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
                     self.lock.lock()
+                    // A stop() that landed while we queued means stay
+                    // silent — same generation guard the cloud path uses.
+                    guard self.generation == gen else {
+                        self.lock.unlock(); c.resume(); return
+                    }
                     self.finished = c
                     self.lock.unlock()
                     self.synth.speak(u)

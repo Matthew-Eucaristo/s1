@@ -59,6 +59,10 @@ public final class Serve: @unchecked Sendable {
         public var languages: [Locale]
         /// Pinned TTS voice identifier (nil = best installed per language).
         public var voice: String?
+        /// Voice interrupt: while a run or the reply is in flight, a
+        /// sustained voice burst aborts it and the listener reopens for
+        /// the next command. Off = only the hotkey/kill switch stops work.
+        public var voiceInterrupt: Bool
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -75,7 +79,8 @@ public final class Serve: @unchecked Sendable {
                     isBusy: @escaping @Sendable () async -> Bool = {
                         S1Runner.anotherRunActive() },
                     languages: [Locale] = [],
-                    voice: String? = nil) {
+                    voice: String? = nil,
+                    voiceInterrupt: Bool = true) {
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -90,6 +95,7 @@ public final class Serve: @unchecked Sendable {
             self.isBusy = isBusy
             self.languages = languages
             self.voice = voice
+            self.voiceInterrupt = voiceInterrupt
         }
     }
 
@@ -300,6 +306,29 @@ public final class Serve: @unchecked Sendable {
     private func run(goal: String) async -> Bool {
         setState(.running)
         emit(.runStart, goal)
+        // Barge-in: the mic is otherwise closed for the whole run + reply,
+        // so "wait—"/"stop" said out loud would never be heard. The monitor
+        // is energy-only (near-free); voice processing's AEC keeps our own
+        // TTS from tripping it.
+        let barged = AtomicFlag()
+        var barge: BargeMonitor?
+        if config.voiceInterrupt {
+            barge = BargeMonitor { [weak self] in
+                barged.set()
+                self?.interrupted()
+            }
+            barge?.start()
+        }
+        defer {
+            barge?.stop()
+            if barged.get {
+                // The run aborted at its next step; consume the kill file
+                // the interrupt wrote so the loop's own kill check doesn't
+                // read it as "sleep the listener" — the user interrupted to
+                // say something NEW, so the next turn should still open.
+                try? FileManager.default.removeItem(atPath: config.killSwitch)
+            }
+        }
         var ok = true
         do {
             let (report, logger) = try await S1Runner.run(
@@ -317,8 +346,12 @@ public final class Serve: @unchecked Sendable {
                 })
             emit(.runDone, report.status.rawValue, dir: logger.runDir.path)
             // A kill file means the user cancelled — sleep must mean silent,
-            // so an aborted run never says "Stopped" after the fact.
-            if config.speak && !FileManager.default.fileExists(atPath: config.killSwitch) {
+            // so an aborted run never says "Stopped" after the fact. A
+            // barge-in sets its flag before the kill file, and it stays set
+            // through the defer — a user who talked over the run doesn't
+            // want a reply about it.
+            if config.speak && !barged.get
+               && !FileManager.default.fileExists(atPath: config.killSwitch) {
                 // Speak the truth: "done" is only said when it actually is.
                 let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
                 let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
@@ -345,6 +378,14 @@ public final class Serve: @unchecked Sendable {
             emit(.listening, "")
         }
         return ok
+    }
+
+    /// Barge-in callback (audio monitor queue): abort the in-flight run at
+    /// its next step check and cut any speech already playing.
+    private func interrupted() {
+        try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
+        speaker.stop()
+        emit(.heard, "voice interrupt")
     }
 
     /// True when the utterance is a "go to sleep" phrase (case/locale-insensitive,

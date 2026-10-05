@@ -42,6 +42,12 @@ final class AppModel {
     var ttsVoice = "" { didSet { rearmServe() } }
     var useS2 = true { didSet { rearmServe() } }
     var speakReply = true { didSet { rearmServe() } }
+    /// Voice interrupt (barge-in): talk over a run or the reply to stop it.
+    var voiceInterrupt = true { didSet { rearmServe() } }
+    /// Turn-end detector: "auto" = Apple SpeechDetector + energy; "energy"
+    /// = RMS endpointer only. Applied at SpeechToText construction.
+    var vadMode = "auto" { didSet { invalidateStt(); scheduleSave() } }
+    var vadSensitivity = "medium" { didSet { invalidateStt(); scheduleSave() } }
     /// Text fields debounce — rearming the hotkey per keystroke would tear
     /// the tap down and back up while the user is still typing.
     var vlmBase = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
@@ -236,7 +242,9 @@ final class AppModel {
     private var stt: SpeechToText {
         if let _stt { return _stt }
         let s = SpeechToText(locales: SpokenLanguage.candidates(for: locale),
-                             vocabulary: Vocabulary.assemble(custom: parsedVocab))
+                             vocabulary: Vocabulary.assemble(custom: parsedVocab),
+                             vadMode: SpeechToText.VadMode(rawValue: vadMode),
+                             vadSensitivity: SpeechToText.VadSensitivity(rawValue: vadSensitivity))
         _stt = s
         // Pre-warm the model assets so the first listen isn't cold-slow.
         Task { await s.warmup() }
@@ -267,6 +275,9 @@ final class AppModel {
         if let b = cfg.s2?.base { s2Base = b }
         if let m = cfg.s2?.model { s2Model = m }
         if let s = cfg.speak { speakReply = s }
+        if let v = cfg.voiceInterrupt { voiceInterrupt = v }
+        if let v = cfg.vad { vadMode = v }
+        if let v = cfg.vadSensitivity { vadSensitivity = v }
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
         if let r = cfg.recent { recentGoals = r }
         if let e = cfg.stt { sttBase = e.base ?? sttBase; sttModel = e.model ?? "" }
@@ -397,7 +408,8 @@ final class AppModel {
                 // `s1 run`/`s1 serve` holds ~/.s1/run.pid) owns the screen.
                 if await self?.running == true { return true }
                 return S1Runner.anotherRunActive() },
-                languages: langs, voice: voiceID),
+                languages: langs, voice: voiceID,
+                voiceInterrupt: voiceInterrupt),
             locale: langs[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in
@@ -470,6 +482,9 @@ final class AppModel {
         var cfg = S1Config.load()
         cfg.locale = locale
         cfg.speak = speakReply
+        cfg.voiceInterrupt = voiceInterrupt
+        cfg.vad = vadMode
+        cfg.vadSensitivity = vadSensitivity
         // Keep key/numCtx from the file — the app owns base/model, not the
         // credentials: wiping them on every save would break the CLI's auth.
         cfg.vlm = .init(base: vlmBase, model: vlmModel,
@@ -539,6 +554,29 @@ final class AppModel {
         } catch {
             cuaInstallLog += "✗ \(error.localizedDescription)\n"
         }
+    }
+
+    /// Connect a provider family: apply every preset it ships — one click
+    /// wires S1/S2/STT/TTS for that provider. Keys still save per role
+    /// (same key, pasted once per role, or reuse across roles via Keychain).
+    func connect(_ family: ProviderFamily) {
+        // One pick per role — recommended first, else the first listed.
+        var seen = Set<String>()
+        for p in family.presets.sorted(by: { ($0.recommended ?? false) && !($1.recommended ?? false) }) {
+            guard seen.insert(p.role).inserted else { continue }
+            switch p.role {
+            case "decision": decisionBase = p.base; decisionModel = p.model
+            case "s2": s2Base = p.base; s2Model = p.model
+            case "vlm": vlmBase = p.base; vlmModel = p.model
+            case "grounder": grounderModel = p.model
+            case "stt": sttBase = p.base; sttModel = p.model
+            case "tts":
+                ttsBase = p.base; ttsModel = p.model
+                if let v = p.voice { ttsCloudVoice = v }
+            default: break
+            }
+        }
+        status = "\(family.name) connected — save its API key under each pill's role below"
     }
 
     /// The live decision endpoint (typed-but-unsaved edits count); env wins.

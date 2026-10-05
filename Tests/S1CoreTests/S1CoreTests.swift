@@ -2612,3 +2612,177 @@ struct DoneEachSubgoal: Policy {
     // Sandbox off is a healthy default.
     #expect(items.contains { $0.what == "sandbox-runtime" && $0.level == .ok })
 }
+
+// MARK: - voice interrupt + VAD config
+
+@Test func voiceInterruptConfigResolution() {
+    var cfg = S1Config()
+    // Default (unset) = on.
+    #expect(S1Config.voiceInterruptEnabled(env: [:], config: cfg))
+    cfg.voiceInterrupt = false
+    #expect(!S1Config.voiceInterruptEnabled(env: [:], config: cfg))
+    cfg.voiceInterrupt = true
+    #expect(S1Config.voiceInterruptEnabled(env: [:], config: cfg))
+    // Env overrides the file either way.
+    #expect(!S1Config.voiceInterruptEnabled(env: ["S1_VOICE_INTERRUPT": "0"], config: cfg))
+    #expect(!S1Config.voiceInterruptEnabled(env: ["S1_VOICE_INTERRUPT": "off"], config: cfg))
+    cfg.voiceInterrupt = false
+    #expect(S1Config.voiceInterruptEnabled(env: ["S1_VOICE_INTERRUPT": "1"], config: cfg))
+    #expect(S1Config.voiceInterruptEnabled(env: ["S1_VOICE_INTERRUPT": "true"], config: cfg))
+}
+
+@Test @available(macOS 26, *) func configuredVadRespectsConfigAndEnv() {
+    var cfg = S1Config()
+    // Default: auto + medium.
+    #expect(SpeechToText.configuredVad(env: [:], config: cfg) == (.auto, .medium))
+    cfg.vad = "energy"; cfg.vadSensitivity = "high"
+    #expect(SpeechToText.configuredVad(env: [:], config: cfg) == (.energy, .high))
+    // Env beats the file; garbage falls back to defaults.
+    #expect(SpeechToText.configuredVad(env: ["S1_VAD": "auto"], config: cfg).0 == .auto)
+    cfg.vad = "nonsense"; cfg.vadSensitivity = "loud-ish"
+    #expect(SpeechToText.configuredVad(env: [:], config: cfg) == (.auto, .medium))
+}
+
+@Test @available(macOS 26, *) func vadSensitivityMapsEndpointerConfig() {
+    let low = SpeechToText.VadSensitivity.low.endpointerConfig
+    let med = SpeechToText.VadSensitivity.medium.endpointerConfig
+    let high = SpeechToText.VadSensitivity.high.endpointerConfig
+    // High ends turns fast; low tolerates pauses — monotone in both knobs.
+    #expect(high.trailingSilence < med.trailingSilence)
+    #expect(med.trailingSilence < low.trailingSilence)
+    #expect(high.margin < med.margin)
+    #expect(med.margin < low.margin)
+}
+
+@Test func atomicFlagStartsClearAndLatches() {
+    let f = AtomicFlag()
+    #expect(!f.get)
+    f.set()
+    #expect(f.get)
+    f.set()           // idempotent
+    #expect(f.get)
+}
+
+// MARK: - provider families
+
+@Test func providerFamiliesGroupRolesIntoPills() {
+    let fams = Providers.families()
+    let byID = Dictionary(uniqueKeysWithValues: fams.map { ($0.id, $0) })
+    // The headline multi-role providers.
+    #expect(byID["groq"]?.roles == ["s2", "stt", "tts"])
+    #expect(byID["openai"]?.roles == ["s2", "stt", "tts"])
+    #expect(byID["gemini"]?.roles == ["vlm", "s2"])
+    #expect(byID["xai"]?.roles == ["vlm", "s2"])
+    #expect(byID["openrouter"]?.roles == ["vlm", "s2"])
+    #expect(byID["cloudflare"]?.roles == ["decision", "s2"])
+    #expect(byID["typesafe"]?.roles == ["decision"])
+    // The on-device/off rows never appear — nothing to connect.
+    #expect(byID["builtin"] == nil)
+    // Names come from labels, not raw ids.
+    #expect(byID["groq"]?.name == "Groq")
+    #expect(byID["opencode"]?.name == "OpenCode Go")
+    // Every family carries at least one preset and keeps catalog order.
+    #expect(fams.allSatisfy { !$0.presets.isEmpty })
+    #expect(fams.map(\.id).first == "typesafe")
+}
+
+// MARK: - S1 grammar: window/media verbs + click flavors
+
+@Test func axPolicyWindowAndMediaVerbs() async throws {
+    let pol = AXPolicy()
+    let obs = NullPerceiver().observation
+    func keys(_ goal: String) async throws -> [String]? {
+        if case .keyCombo(let k)? = try await pol.decide(
+            observation: obs, goal: goal, history: []).action { return k }
+        return nil
+    }
+    #expect(try await keys("close") == ["cmd", "w"])
+    #expect(try await keys("quit") == ["cmd", "q"])
+    #expect(try await keys("minimize") == ["cmd", "m"])
+    #expect(try await keys("fullscreen") == ["ctrl", "cmd", "f"])
+    #expect(try await keys("new tab") == ["cmd", "t"])
+    #expect(try await keys("tab baru") == ["cmd", "t"])
+    #expect(try await keys("next") == ["cmd", "tab"])
+    #expect(try await keys("next track") == ["nexttrack"])
+    #expect(try await keys("back") == ["cmd", "leftbracket"])
+    #expect(try await keys("back lagu") == ["prevtrack"])
+    #expect(try await keys("reload") == ["cmd", "r"])
+    #expect(try await keys("muat ulang") == ["cmd", "r"])
+    #expect(try await keys("play") == ["playpause"])
+    #expect(try await keys("jeda") == ["playpause"])
+    #expect(try await keys("skip") == ["nexttrack"])
+    #expect(try await keys("volume up") == ["volumeup"])
+    #expect(try await keys("kecilkan volume") == ["volumedown"])
+    #expect(try await keys("keraskan suara") == ["volumeup"])
+    #expect(try await keys("mute") == ["mute"])
+    #expect(try await keys("delete") == ["delete"])
+    #expect(try await keys("switch window") == ["cmd", "grave"])
+    #expect(try await keys("lock") == ["ctrl", "cmd", "q"])
+    // Zoom tri-state.
+    #expect(try await keys("zoom in") == ["cmd", "equal"])
+    #expect(try await keys("zoom out") == ["cmd", "minus"])
+    #expect(try await keys("zoom reset") == ["cmd", "0"])
+    // Objectful/ambiguous forms still abstain — a model decides those.
+    for goal in ["quit Safari", "play some music", "close the dialog",
+                 "back to the start", "volume", "new", "switch to Safari"] {
+        let d = try await pol.decide(observation: obs, goal: goal, history: [])
+        #expect(d.action == nil && d.confidence < 0.6, "\(goal) should abstain")
+    }
+}
+
+@Test func axPolicyClickFlavorsAndFindDesugar() async throws {
+    let pol = AXPolicy()
+    // Click flavors normalize to marker verbs sharing the AX path.
+    #expect(AXPolicy.intents(of: "double click Save").first?.verb == "dclick")
+    #expect(AXPolicy.intents(of: "double click Save").first?.arg == "Save")
+    #expect(AXPolicy.intents(of: "klik kanan File").first?.verb == "rclick")
+    #expect(AXPolicy.intents(of: "klik dua kali File").first?.verb == "dclick")
+    #expect(AXPolicy.intents(of: "right click Save").first?.verb == "rclick")
+    // "find X" desugars to open-find-bar + type — two intents.
+    let found = AXPolicy.intents(of: "find waldo")
+    #expect(found.count == 2)
+    #expect(found[0].verb == "key" && found[0].arg == "cmd f")
+    #expect(found[1].verb == "type" && found[1].arg == "waldo")
+    let foundID = AXPolicy.intents(of: "cari jadwal")
+    #expect(foundID.count == 2 && foundID[1].arg == "jadwal")
+    // Flavor clicks on a framed pressable go pixel, not axPress.
+    let node = AXNode(ref: "e5", role: "AXButton", title: "Save", desc: nil, value: nil,
+                      frame: CGRectCodable(CGRect(x: 10, y: 20, width: 40, height: 20)), children: [])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "App", desc: nil, value: nil,
+                      frame: nil, children: [node])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "App", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    if case .doubleClick(let x, let y)? = try await pol.decide(
+        observation: obs, goal: "double click Save", history: []).action {
+        #expect(x == 30 && y == 30)
+    } else { Issue.record("double click should pixel-click the button center") }
+    if case .rightClick? = try await pol.decide(
+        observation: obs, goal: "right click Save", history: []).action {} else {
+        Issue.record("right click should pixel-click")
+    }
+}
+
+@Test func typeSegmentsOnlySplitOnCommandVerbs() {
+    // Dictation words that double as verbs stay literal inside a type
+    // segment — "type ready and next" must NOT become type "ready" + next.
+    #expect(AXPolicy.intents(of: "type ready and next").count == 1)
+    #expect(AXPolicy.intents(of: "type ready and next").first?.arg == "ready and next")
+    #expect(AXPolicy.intents(of: "type stop and play").count == 1)
+    #expect(AXPolicy.intents(of: "type back and forward").count == 1)
+    // …but unambiguous command verbs still split inside type segments.
+    #expect(AXPolicy.intents(of: "type bread and butter and click Save").count == 2)
+    #expect(AXPolicy.intents(of: "type x and open Notes").count == 2)
+    // Outside type segments, the same words split as commands.
+    #expect(AXPolicy.intents(of: "open Notes and next").count == 2)
+}
+
+@Test func keyNamesAcceptMediaKeys() {
+    #expect(AXPolicy.keyNames("play") == ["play"])
+    #expect(AXPolicy.keyNames("volumeup") == ["volumeup"])
+    #expect(AXPolicy.keyNames("mute") == ["mute"])
+    // Media keys are not keyCodes — CGEventActuator routes them to
+    // NX_SYSDEFINED instead.
+    #expect(CGEventActuator.mediaKeys["playpause"] == 16)
+    #expect(CGEventActuator.mediaKeys["volumeup"] == 0)
+    #expect(CGEventActuator.keyCodes["playpause"] == nil)
+}

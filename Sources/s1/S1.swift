@@ -684,7 +684,8 @@ struct ServeCmd: AsyncParsableCommand {
                               }
                           },
                           languages: SpokenLanguage.candidates(for: loc),
-                          voice: S1Config.load().voice),
+                          voice: S1Config.load().voice,
+                          voiceInterrupt: S1Config.voiceInterruptEnabled()),
             locale: SpokenLanguage.candidates(for: loc)[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { ev in

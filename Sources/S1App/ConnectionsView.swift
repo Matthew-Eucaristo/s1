@@ -13,6 +13,27 @@ struct ConnectionsView: View {
         Form {
                 decisionStatus
                 Section {
+                    ForEach(Providers.families(), id: \.id) { fam in
+                        HStack(spacing: 8) {
+                            Text(fam.name)
+                            ForEach(fam.roles, id: \.self) { r in
+                                Text(Self.roleTag(r))
+                                    .font(.caption2.weight(.medium))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(.quaternary, in: Capsule())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Connect") { model.connect(fam) }
+                                .controlSize(.small)
+                        }
+                    }
+                } header: {
+                    Text("Connect a provider")
+                } footer: {
+                    Text("One click fills every role a provider covers — pills show which (S1 = decision judge, S2 = reasoning, STT/TTS = speech). Then paste its API key under each role below. Any OpenAI-compatible endpoint works, including every model on OpenRouter.")
+                }
+                Section {
                     presetMenu(role: .decision) { model.decisionBase = $0; model.decisionModel = $1 }
                     TextField("Server", text: $model.decisionBase)
                     TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text(Endpoints.defaultDecisionModel))
@@ -90,6 +111,19 @@ struct ConnectionsView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Pill labels per role id.
+    static func roleTag(_ role: String) -> String {
+        switch role {
+        case "decision": return "S1"
+        case "vlm": return "Vision"
+        case "grounder": return "Ground"
+        case "s2": return "S2"
+        case "stt": return "STT"
+        case "tts": return "TTS"
+        default: return role.uppercased()
         }
     }
 

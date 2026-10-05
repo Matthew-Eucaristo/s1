@@ -232,6 +232,22 @@ private struct VoiceSettings: View {
                 Text("Apple still listens on-device (end-of-speech detection, live text). With a model set, each finished turn is re-transcribed in the cloud for accuracy, using your custom words as the spelling hint, and falls back to on-device on any error. Audio leaves the Mac only when this is on.")
             }
             Section {
+                Toggle("Interrupt with my voice (barge-in)", isOn: $model.voiceInterrupt)
+                Picker("End-of-speech detection", selection: $model.vadMode) {
+                    Text("Automatic (Apple VAD + energy)").tag("auto")
+                    Text("Energy only (deterministic)").tag("energy")
+                }
+                Picker("End-of-speech sensitivity", selection: $model.vadSensitivity) {
+                    Text("Low — tolerates pauses").tag("low")
+                    Text("Medium").tag("medium")
+                    Text("High — ends the turn fast").tag("high")
+                }
+            } header: {
+                Text("Listening")
+            } footer: {
+                Text("Barge-in listens (energy only, echo-cancelled) while a run or reply is in flight — say anything and it stops, then keep talking for the next command. High sensitivity cuts the turn sooner after your last word.")
+            }
+            Section {
                 Toggle("Speak results", isOn: $model.speakReply)
                 Picker("Voice", selection: $model.ttsVoice) {
                     Text("Automatic (best installed)").tag("")

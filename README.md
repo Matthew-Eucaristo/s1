@@ -115,6 +115,22 @@ lands). Add your own jargon to `~/.s1/config.json`:
 or per command: `--vocabulary "Warp,JIRA"`. Apple's limit is 100 phrases —
 your words rank first, app names fill the rest.
 
+**Turn detection + barge-in** — while a run or the spoken reply is in
+flight, an energy-only monitor (voice-processing AEC keeps s1's own TTS
+from tripping it) listens for sustained speech: talk over the agent and it
+aborts at the next step, then the mic reopens for the new command. Turn
+ending is Apple `SpeechDetector` + an RMS endpointer; the detector's
+sensitivity and the endpointer's margins are configurable:
+
+```json
+{ "voiceInterrupt": true, "vad": "auto", "vadSensitivity": "medium" }
+```
+
+`"vad": "energy"` runs the deterministic RMS endpointer alone (no detector
+module); sensitivity `low` tolerates thinking pauses, `high` cuts the turn
+fast. Env overrides: `S1_VOICE_INTERRUPT`, `S1_VAD`, `S1_VAD_SENSITIVITY`.
+All three are also in Settings → Listening.
+
 ## Always-on companion
 
 ```bash
@@ -238,7 +254,10 @@ Try a grounder on any screenshot before wiring it in:
 S2 is plain OpenAI `/chat/completions`, so subscriptions with a compatible
 endpoint drop in by URL + key — e.g. OpenCode Go
 (`"s2": {"base": "https://opencode.ai/zen/go/v1", "model": "glm-5.3"}` +
-`s1 key set s2`), OpenRouter, Groq, OpenAI.
+`s1 key set s2`), OpenRouter (any model, incl. Claude), Groq, OpenAI,
+Google Gemini (`…/v1beta/openai`), xAI Grok, DeepSeek. Settings →
+Connections lists every provider with a pill per role it covers (S1 judge,
+vision, S2, STT, TTS) — one Connect click wires them all.
 
 ### S1 decision model (optional judge)
 

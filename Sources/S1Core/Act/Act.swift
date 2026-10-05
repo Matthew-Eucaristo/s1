@@ -368,7 +368,17 @@ public struct CGEventActuator: Actuator {
                 key = k
             }
         }
-        guard let k = key, let code = Self.keyCodes[k.lowercased()] else {
+        guard let k = key else {
+            throw S1Error.aborted("unknown key in combo \(keys)")
+        }
+        if let aux = Self.mediaKeys[k.lowercased()] {
+            guard flags.isEmpty else {
+                throw S1Error.aborted("media key \(k) takes no modifiers")
+            }
+            Self.postMediaKey(aux)
+            return
+        }
+        guard let code = Self.keyCodes[k.lowercased()] else {
             throw S1Error.aborted("unknown key in combo \(keys)")
         }
         let src = CGEventSource(stateID: .hidSystemState)
@@ -397,6 +407,30 @@ public struct CGEventActuator: Actuator {
         "left": 123, "leftarrow": 123, "right": 124, "rightarrow": 124,
         "down": 125, "downarrow": 125, "up": 126, "uparrow": 126,
     ]
+
+    /// Media/system keys have no virtual keyCode — they ride NX_SYSDEFINED
+    /// (subtype 8) events. Values are IOKit NX_KEYTYPE_* constants.
+    static let mediaKeys: [String: Int] = [
+        "volumeup": 0, "volumedown": 1, "mute": 7,
+        "playpause": 16, "play": 16, "pause": 16,
+        "nexttrack": 17, "prevtrack": 18, "previoustrack": 18,
+    ]
+
+    /// Post one media-key press as a system-defined HID event — the
+    /// undocumented-but-stable incantation every macOS media-key utility
+    /// (BeardedSpice, Hammerspoon) uses.
+    static func postMediaKey(_ key: Int) {
+        func ev(_ down: Bool) -> CGEvent? {
+            let flags = down ? 0xa00 : 0xb00
+            return NSEvent.otherEvent(with: .systemDefined, location: .zero,
+                modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags)),
+                timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
+                data1: (key << 16) | (flags << 8), data2: -1)?.cgEvent
+        }
+        ev(true)?.post(tap: .cghidEventTap)
+        usleep(30_000)
+        ev(false)?.post(tap: .cghidEventTap)
+    }
 
     func openApp(named name: String) async throws {
         let ws = NSWorkspace.shared

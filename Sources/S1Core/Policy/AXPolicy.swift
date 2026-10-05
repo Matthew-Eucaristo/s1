@@ -87,9 +87,9 @@ public struct AXPolicy: Policy {
             // ("milk and honey") AND conjunctions ("open X and type Y").
             // Split only when the following word is a grammar verb.
             .flatMap { splitConjunctions($0) }
-            .map { part -> Intent in
+            .flatMap { part -> [Intent] in
                 let words = part.split(separator: " ", maxSplits: 1)
-                let verb = words.first?.lowercased() ?? ""
+                var verb = words.first?.lowercased() ?? ""
                 var arg = words.count > 1 ? String(words[1]) : ""
                 // A trailing conjunction can't open a new command — "buka
                 // notes lalu" must not hunt for an app literally called
@@ -97,7 +97,25 @@ public struct AXPolicy: Policy {
                 if !typeVerbs.contains(verb) {
                     arg = stripTrailingConjunction(arg)
                 }
-                return Intent(verb: verb, arg: arg)
+                // Click flavors normalize to marker verbs so decide() shares
+                // one AX-resolution path: "double click Save" → dclick Save,
+                // "klik kanan X" → rclick X, "right click X" → rclick X.
+                let low = arg.lowercased()
+                if ["double", "dobel"].contains(verb) {
+                    if low.hasPrefix("click ") { arg = String(arg.dropFirst(6)); verb = "dclick" }
+                    else if low.hasPrefix("klik ") { arg = String(arg.dropFirst(5)); verb = "dclick" }
+                } else if verb == "right", low.hasPrefix("click ") {
+                    arg = String(arg.dropFirst(6)); verb = "rclick"
+                } else if verb == "klik" {
+                    if low.hasPrefix("dua kali ") { arg = String(arg.dropFirst(9)); verb = "dclick" }
+                    else if low.hasPrefix("kanan ") { arg = String(arg.dropFirst(6)); verb = "rclick" }
+                }
+                // "find X" / "cari X" desugars to open-the-find-bar + type —
+                // two ordinary steps the loop already sequences.
+                if ["find", "cari"].contains(verb), !arg.isEmpty {
+                    return [Intent(verb: "key", arg: "cmd f"), Intent(verb: "type", arg: arg)]
+                }
+                return [Intent(verb: verb, arg: arg)]
             }
     }
 
@@ -127,15 +145,19 @@ public struct AXPolicy: Policy {
         "verify", "cek", "check", "pastikan", "done", "selesai", "finish",
         "click", "press", "klik", "tekan", "set", "isi",
         "take", "grab", "snap",
-        // Commandish verbs the deterministic grammar doesn't implement —
-        // they abstain to S2, but they must split "dan/and" correctly.
-        // Deliberately excluded: copy/paste/cut/delete/move/go/ke — those
-        // are typed-text words ("type copy and paste") where a false
-        // split costs more than a polluted argument.
+        // Window/tab/app control — all implemented below as keyCombos or
+        // media keys, no model needed.
         "tutup", "close", "quit", "keluar", "exit", "matikan", "hide",
         "sembunyikan", "minimize", "kecilkan", "maximize", "besarkan",
+        "fullscreen", "layar", "new", "baru", "tab", "next", "previous",
+        "prev", "sebelumnya", "back", "kembali", "forward", "maju",
+        "reload", "refresh", "muat", "switch", "lock", "kunci",
+        // Media + edit.
+        "play", "pause", "jeda", "skip", "lewati", "mute", "bisukan",
+        "senyap", "bisu", "volume", "suara", "naikkan", "keraskan",
         "cari", "find", "search", "save", "simpan", "undo", "redo",
-        "zoom", "select", "pilih", "stop", "berhenti", "pause", "jeda",
+        "zoom", "select", "pilih", "stop", "berhenti", "delete", "hapus",
+        "double", "dobel", "right",
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
         "ubah", "rename", "ganti",
     ]
@@ -170,7 +192,11 @@ public struct AXPolicy: Policy {
                               range: searchFrom ..< s.endIndex) {
             let next = s[r.upperBound...]
                 .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
-            if verbs.contains(next) || (editVerbs.contains(next) && !startsWithTypeVerb(s)) {
+            // Inside a type segment, ordinary dictation words stay literal
+            // — "type ready and next" is text; only unambiguous command
+            // verbs ("click", "open") still split.
+            if (verbs.contains(next) || editVerbs.contains(next))
+               && !(typeWords.contains(next) && startsWithTypeVerb(s)) {
                 return splitOnConj(String(s[..<r.lowerBound]), conj: conj) +
                        splitOnConj(String(s[r.upperBound...]), conj: conj)
             }
@@ -188,7 +214,8 @@ public struct AXPolicy: Policy {
                               range: searchFrom ..< s.endIndex) {
             let next = s[r.upperBound...]
                 .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
-            if verbs.contains(next) || (editVerbs.contains(next) && !startsWithTypeVerb(s)) {
+            if (verbs.contains(next) || editVerbs.contains(next))
+               && !(typeWords.contains(next) && startsWithTypeVerb(s)) {
                 return splitConjunctions(String(s[..<r.lowerBound])) +
                        splitConjunctions(String(s[r.upperBound...]))
             }
@@ -230,6 +257,18 @@ public struct AXPolicy: Policy {
         "page up": "pageup", "page down": "pagedown",
     ]
 
+    /// Verbs that are ALSO ordinary dictation words — inside a segment that
+    /// starts with a type verb they stay literal text, not command starts.
+    /// "type ready and next" stays one intent; "type … and click Save"
+    /// still splits because nobody dictates "click Save" into a field.
+    static let typeWords: Set<String> = editVerbs.union([
+        "close", "quit", "exit", "hide", "new", "next", "previous", "prev",
+        "back", "forward", "switch", "lock", "play", "pause", "stop", "skip",
+        "mute", "volume", "find", "search", "zoom", "select", "delete",
+        "double", "right", "drag", "drop", "resize", "start", "restart",
+        "ganti", "set", "isi",
+    ])
+
     static let keyModifiers: Set<String> =
         ["cmd", "command", "shift", "opt", "option", "alt", "ctrl", "control"]
 
@@ -243,7 +282,8 @@ public struct AXPolicy: Policy {
             .map(String.init)
         guard !keys.isEmpty,
               keys.allSatisfy({ keyModifiers.contains($0)
-                                || CGEventActuator.keyCodes[$0] != nil }) else { return nil }
+                                || CGEventActuator.keyCodes[$0] != nil
+                                || CGEventActuator.mediaKeys[$0] != nil }) else { return nil }
         return keys
     }
 
@@ -342,7 +382,7 @@ public struct AXPolicy: Policy {
                             rationale: "verify '\(intent.arg)' on screen")
         case "done", "selesai", "finish":
             return Decision(action: .done(summary: "done"), confidence: 0.95, rationale: "done intent")
-        case "click", "press", "klik", "tekan", "set", "isi":
+        case "click", "press", "klik", "tekan", "set", "isi", "dclick", "rclick":
             guard !intent.arg.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a target")
@@ -400,6 +440,16 @@ public struct AXPolicy: Policy {
             let action: Action
             if let setValue {
                 action = .axSetValue(ref: node.ref, value: setValue)
+            } else if intent.verb == "dclick" || intent.verb == "rclick" {
+                // AXPress is single-click semantics — flavor clicks go pixel
+                // at the element's center instead.
+                guard let f = node.frame else {
+                    return Decision(action: nil, confidence: 0.2,
+                                    rationale: "matched \(node.ref) but it has no frame to click")
+                }
+                action = intent.verb == "dclick"
+                    ? .doubleClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
+                    : .rightClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
             } else if isPressable {
                 action = .axPress(ref: node.ref)
             } else {
@@ -439,6 +489,213 @@ public struct AXPolicy: Policy {
             }
             return Decision(action: .keyCombo(keys: combo), confidence: 0.95,
                             rationale: "\(intent.verb) (\(combo.joined(separator: "+")))")
+        // ---- Window / tab / app control: plain keyCombos, no model needed.
+        case "close", "tutup":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "close what? — object targets need S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "w"]), confidence: 0.9,
+                            rationale: "close front window")
+        case "quit", "keluar", "exit":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "quit what? — named apps need S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "q"]), confidence: 0.9,
+                            rationale: "quit frontmost app")
+        case "minimize", "kecilkan":
+            let a = intent.arg.lowercased()
+            if a.contains("volume") || a.contains("suara") {
+                return Decision(action: .keyCombo(keys: ["volumedown"]), confidence: 0.9,
+                                rationale: "volume down")
+            }
+            guard a.isEmpty || ["window", "jendela"].contains(a) else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "minimize what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "m"]), confidence: 0.9,
+                            rationale: "minimize window")
+        case "hide", "sembunyikan":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2, rationale: "hide what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "h"]), confidence: 0.9,
+                            rationale: "hide app")
+        case "fullscreen", "maximize", "besarkan", "layar":
+            let a = intent.arg.lowercased()
+            if a.contains("volume") || a.contains("suara") {
+                return Decision(action: .keyCombo(keys: ["volumeup"]), confidence: 0.9,
+                                rationale: "volume up")
+            }
+            guard a.isEmpty || ["window", "jendela", "penuh", "layar"].contains(a) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "maximize what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["ctrl", "cmd", "f"]), confidence: 0.9,
+                            rationale: "toggle fullscreen")
+        case "zoom":
+            switch intent.arg.lowercased() {
+            case "in", "masuk", "perbesar", "+":
+                return Decision(action: .keyCombo(keys: ["cmd", "equal"]), confidence: 0.9,
+                                rationale: "zoom in")
+            case "out", "keluar", "perkecil", "-":
+                return Decision(action: .keyCombo(keys: ["cmd", "minus"]), confidence: 0.9,
+                                rationale: "zoom out")
+            case "reset", "normal", "100", "default":
+                return Decision(action: .keyCombo(keys: ["cmd", "0"]), confidence: 0.9,
+                                rationale: "zoom reset")
+            default:
+                return Decision(action: nil, confidence: 0.2, rationale: "zoom how? — needs S2")
+            }
+        case "new", "baru":
+            switch intent.arg.lowercased() {
+            case "tab":
+                return Decision(action: .keyCombo(keys: ["cmd", "t"]), confidence: 0.9,
+                                rationale: "new tab")
+            case "window", "jendela":
+                return Decision(action: .keyCombo(keys: ["cmd", "n"]), confidence: 0.9,
+                                rationale: "new window")
+            case "incognito", "private", "pribadi":
+                return Decision(action: .keyCombo(keys: ["cmd", "shift", "n"]), confidence: 0.9,
+                                rationale: "new private window")
+            default:
+                return Decision(action: nil, confidence: 0.2, rationale: "new what? — needs S2")
+            }
+        case "tab":
+            switch intent.arg.lowercased() {
+            case "baru":
+                return Decision(action: .keyCombo(keys: ["cmd", "t"]), confidence: 0.9,
+                                rationale: "new tab")
+            case "next", "berikutnya", "lanjut":
+                return Decision(action: .keyCombo(keys: ["ctrl", "tab"]), confidence: 0.9,
+                                rationale: "next tab")
+            case "previous", "prev", "sebelumnya":
+                return Decision(action: .keyCombo(keys: ["ctrl", "shift", "tab"]), confidence: 0.9,
+                                rationale: "previous tab")
+            default:
+                return Decision(action: nil, confidence: 0.2, rationale: "tab what? — needs S2")
+            }
+        case "next", "lanjut":
+            switch intent.arg.lowercased() {
+            case "tab": return Decision(action: .keyCombo(keys: ["ctrl", "tab"]), confidence: 0.9,
+                                        rationale: "next tab")
+            case "track", "lagu", "song", "music":
+                return Decision(action: .keyCombo(keys: ["nexttrack"]), confidence: 0.9,
+                                rationale: "next track")
+            case "", "app", "aplikasi":
+                return Decision(action: .keyCombo(keys: ["cmd", "tab"]), confidence: 0.9,
+                                rationale: "next app")
+            default: return Decision(action: nil, confidence: 0.2, rationale: "next what? — needs S2")
+            }
+        case "previous", "prev", "sebelumnya":
+            switch intent.arg.lowercased() {
+            case "tab": return Decision(action: .keyCombo(keys: ["ctrl", "shift", "tab"]),
+                                        confidence: 0.9, rationale: "previous tab")
+            case "track", "lagu", "song", "music":
+                return Decision(action: .keyCombo(keys: ["prevtrack"]), confidence: 0.9,
+                                rationale: "previous track")
+            default: return Decision(action: nil, confidence: 0.2, rationale: "previous what? — needs S2")
+            }
+        case "back", "kembali":
+            let a = intent.arg.lowercased()
+            if ["track", "lagu", "song", "music"].contains(a) {
+                return Decision(action: .keyCombo(keys: ["prevtrack"]), confidence: 0.9,
+                                rationale: "previous track")
+            }
+            guard a.isEmpty else {
+                return Decision(action: nil, confidence: 0.2, rationale: "back where? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "leftbracket"]), confidence: 0.85,
+                            rationale: "navigate back")
+        case "forward", "maju":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2, rationale: "forward where? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "rightbracket"]), confidence: 0.85,
+                            rationale: "navigate forward")
+        case "reload", "refresh":
+            let a = intent.arg.lowercased()
+            guard a.isEmpty || ["page", "halaman"].contains(a) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "reload what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "r"]), confidence: 0.9,
+                            rationale: "reload")
+        case "muat":
+            guard ["ulang", "lagi"].contains(intent.arg.lowercased()) else {
+                return Decision(action: nil, confidence: 0.15, rationale: "'muat' needs 'ulang'/'lagi'")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "r"]), confidence: 0.9,
+                            rationale: "reload")
+        case "delete", "hapus":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2, rationale: "delete what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["delete"]), confidence: 0.9,
+                            rationale: "delete key")
+        case "switch":
+            switch intent.arg.lowercased() {
+            case "", "app", "aplikasi", "apps":
+                return Decision(action: .keyCombo(keys: ["cmd", "tab"]), confidence: 0.9,
+                                rationale: "app switcher")
+            case "window", "jendela":
+                return Decision(action: .keyCombo(keys: ["cmd", "grave"]), confidence: 0.9,
+                                rationale: "next window")
+            default:
+                return Decision(action: nil, confidence: 0.2, rationale: "switch to what? — needs S2")
+            }
+        case "lock", "kunci":
+            guard intent.arg.isEmpty || ["screen", "layar"].contains(intent.arg.lowercased()) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "lock what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["ctrl", "cmd", "q"]), confidence: 0.85,
+                            rationale: "lock screen")
+        // ---- Media / volume: NX_SYSDEFINED aux keys, no model needed.
+        case "play", "pause", "jeda":
+            guard intent.arg.isEmpty else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "'\(intent.verb) <thing>' needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["playpause"]), confidence: 0.9,
+                            rationale: "play/pause")
+        case "skip", "lewati":
+            guard intent.arg.isEmpty || ["track", "lagu", "song", "music"].contains(intent.arg.lowercased()) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "skip what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["nexttrack"]), confidence: 0.9,
+                            rationale: "next track")
+        case "mute", "bisukan", "senyap", "bisu":
+            let a = intent.arg.lowercased()
+            guard a.isEmpty || ["volume", "suara"].contains(a) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "mute what? — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["mute"]), confidence: 0.9,
+                            rationale: "mute")
+        case "volume", "suara", "naikkan", "keraskan":
+            let a = intent.arg.lowercased()
+            // The verb itself is the direction — "keraskan suara" parses
+            // as verb=keraskan arg=suara (the noun, not "up").
+            if ["naikkan", "keraskan"].contains(intent.verb) {
+                guard a.contains("volume") || a.contains("suara") else {
+                    return Decision(action: nil, confidence: 0.2,
+                                    rationale: "'\(intent.verb)' needs 'volume'/'suara' — needs S2")
+                }
+                return Decision(action: .keyCombo(keys: ["volumeup"]), confidence: 0.9,
+                                rationale: "volume up")
+            }
+            switch a {
+            case "up", "naik", "besar", "keras", "keraskan", "volume up", "naikkan volume", "keraskan volume", "keraskan suara", "naikkan suara":
+                return Decision(action: .keyCombo(keys: ["volumeup"]), confidence: 0.9,
+                                rationale: "volume up")
+            case "down", "turun", "kecil", "volume down", "kecilkan volume", "kecilkan suara", "turunkan volume":
+                return Decision(action: .keyCombo(keys: ["volumedown"]), confidence: 0.9,
+                                rationale: "volume down")
+            case "mute", "mati", "off", "bisukan", "senyap":
+                return Decision(action: .keyCombo(keys: ["mute"]), confidence: 0.9,
+                                rationale: "mute")
+            default:
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "volume how? — up/down/mute")
+            }
         default:
             return Decision(action: nil, confidence: 0.1,
                             rationale: "unknown verb '\(intent.verb)' — needs a smarter brain")

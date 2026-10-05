@@ -62,6 +62,15 @@ public struct S1Config: Codable, Sendable {
     public var ttsCloudVoice: String?
     /// Persistent memory (~/.s1/memory.md + ~/.s1/memory/ topics); nil = on.
     public var memory: Bool?
+    /// Voice interrupt (barge-in): while a run or the TTS reply is in
+    /// flight a sustained voice burst aborts it — nil/true = on.
+    public var voiceInterrupt: Bool?
+    /// Turn-end detector: "auto" (Apple SpeechDetector when the modern
+    /// transcriber runs, energy endpointer otherwise), "energy" (RMS
+    /// endpointer only — deterministic, no detector module).
+    public var vad: String?
+    /// Endpointer/detector sensitivity: "low" | "medium" | "high".
+    public var vadSensitivity: String?
     /// Shell sandbox: nil/"off" = gated shell actions run under plain zsh
     /// (default); "srt" = wrap them in Anthropic sandbox-runtime — Seatbelt
     /// fs rules + network proxy from ~/.s1/srt-settings.json.
@@ -250,6 +259,16 @@ public enum Endpoints {
 
 
 public extension S1Config {
+    /// Voice-interrupt resolution: `S1_VOICE_INTERRUPT` (0/false/off) wins,
+    /// then config.json, default on.
+    static func voiceInterruptEnabled(env: [String: String] = ProcessInfo.processInfo.environment,
+                                      config: S1Config = .load()) -> Bool {
+        if let e = env["S1_VOICE_INTERRUPT"]?.lowercased() {
+            return !(e == "0" || e == "false" || e == "off")
+        }
+        return config.voiceInterrupt ?? true
+    }
+
     /// Drop a role's plaintext `key` from config.json once the Keychain owns
     /// it — a key must not linger in a file after moving to the Keychain.
     static func stripPlaintextKey(_ role: ModelRole, path: String = S1Config.path) throws {
