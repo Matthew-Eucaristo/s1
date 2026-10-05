@@ -2,7 +2,7 @@
 # Regenerate the app icon + menu-bar glyph from the s1 mark.
 # Draws natively (no SVG rasterizer): macOS icon grid — 1024 canvas,
 # 824 pt continuous-corner squircle body inset 100 pt, baked soft drop
-# shadow, deep indigo gradient with a top sheen, white mark. Then builds
+# shadow, plain white body, black mark. Then builds
 # the standard 10-image iconset and iconutil-compiles AppIcon.icns.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -82,7 +82,7 @@ let icon = png(1024) { S in
     // Baked drop shadow, as on every macOS app icon.
     NSGraphicsContext.saveGraphicsState()
     let sh = NSShadow()
-    sh.shadowColor = NSColor.black.withAlphaComponent(0.32)
+    sh.shadowColor = NSColor.black.withAlphaComponent(0.25)
     sh.shadowOffset = NSSize(width: 0, height: -10 * u)
     sh.shadowBlurRadius = 22 * u
     sh.set()
@@ -91,25 +91,16 @@ let icon = png(1024) { S in
 
     NSGraphicsContext.saveGraphicsState()
     shape.addClip()
-    NSGradient(colors: [NSColor(srgbRed: 0.42, green: 0.45, blue: 1.00, alpha: 1),
-                        NSColor(srgbRed: 0.24, green: 0.22, blue: 0.86, alpha: 1),
-                        NSColor(srgbRed: 0.10, green: 0.09, blue: 0.38, alpha: 1)],
-               atLocations: [0, 0.5, 1], colorSpace: .sRGB)!.draw(in: body, angle: -90)
-    // Soft top sheen.
-    NSGradient(colors: [NSColor.white.withAlphaComponent(0.22), NSColor.white.withAlphaComponent(0)])!
-        .draw(in: NSRect(x: body.minX, y: body.midY, width: body.width, height: body.height / 2), angle: -90)
-    // The mark, with a faint lift.
+    // Plain white body (a whisper of grey at the bottom, like Apple's
+    // white icons) with a solid black mark.
+    NSGradient(colors: [NSColor(white: 1.0, alpha: 1), NSColor(white: 0.95, alpha: 1)])!
+        .draw(in: body, angle: -90)
     let (stroke, bar) = markPath(into: markTransform(in: body, fill: 0.56))
-    let lift = NSShadow()
-    lift.shadowColor = NSColor.black.withAlphaComponent(0.28)
-    lift.shadowOffset = NSSize(width: 0, height: -6 * u)
-    lift.shadowBlurRadius = 14 * u
-    lift.set()
-    NSColor.white.setStroke(); stroke.stroke()
-    NSColor.white.setFill(); bar.fill()
+    NSColor.black.setStroke(); stroke.stroke()
+    NSColor.black.setFill(); bar.fill()
     NSGraphicsContext.restoreGraphicsState()
-    // Hairline edge so the shape reads on light and dark wallpapers.
-    NSColor.white.withAlphaComponent(0.18).setStroke()
+    // Hairline edge so the white shape reads on light wallpapers.
+    NSColor.black.withAlphaComponent(0.10).setStroke()
     shape.lineWidth = 2 * u
     shape.stroke()
 }

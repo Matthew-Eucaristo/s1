@@ -619,7 +619,7 @@ final class AppModel {
     func resetAccessibility() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "com.matthew.s1.app"]
+        p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "com.mattheweuc.s1"]
         try? p.run(); p.waitUntilExit()
         requestPermissions()
     }

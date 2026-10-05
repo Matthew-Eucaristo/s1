@@ -15,7 +15,11 @@ struct ConnectionsView: View {
                 Section {
                     presetMenu([
                         ("TypeSafe · Jev (recommended)", Endpoints.defaultDecisionBase, Endpoints.defaultDecisionModel),
-                        ("Cloudflare · Clef (Workers AI)",
+                        ("Liquid AI · d1 free tier (vision)", "https://api.liquid.ai/decisions", "d1:free"),
+                        ("Liquid AI · d1 (vision)", "https://api.liquid.ai/decisions", "d1"),
+                        ("Cloudflare · Clef Flash (Workers AI, vision)",
+                         "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef-flash", "clef-flash"),
+                        ("Cloudflare · Clef (Workers AI, vision)",
                          "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef", "clef"),
                         ("Local · Ollama nimble 9B (advanced)", "http://localhost:11434", "nimble"),
                         ("Local · Ollama tev1 4B (advanced)", "http://localhost:11434", "tev1"),
@@ -28,7 +32,7 @@ struct ConnectionsView: View {
                 } header: {
                     Text("S1 · Decision model")
                 } footer: {
-                    Text("Default: TypeSafe Jev (get a key at typesafe.ai). Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
+                    Text("Default: TypeSafe Jev (get a key at typesafe.ai). Liquid d1 (console.liquid.ai, `liquid_…` key) and Cloudflare Clef / Clef Flash (API token; replace <ACCOUNT_ID>) also see a screenshot of the window. Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
                 }
                 Section {
                     DisclosureGroup(isExpanded: $showVision) {

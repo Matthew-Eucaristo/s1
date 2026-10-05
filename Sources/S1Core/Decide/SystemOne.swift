@@ -118,8 +118,10 @@ public struct SystemOneClient: DecisionJudge {
     /// Clef / Clef Flash take base64 `images` (Ollama + Workers AI); Jev,
     /// nimble and tev1 are text-only.
     public var acceptsImages: Bool { Self.acceptsImages(model: endpoint.model) }
+    /// Clef / Clef Flash (Cloudflare) and Liquid d1 accept `images`.
     public static func acceptsImages(model: String) -> Bool {
-        model.lowercased().contains("clef")
+        let m = model.lowercased()
+        return m.contains("clef") || m == "d1" || m.hasPrefix("d1:") || m.hasPrefix("d1-")
     }
 
     public init(endpoint: Endpoint, timeout: TimeInterval = 30) {

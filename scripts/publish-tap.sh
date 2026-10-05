@@ -84,16 +84,21 @@ cask "s1" do
   # into HOMEBREW_PREFIX/bin so \`s1\` works on PATH from the same install.
   binary "#{appdir}/S1.app/Contents/Resources/s1"
   uninstall launchctl: ["com.matthew.s1.serve", "sh.brew.s1"],
-            quit:      "com.matthew.s1.app"
+            quit:      ["com.mattheweuc.s1", "com.matthew.s1.app"]
 
   zap trash: [
     "~/.s1",
+    "~/Library/Application Scripts/com.mattheweuc.s1",
     "~/Library/Application Scripts/com.matthew.s1.app",
+    "~/Library/Containers/com.mattheweuc.s1",
     "~/Library/Containers/com.matthew.s1.app",
+    "~/Library/HTTPStorages/com.mattheweuc.s1",
     "~/Library/HTTPStorages/com.matthew.s1.app",
     "~/Library/LaunchAgents/com.matthew.s1.serve.plist",
     "~/Library/LaunchAgents/sh.brew.s1.plist",
+    "~/Library/Preferences/com.mattheweuc.s1.plist",
     "~/Library/Preferences/com.matthew.s1.app.plist",
+    "~/Library/Saved Application State/com.mattheweuc.s1.savedState",
     "~/Library/Saved Application State/com.matthew.s1.app.savedState",
   ]
 

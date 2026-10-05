@@ -39,7 +39,7 @@ existing grants** — the System Settings toggle still shows ON while
 reports ⚠ despite a green toggle:
 
 ```sh
-tccutil reset Accessibility com.matthew.s1.app   # drop the stale entry
+tccutil reset Accessibility com.mattheweuc.s1   # drop the stale entry
 # relaunch, then re-grant in System Settings
 ```
 

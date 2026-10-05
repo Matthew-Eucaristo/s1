@@ -2295,3 +2295,12 @@ private struct DelegatingReasoner: Reasoner {
     #expect(!CuaDriver.enabled(S1Config(), env: [:]))
     #expect(CuaDriver.binary(env: ["CUA_DRIVER_PATH": "/bin/ls"]) == "/bin/ls")
 }
+
+@Test func liquidAndClefFlashEndpoints() {
+    #expect(SystemOneClient.url(for: "https://api.liquid.ai/decisions")?.absoluteString
+            == "https://api.liquid.ai/decisions/v1/systemone")
+    #expect(SystemOneClient.acceptsImages(model: "d1:free"))
+    #expect(SystemOneClient.acceptsImages(model: "clef-flash"))
+    #expect(!SystemOneClient.acceptsImages(model: "jev-latest"))
+    #expect(!SystemOneClient.acceptsImages(model: "d10x"))
+}
