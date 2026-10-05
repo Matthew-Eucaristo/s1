@@ -511,6 +511,7 @@ struct PermRow: View {
         HStack {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .foregroundStyle(ok ? .green : .orange)
+                .symbolEffect(.bounce, value: ok)
                 .accessibilityLabel(ok ? "granted" : "missing")
             Text(label).font(.callout)
             if !ok {

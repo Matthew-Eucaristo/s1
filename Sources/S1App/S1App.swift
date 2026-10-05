@@ -124,6 +124,8 @@ private struct MenuBarView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+                .contentTransition(.opacity)
+                .animation(.smooth, value: model.serveStatus)
             if !model.transcript.isEmpty {
                 Text("heard: \(model.transcript)")
                     .font(.caption2)
@@ -199,5 +201,7 @@ private struct MenuBarView: View {
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.2), in: .capsule)
             .foregroundStyle(color)
+            .contentTransition(.opacity)
+            .animation(.smooth, value: model.serveState)
     }
 }

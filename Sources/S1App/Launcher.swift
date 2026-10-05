@@ -256,7 +256,9 @@ struct LauncherView: View {
 
     private func row(_ item: LauncherItem, selected: Bool) -> some View {
         HStack(spacing: 12) {
-            icon(item).frame(width: 26, height: 26)
+            icon(item)
+                .frame(width: 26, height: 26)
+                .symbolRenderingMode(.hierarchical)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).lineLimit(1)
                 if !item.subtitle.isEmpty {
@@ -279,7 +281,7 @@ struct LauncherView: View {
         case .calc: Image(systemName: "equal.circle")
         case .window: Image(systemName: "rectangle.split.2x1")
         case .recent: Image(systemName: "clock.arrow.circlepath")
-        case .ask: Image(systemName: "sparkles")
+        case .ask: Image(systemName: "sparkles").foregroundStyle(.tint)
         case .command: Image(systemName: "pencil")
         case .file: Image(nsImage: NSWorkspace.shared.icon(forFile: item.payload)).resizable()
         case .spotlight: Image(systemName: "magnifyingglass.circle")

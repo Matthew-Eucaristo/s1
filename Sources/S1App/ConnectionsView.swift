@@ -153,6 +153,7 @@ struct ProviderRow: View {
                         .font(.caption)
                         .foregroundStyle(.green)
                         .labelStyle(.titleAndIcon)
+                        .symbolEffect(.bounce, value: connected)
                 }
                 Button("Connect") {
                     model.connect(fam)

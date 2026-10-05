@@ -38,6 +38,11 @@ struct OnboardingView: View {
                 default: doneStep
                 }
             }
+            .id(step)
+            .transition(.asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)))
+            .animation(.smooth, value: step)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 36)
 
@@ -78,6 +83,7 @@ struct OnboardingView: View {
             Spacer()
             Image(systemName: "hand.raised.circle.fill")
                 .font(.system(size: 44)).foregroundStyle(.orange)
+                .symbolEffect(.bounce, value: step)
             Text("Permissions").font(.title.weight(.bold))
             Text("Only Accessibility is required — it's how s1 sees and\n" +
                  "touches your screen. The rest unlock extras.")
@@ -104,6 +110,7 @@ struct OnboardingView: View {
             Spacer()
             Image(systemName: "cursorarrow.rays")
                 .font(.system(size: 44)).foregroundStyle(.tint)
+                .symbolEffect(.bounce, value: step)
             Text("Cua Driver").font(.title.weight(.bold))
             Text("Recommended — s1 types, presses keys and launches apps in\n" +
                  "the background without stealing your focus. Installed with\n" +
@@ -138,6 +145,7 @@ struct OnboardingView: View {
         VStack(spacing: 14) {
             Spacer()
             Image(systemName: "key.fill").font(.system(size: 40)).foregroundStyle(.tint)
+                .symbolEffect(.bounce, value: step)
             Text("Model keys").font(.title.weight(.bold))
             Text("Optional — s1 acts on its own without them. Keys unlock the\n" +
                  "step judge and the reasoning brain. Stored in the Keychain.")
@@ -184,6 +192,7 @@ struct OnboardingView: View {
             Spacer()
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 48)).foregroundStyle(.green)
+                .symbolEffect(.bounce, value: step)
             Text("You're set").font(.title.weight(.bold))
             Text("Try it: press ⇧⇧ and say “open Notes” — or type a goal\n" +
                  "in the window. Everything lives in ~/.s1 as plain files\n" +
