@@ -103,8 +103,9 @@ cask "s1" do
   ]
 
   caveats <<~EOS
-    Ad-hoc signed → Gatekeeper will block the first open. Either install
-    with \`brew install --cask --no-quarantine s1\`, or once:
+    Developer-signed but not notarized → Gatekeeper will block the first
+    open. Either install with \`brew install --cask --no-quarantine s1\`,
+    or once:
       xattr -dr com.apple.quarantine /Applications/S1.app
     Then open S1 and grant Accessibility + Screen Recording + Microphone
     when it asks — \`s1 preflight\` shows the score.
