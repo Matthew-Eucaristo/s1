@@ -255,9 +255,16 @@ S2 is plain OpenAI `/chat/completions`, so subscriptions with a compatible
 endpoint drop in by URL + key — e.g. OpenCode Go
 (`"s2": {"base": "https://opencode.ai/zen/go/v1", "model": "glm-5.3"}` +
 `s1 key set s2`), OpenRouter (any model, incl. Claude), Groq, OpenAI,
-Google Gemini (`…/v1beta/openai`), xAI Grok, DeepSeek. Settings →
-Connections lists every provider with a pill per role it covers (S1 judge,
-vision, S2, STT, TTS) — one Connect click wires them all.
+Google Gemini (`…/v1beta/openai`), xAI Grok, DeepSeek. Settings → Models
+lists every provider with a pill per role it covers (S1 judge, S2, STT,
+TTS) — one Connect click wires them all, one pasted key covers the whole
+card, and configured connections re-test on page-open and on every model
+change. The app exposes two S1 brains only — **Auto** (grammar + judge,
+the default) and **AX** (grammar alone, zero model calls); hard steps
+always escalate to S2, it isn't a toggle. The VLM brain + click grounder
+remain CLI/config paths (`--policy vlm`, `"grounder"`); future S1 models
+are expected to see the screen themselves rather than need a separate
+grounder UI.
 
 ### S1 decision model (optional judge)
 

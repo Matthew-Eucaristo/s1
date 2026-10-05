@@ -2671,9 +2671,9 @@ struct DoneEachSubgoal: Policy {
     // The headline multi-role providers.
     #expect(byID["groq"]?.roles == ["s2", "stt", "tts"])
     #expect(byID["openai"]?.roles == ["s2", "stt", "tts"])
-    #expect(byID["gemini"]?.roles == ["vlm", "s2"])
-    #expect(byID["xai"]?.roles == ["vlm", "s2"])
-    #expect(byID["openrouter"]?.roles == ["vlm", "s2"])
+    #expect(byID["gemini"]?.roles == ["s2"])
+    #expect(byID["xai"]?.roles == ["s2"])
+    #expect(byID["openrouter"]?.roles == ["s2"])
     #expect(byID["cloudflare"]?.roles == ["decision", "s2"])
     #expect(byID["typesafe"]?.roles == ["decision"])
     // The on-device/off rows never appear — nothing to connect.

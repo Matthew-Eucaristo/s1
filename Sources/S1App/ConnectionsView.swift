@@ -1,78 +1,50 @@
 import SwiftUI
 import S1Core
 
-/// One place to wire every brain: S1 decision model, S1 vision + click
-/// grounder, S2 LLM — base URL, model, and an API key that goes straight
-/// to the Keychain (the field never shows a saved key back).
+/// One place to wire every brain: pick a provider card, paste its key
+/// once, pick models per role — the detail sections below stay for
+/// custom endpoints. API keys go straight to the Keychain and are
+/// never shown back.
 @available(macOS 26, *)
 struct ConnectionsView: View {
     @Bindable var model: AppModel
-    @State private var showVision = false
 
     var body: some View {
         Form {
                 decisionStatus
                 Section {
                     ForEach(Providers.families(), id: \.id) { fam in
-                        HStack(spacing: 8) {
-                            Text(fam.name)
-                            ForEach(fam.roles, id: \.self) { r in
-                                Text(Self.roleTag(r))
-                                    .font(.caption2.weight(.medium))
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(.quaternary, in: Capsule())
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Connect") { model.connect(fam) }
-                                .controlSize(.small)
-                        }
+                        ProviderRow(model: model, fam: fam)
                     }
                 } header: {
-                    Text("Connect a provider")
+                    Text("Providers")
                 } footer: {
-                    Text("One click fills every role a provider covers — pills show which (S1 = decision judge, S2 = reasoning, STT/TTS = speech). Then paste its API key under each role below. Any OpenAI-compatible endpoint works, including every model on OpenRouter.")
+                    Text("Connect applies the provider's models to every role it covers (S1 = decision judge, S2 = reasoning, STT/TTS = speech). One API key unlocks the whole card — paste it once. Any OpenAI-compatible endpoint works, including every model on OpenRouter.")
                 }
                 Section {
                     presetMenu(role: .decision) { model.decisionBase = $0; model.decisionModel = $1 }
                     TextField("Server", text: $model.decisionBase)
                     TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text(Endpoints.defaultDecisionModel))
                     KeyRow(model: model, role: .decision)
-                    TestRow(model: model, role: .decision)
+                    TestRow(model: model, role: .decision,
+                            watch: model.decisionBase + "|" + model.decisionModel)
                 } header: {
                     Text("S1 · Decision model")
                 } footer: {
                     Text("Default: TypeSafe Jev (get a key at typesafe.ai). Liquid d1 (console.liquid.ai, `liquid_…` key) and Cloudflare Clef / Clef Flash (API token; replace <ACCOUNT_ID>) also see a screenshot of the window. Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
                 }
                 Section {
-                    DisclosureGroup(isExpanded: $showVision) {
-                        presetMenu(role: .vlm) { model.vlmBase = $0; model.vlmModel = $1 }
-                        TextField("Base URL", text: $model.vlmBase)
-                        TextField("Vision model (empty = off)", text: $model.vlmModel)
-                        Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
-                        if !model.vlmModel.isEmpty { ModelStatusRow(status: model.vlmStatus) }
-                        TextField("Click grounder (empty = VLM grounds)", text: $model.grounderModel)
-                        KeyRow(model: model, role: .vlm)
-                        TestRow(model: model, role: .vlm)
-                    } label: {
-                        LabeledContent("Advanced · S1 vision + click grounder",
-                                       value: model.vlmModel.isEmpty ? "Off" : model.vlmModel)
-                    }
-                } footer: {
-                    Text("Not needed for most commands: the AX grammar handles open/type/press/scroll and labeled buttons, S2 plans from the AX text, Jev judges. Turn on only for targets with no accessibility label (images, canvases, games). Reuses the S2 key on the same provider.")
-                }
-                Section {
                     presetMenu(role: .s2) { model.s2Base = $0; model.s2Model = $1 }
                     TextField("Base URL", text: $model.s2Base)
                     TextField("Model", text: $model.s2Model)
-                    Toggle("Escalate to S2", isOn: $model.useS2)
                     ModelStatusRow(status: model.s2Status)
                     KeyRow(model: model, role: .s2)
-                    TestRow(model: model, role: .s2)
+                    TestRow(model: model, role: .s2,
+                            watch: model.s2Base + "|" + model.s2Model)
                 } header: {
                     Text("S2 · Reasoning LLM")
                 } footer: {
-                    Text("Recommended: OpenCode Go subscription key + DeepSeek V4.1 Flash. Any OpenAI-compatible /v1/chat/completions server works. Gets low-confidence and judge-vetoed steps. Local models are optional and not recommended.")
+                    Text("Recommended: OpenCode Go subscription key + DeepSeek V4.1 Flash. Any OpenAI-compatible /v1/chat/completions server works. Hard steps always escalate to S2 — that isn't optional, it's the safety design. Local models are optional and not recommended.")
                 }
                 UsageSection(model: model)
                 ModelLibrarySection(model: model)
@@ -104,7 +76,7 @@ struct ConnectionsView: View {
                         Text(p).font(.caption).lineLimit(1).truncationMode(.head).frame(maxWidth: 140)
                     } else if model.ollamaPresent {
                         Button("Download") {
-                            model.pullModel(model.decisionModel, vision: false, decision: true)
+                            model.pullModel(model.decisionModel, decision: true)
                         }
                     } else {
                         Text(ModelPull.installHint).font(.caption.monospaced()).textSelection(.enabled)
@@ -147,6 +119,115 @@ struct ConnectionsView: View {
     }
 }
 
+/// One provider: capability pills, connect state, a single key field for
+/// every role it covers, per-role model pickers, and an auto-test that
+/// runs whenever a covered role is configured — on appear and on change.
+@available(macOS 26, *)
+struct ProviderRow: View {
+    @Bindable var model: AppModel
+    let fam: ProviderFamily
+    @State private var draft = ""
+    @State private var results: [ModelRole: String] = [:]
+    @State private var testing = Set<ModelRole>()
+
+    private var roles: [ModelRole] { fam.roles.compactMap(ModelRole.init(rawValue:)) }
+    /// Local-only providers (e.g. an Ollama preset family) never need a
+    /// key — the card skips the field instead of demanding credentials.
+    private var needsKey: Bool { !fam.presets.allSatisfy { Endpoints.isLocal($0.base) } }
+    private var connected: Bool { model.familyHasKey(fam) || !needsKey }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(fam.name)
+                ForEach(fam.roles, id: \.self) { r in
+                    Text(ConnectionsView.roleTag(r))
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.quaternary, in: Capsule())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if connected {
+                    Label("connected", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                        .labelStyle(.titleAndIcon)
+                }
+                Button("Connect") {
+                    model.connect(fam)
+                    autoTest()
+                }
+                .controlSize(.small)
+            }
+            if needsKey {
+                HStack {
+                    SecureField(connected ? "key saved in Keychain — paste to replace" : "API key",
+                                text: $draft)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                    Button("Save") {
+                        model.saveKey(draft, forFamily: fam); draft = ""
+                        autoTest()
+                    }
+                    .controlSize(.small)
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            // Per-role model pick — presets this provider ships for that
+            // role; picking one rewires the role and re-tests it.
+            ForEach(roles, id: \.self) { r in
+                HStack(spacing: 8) {
+                    Text(ConnectionsView.roleTag(r.rawValue))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, alignment: .leading)
+                    Menu(currentModel(r)) {
+                        ForEach(fam.presets.filter { $0.role == r.rawValue }, id: \.id) { p in
+                            Button(p.model) { model.apply(p); autoTest(r) }
+                        }
+                    }
+                    .controlSize(.small)
+                    .font(.caption)
+                    if testing.contains(r) {
+                        ProgressView().controlSize(.mini)
+                    } else if let res = results[r] {
+                        Text(res).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .task { autoTest() }
+    }
+
+    private func currentModel(_ r: ModelRole) -> String {
+        let m = switch r {
+        case .decision: model.decisionModel
+        case .s2: model.s2Model
+        case .vlm: model.vlmModel
+        case .grounder: model.grounderModel
+        case .stt: model.sttModel
+        case .tts: model.ttsModel
+        }
+        return m.isEmpty ? "pick a model" : m
+    }
+
+    /// First-open and post-change probe — only roles that are configured
+    /// AND credentialed (or local) fire a request.
+    private func autoTest(_ only: ModelRole? = nil) {
+        for r in roles where only == nil || r == only {
+            guard model.roleReady(r), !testing.contains(r) else { continue }
+            testing.insert(r)
+            Task {
+                results[r] = await model.testConnection(r)
+                testing.remove(r)
+            }
+        }
+    }
+}
+
 @available(macOS 26, *)
 struct KeyRow: View {
     @Bindable var model: AppModel
@@ -175,21 +256,37 @@ struct KeyRow: View {
 struct TestRow: View {
     @Bindable var model: AppModel
     let role: ModelRole
+    /// Endpoint fingerprint (base+model) — changing it re-tests when the
+    /// role has credentials, so a model pick or Connect is verified live.
+    var watch = ""
     @State private var result = ""
     @State private var testing = false
 
     var body: some View {
         HStack {
             Button(testing ? "Testing…" : "Test connection") {
-                testing = true
-                Task {
-                    result = await model.testConnection(role)
-                    testing = false
-                }
+                run()
             }
             .disabled(testing)
             Text(result).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         }
+        .onAppear { auto() }
+        .onChange(of: watch) { auto() }
+    }
+
+    private func run() {
+        testing = true
+        Task {
+            result = await model.testConnection(role)
+            testing = false
+        }
+    }
+
+    /// First-open and post-change probe — skips unconfigured or
+    /// uncredentialed roles rather than spamming "needs key".
+    private func auto() {
+        guard model.roleReady(role), !testing else { return }
+        run()
     }
 }
 

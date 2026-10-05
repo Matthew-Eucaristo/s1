@@ -18,12 +18,31 @@ public enum Vocabulary {
         "wait", "scroll", "screenshot", "verify", "done", "press", "key",
     ]
 
-    /// `custom` entries keep their spelling and rank above auto names.
-    /// Case-insensitive dedup preserves the first-seen casing.
-    public static func assemble(custom: [String], appNames: () -> [String] = InstalledApps.names) -> [String] {
+    /// Words s1 already knows the user says: saved skill names + triggers,
+    /// and proper nouns pulled from remembered facts ("my editor is Zed"
+    /// teaches "Zed"). Mid-fact capitalized tokens are almost always names;
+    /// the leading word is skipped so sentence starters don't qualify.
+    public static func learned() -> [String] {
+        var out = Skills.load().flatMap { [$0.name] + $0.triggers }
+        for fact in Memory.allFacts() {
+            let words = fact.split(separator: " ")
+            for tok in words.dropFirst() {
+                let w = String(tok).trimmingCharacters(in: .punctuationCharacters)
+                guard w.count > 1, w.first?.isUppercase == true else { continue }
+                out.append(w)
+            }
+        }
+        return out
+    }
+
+    /// `custom` entries keep their spelling and rank above learned/auto
+    /// names. Case-insensitive dedup preserves the first-seen casing.
+    public static func assemble(custom: [String],
+                                learned: () -> [String] = Vocabulary.learned,
+                                appNames: () -> [String] = InstalledApps.names) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for w in ["s1"] + custom + grammarWords + appNames() {
+        for w in ["s1"] + custom + learned() + grammarWords + appNames() {
             let t = w.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty else { continue }
             guard seen.insert(t.lowercased()).inserted else { continue }

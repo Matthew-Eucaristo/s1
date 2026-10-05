@@ -12,13 +12,12 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             if !model.permissions.ready { onboardingBanner }
             else if !model.missingKeys.isEmpty { keysBanner }
-            commandCard
-            controlRow
             companionRow
-            stepsFeed
+            feed
+            composer
             statusBar
         }
         .padding(16)
@@ -26,6 +25,14 @@ struct ContentView: View {
         .frame(minWidth: 620, minHeight: 500)
         .onAppear { model.openSettingsAction = { openSettings() } }
         .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    model.pickAudioAndTranscribe()
+                } label: {
+                    Label("Transcribe audio file", systemImage: "doc.waveform")
+                }
+                .help("Transcribe an audio file instead of the mic")
+            }
             ToolbarItem(placement: .primaryAction) {
                 SettingsLink {
                     Label("Settings", systemImage: "gearshape")
@@ -59,27 +66,79 @@ struct ContentView: View {
         .glassEffect(in: .rect(cornerRadius: 12))
     }
 
-    private var commandCard: some View {
+    /// The composer — one obvious place to type or talk. Mic, input, and
+    /// send live in a single glass bar, ChatGPT-style; it doubles as the
+    /// stop button while a run is in flight.
+    private var composer: some View {
         GlassEffectContainer {
             VStack(alignment: .leading, spacing: 8) {
-                TextField("Command — e.g. buka TextEdit lalu ketik halo", text: $model.goal, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    .lineLimit(1...3)
-                    .focused($goalFocused)
-                    .onSubmit { Task { await model.run() } }
                 if !model.transcript.isEmpty {
-                    Text("heard: \(model.transcript)")
+                    Label(model.transcript, systemImage: "waveform")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .transition(.opacity)
                 }
-                HStack(spacing: 8) {
-                    ForEach(examples, id: \.self) { ex in
-                        Button(ex) { model.goal = ex }
-                            .buttonStyle(.glass)
-                            .controlSize(.mini)
+                HStack(spacing: 10) {
+                    Button {
+                        model.toggleListen()
+                    } label: {
+                        Image(systemName: model.listening ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .contentShape(Circle())
                     }
-                    if !model.recentGoals.isEmpty {
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive().tint(
+                        model.listening ? .red.opacity(0.5) : .clear), in: .circle)
+                    .help("Dictate a command (⌘L) — on-device, auto language")
+                    .accessibilityLabel(model.listening ? "Stop dictation" : "Dictate a command")
+
+                    TextField("Message s1 — e.g. buka TextEdit lalu ketik halo",
+                              text: $model.goal, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .lineLimit(1...4)
+                        .focused($goalFocused)
+                        .onSubmit { Task { await model.run() } }
+
+                    if model.listening {
+                        LiveWaveform()
+                            .frame(width: 60, height: 22)
+                            .transition(.opacity)
+                            .accessibilityHidden(true)
+                    }
+
+                    if model.running {
+                        Button {
+                            model.stop()
+                        } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive().tint(.red.opacity(0.45)), in: .circle)
+                        .help("Stop (⌘.)")
+                        .accessibilityLabel("Stop")
+                    } else {
+                        Button {
+                            Task { await model.run() }
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .bold))
+                                .frame(width: 34, height: 34)
+                        }
+                        .buttonStyle(.plain)
+                        .glassEffect(.regular.interactive().tint(.accentColor.opacity(0.45)), in: .circle)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Run (⌘↩)")
+                        .accessibilityLabel("Run")
+                        .disabled(model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                if !model.recentGoals.isEmpty {
+                    HStack(spacing: 8) {
                         Menu("Recent") {
                             ForEach(model.recentGoals, id: \.self) { g in
                                 Button(g) { model.goal = g }
@@ -89,9 +148,10 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .glassEffect(.regular, in: .rect(cornerRadius: 20))
         }
     }
 
@@ -136,66 +196,6 @@ struct ContentView: View {
             : ["open TextEdit then type hello", "open Notes", "screenshot"]
     }
 
-    private var controlRow: some View {
-        GlassEffectContainer(spacing: 18) {
-            HStack(spacing: 18) {
-                Button {
-                    model.toggleListen()
-                } label: {
-                    Image(systemName: model.listening ? "stop.fill" : "mic.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .frame(width: 58, height: 58)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive().tint(
-                    model.listening ? .red.opacity(0.55) : .accentColor.opacity(0.55)),
-                    in: .circle)
-                .help("Dictate a command (⌘L) — on-device, auto language")
-                .accessibilityLabel(model.listening ? "Stop listening" : "Listen")
-                .accessibilityHint("Records a voice command, transcribes on-device, runs it")
-
-                if model.listening {
-                    // Live proof the mic is capturing — Siri-style bars,
-                    // flat when it hears silence.
-                    LiveWaveform()
-                        .frame(width: 150, height: 30)
-                        .transition(.opacity)
-                        .accessibilityHidden(true)
-                }
-
-                Button {
-                    model.pickAudioAndTranscribe()
-                } label: {
-                    Label("Audio file", systemImage: "doc.waveform")
-                }
-                .buttonStyle(.glass)
-                .help("Transcribe an audio file instead of the mic")
-
-                Button {
-                    Task { await model.run() }
-                } label: {
-                    Label("Run", systemImage: "play.fill")
-                }
-                .buttonStyle(.glassProminent)
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(model.running || model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                if model.running {
-                    Button {
-                        model.stop()
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                    }
-                    .buttonStyle(.glass)
-                    .tint(.red)
-                    .keyboardShortcut(".", modifiers: .command)
-                }
-                Spacer()
-            }
-        }
-    }
-
     /// Always-on companion strip — same surface as the menu bar item.
     private var companionRow: some View {
         GlassEffectContainer {
@@ -227,26 +227,89 @@ struct ContentView: View {
         }
     }
 
-    private var stepsFeed: some View {
+    /// The conversation — your goal on the right, the agent's steps as a
+    /// compact activity list, and its closing line on the left.
+    private var feed: some View {
         ScrollView {
-            GlassEffectContainer(spacing: 10) {
-                LazyVStack(spacing: 10) {
-                    ForEach(Array(model.steps.enumerated()), id: \.offset) { _, rec in
-                        stepRow(rec)
+            LazyVStack(spacing: 10) {
+                ForEach(model.feed) { item in
+                    switch item.kind {
+                    case .goal(let text): goalBubble(text)
+                    case .step(let rec): stepRow(rec)
+                    case .reply(let text): replyBubble(text)
                     }
-                    if model.steps.isEmpty {
-                        Text(model.running ? "working…" : "steps land here")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
+                }
+                if model.running && model.steps.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("working…").font(.callout).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
                 }
             }
             .padding(.horizontal, 2)
+            .padding(.vertical, 4)
         }
         .scrollIndicators(.automatic)
         .defaultScrollAnchor(.bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if model.feed.isEmpty && !model.running { emptyState }
+        }
+    }
+
+    /// Empty feed = the landing: one line of intent and a few one-tap
+    /// starters, like ChatGPT's first screen.
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform.and.mic")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("Tell s1 what to do")
+                .font(.title3.weight(.medium))
+            Text("Type or talk — on the Mac, in Indonesian or English.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(examples, id: \.self) { ex in
+                    Button(ex) { model.goal = ex; goalFocused = true }
+                        .buttonStyle(.glass)
+                        .controlSize(.small)
+                }
+            }
+            .padding(.top, 4)
+        }
+        .padding(24)
+        .allowsHitTesting(true)
+    }
+
+    private func goalBubble(_ text: String) -> some View {
+        HStack {
+            Spacer(minLength: 60)
+            Text(text)
+                .font(.callout)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .glassEffect(.regular.tint(.accentColor.opacity(0.35)),
+                            in: .rect(cornerRadius: 16))
+                .textSelection(.enabled)
+        }
+        .accessibilityLabel("you asked: \(text)")
+    }
+
+    private func replyBubble(_ text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .textSelection(.enabled)
+            Spacer(minLength: 60)
+        }
+        .accessibilityLabel("s1: \(text)")
     }
 
     private func stepRow(_ rec: StepRecord) -> some View {

@@ -17,13 +17,12 @@ final class AppModel {
     static let shared = AppModel()
 
     enum Brain: String, CaseIterable, Identifiable {
-        case auto, ax, vlm
+        case auto, ax
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .auto: return "Auto (model if reachable)"
+            case .auto: return "Auto (grammar + judge model)"
             case .ax:   return "AX (instant, no model)"
-            case .vlm:  return "VLM (model)"
             }
         }
     }
@@ -31,16 +30,13 @@ final class AppModel {
     var goal = ""
     var transcript = "" { didSet { syncHUD() } }
     var brain: Brain = .auto { didSet { rearmServe() } }
-    /// Cached endpoint probe for the auto brain — read inside Serve's
-    /// @Sendable makePolicy, so it lives in a lock box, not MainActor state.
-    /// Unknown while the first probe is in flight → auto degrades to ax
-    /// for that utterance, then resolves once the answer lands.
-    private let vlmAlive = LockedFlag()
     /// "auto" = detect Indonesian/English (+ the Mac's language) per turn.
     var locale = SpokenLanguage.auto { didSet { rearmServe(); invalidateStt() } }
     /// Pinned TTS voice identifier; "" = best installed voice per language.
     var ttsVoice = "" { didSet { rearmServe() } }
-    var useS2 = true { didSet { rearmServe() } }
+    /// Hard steps always escalate to S2 — the safety design, not a toggle.
+    /// Left as a var so model-assignment helpers can set it harmlessly.
+    var useS2 = true
     var speakReply = true { didSet { rearmServe() } }
     /// Voice interrupt (barge-in): talk over a run or the reply to stop it.
     var voiceInterrupt = true { didSet { rearmServe() } }
@@ -136,27 +132,12 @@ final class AppModel {
         Task {
             let names = await Task.detached { ModelPull.installed() }.value
             self.installedModels = names
-            self.adoptPulledBrainIfUnset(names)
         }
-    }
-
-    /// A terminal `ollama pull` never reaches pullModel(), so the endpoint
-    /// can keep asking for a model that isn't there. When the user never
-    /// picked a brain (still on the default) and exactly one catalog-vision
-    /// model is installed, adopt it — the pull's intent was obvious.
-    private func adoptPulledBrainIfUnset(_ installed: [String]) {
-        guard vlmModel.isEmpty else { return }
-        let vision = installed.filter { n in
-            guard let e = ModelPull.catalog.first(where: { $0.name == n }) else { return false }
-            return e.vision && !e.grounding
-        }
-        if vision.count == 1, let only = vision.first { useAsBrain(only) }
     }
 
     /// One tap: pull a catalog/model name into Ollama. On finish the model
-    /// auto-assigns — a vision model becomes the S1 brain, a text-only
-    /// model becomes S2 — matching how the catalog describes them.
-    func pullModel(_ name: String, vision: Bool, grounding: Bool = false, decision: Bool = false) {
+    /// auto-assigns — a judge model to decision, anything else to S2.
+    func pullModel(_ name: String, decision: Bool = false) {
         guard pullProgress[name] == nil else { return }
         pullProgress[name] = "starting…"
         Task {
@@ -166,16 +147,8 @@ final class AppModel {
                 }
                 pullProgress[name] = nil
                 refreshModels()
-                if decision {
-                    useAsDecision(name)
-                } else if grounding {
-                    useAsGrounder(name)
-                } else if vision {
-                    vlmModel = name; brain = .vlm
-                } else {
-                    s2Model = name; useS2 = true
-                }
-                vlmStatus.refresh(); s2Status.refresh()
+                if decision { useAsDecision(name) } else { useAsS2(name) }
+                s2Status.refresh()
             } catch {
                 pullProgress[name] = "failed: \(error.localizedDescription)"
             }
@@ -183,7 +156,6 @@ final class AppModel {
     }
 
     /// Installed row → wire it into the matching slot without re-downloading.
-    func useAsBrain(_ name: String) { vlmModel = name; brain = .vlm }
     func useAsS2(_ name: String) { s2Model = name; useS2 = true }
     func useAsDecision(_ name: String) {
         decisionBase = "http://localhost:11434"; decisionModel = name
@@ -205,16 +177,16 @@ final class AppModel {
     /// ⌘K — empty the step feed (artifacts on disk stay).
     func clearFeed() {
         guard !running else { return }
-        steps = []; runDir = nil; transcript = ""; status = "idle"
+        steps = []; feed = []; runDir = nil; transcript = ""; status = "idle"
     }
-    /// Grounding only runs on the VLM brain's click steps — pick it too
-    /// unless the user already chose a model brain.
-    func useAsGrounder(_ name: String) {
-        grounderModel = name
-        if brain == .ax { brain = .auto }
-    }
-
     private(set) var steps: [StepRecord] = [] { didSet { syncHUD() } }
+    /// The chat-style feed the main window renders — goals, steps, and
+    /// turn replies in order. `steps` stays the step-only view (HUD, ⌘K).
+    private(set) var feed: [FeedItem] = []
+    private func appendFeed(_ kind: FeedItem.Kind) {
+        feed.append(.init(kind: kind))
+        if feed.count > 400 { feed.removeFirst(feed.count - 400) }
+    }
     private(set) var status = "idle" { didSet { syncHUD() } }
     private(set) var running = false { didSet { syncHUD() } }
     private(set) var listening = false { didSet { syncHUD() } }
@@ -234,7 +206,20 @@ final class AppModel {
     /// the same home as the config file instead.
     private let artifactsRoot = NSHomeDirectory() + "/.s1/artifacts"
     private var parsedVocab: [String] {
-        vocabulary.split(separator: ",").map { String($0) }
+        vocabulary.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+    /// Settings → Voice → Custom words: the list editor's model.
+    var vocabularyList: [String] { parsedVocab }
+    func addVocabularyWord(_ w: String) {
+        let t = w.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        guard !parsedVocab.contains(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) else { return }
+        vocabulary = (parsedVocab + [t]).joined(separator: ", ")
+    }
+    func removeVocabularyWord(_ w: String) {
+        vocabulary = parsedVocab.filter { $0 != w }.joined(separator: ", ")
     }
     /// Cached: Vocabulary.assemble scans /Applications and locale changes
     /// rebuild the recognizer — neither belongs on a per-access path.
@@ -253,18 +238,13 @@ final class AppModel {
     private func invalidateStt() { _stt = nil }
     private var serve: Serve?
     private var rearmTask: Task<Void, Never>?
-    /// Slow re-probe while `auto` finds the endpoint down — Ollama coming
-    /// up after launch must upgrade the brain without a settings change.
-    private var vlmProbeTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
-    /// One-click model install state per endpoint — the closures read the
-    /// user's live field edits, so a changed base/model is what refreshes.
-    /// (`lazy` is off-limits under @Observable — these get wired in init.)
-    let vlmStatus: ModelPullStatus
+    /// One-click model install state for the S2 endpoint — the closures
+    /// read the user's live field edits, so a changed base/model is what
+    /// refreshes. (`lazy` is off-limits under @Observable — wired in init.)
     let s2Status: ModelPullStatus
 
     init() {
-        vlmStatus = ModelPullStatus { Endpoints.vlm() }
         s2Status = ModelPullStatus { Endpoints.s2() }
         // ~/.s1/config.json seeds the app too — model choices made in the app
         // persist, and the CLI picks them up (and vice versa).
@@ -284,8 +264,8 @@ final class AppModel {
         if let e = cfg.tts { ttsBase = e.base ?? ttsBase; ttsModel = e.model ?? "" }
         if let v = cfg.ttsCloudVoice { ttsCloudVoice = v }
         if let vs = cfg.vlmScreenshot { vlmScreenshot = vs }
+        // Old "vlm" values decode to nil → falls back to .auto.
         if let b = cfg.brain, let kind = Brain(rawValue: b) { brain = kind }
-        if let u = cfg.useS2 { useS2 = u }
         if let n = cfg.notchHUD { notchHUD = n }
         if let g = cfg.grounder?.model { grounderModel = g }
         if let b = cfg.decision?.base { decisionBase = b }
@@ -296,7 +276,6 @@ final class AppModel {
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
-        vlmStatus.ep = { [weak self] in self?.vlmEndpoint() ?? Endpoints.vlm() }
         s2Status.ep = { [weak self] in self?.s2Endpoint() ?? Endpoints.s2() }
 
         refreshPermissions()
@@ -339,7 +318,9 @@ final class AppModel {
         return e
     }
 
-    /// VLM endpoint — same precedence as `s2Endpoint`.
+    /// VLM endpoint — kept for config compat (`s1 --policy vlm` on the CLI
+    /// still reads the same config); the app's brain picker no longer
+    /// exposes a model-only mode.
     private func vlmEndpoint() -> Endpoint {
         let env = ProcessInfo.processInfo.environment
         return Endpoints.vlm(
@@ -351,45 +332,23 @@ final class AppModel {
         let langs = SpokenLanguage.candidates(for: locale)
         let voiceID = ttsVoice.isEmpty ? nil : ttsVoice
         let brainKind = brain
-        let s2On = useS2 && !s2Endpoint().needsKey
+        let s2On = !s2Endpoint().needsKey   // hard steps always escalate
         let speakOn = speakReply
-        let shot = vlmScreenshot
         // Resolve endpoints now (MainActor) — the closures Serve holds are
         // non-isolated and must not reach back into the model.
-        let vlmEp = vlmEndpoint()
         let s2Ep = s2Endpoint()
         let decisionEp = decisionEndpoint()
-        let box = vlmAlive
-        // Any rearm replaces the upgrade probe — a brain switch away from
-        // `auto` must kill it outright, not leave it polling.
-        vlmProbeTask?.cancel()
-        if brainKind == .auto {
-            box.value = nil   // re-probe on each rearm — the server may have come up
-            Task { box.value = await AutoPolicy.endpointAlive(vlmEp) }
-            // That one shot isn't enough for a long-lived companion: if the
-            // endpoint comes up later, auto would stay pinned to `ax` until
-            // some unrelated rearm. Probe slowly while down — upgrade only;
-            // a mid-run endpoint death still errors honestly per step.
-            vlmProbeTask = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(60))
-                    if Task.isCancelled || box.value == true { return }
-                    if await AutoPolicy.endpointAlive(vlmEp) {
-                        box.value = true
-                        return
-                    }
-                }
-            }
-        }
         let s = Serve(
             config: .init(
                 makePolicy: {
-                    let wantsModel = !vlmEp.model.isEmpty && (brainKind == .vlm
-                        || (brainKind == .auto && box.value == true))
-                    let pol: any Policy = wantsModel
-                        ? VLMPolicy(endpoint: vlmEp, useScreenshot: shot)
-                        : AXPolicy()
-                    return JudgedPolicy.wrapIfConfigured(pol, endpoint: decisionEp)
+                    // auto = deterministic grammar with the judge model
+                    // voting on each step; ax = grammar alone, zero model
+                    // calls. `wrapIfConfigured` degrades to the bare policy
+                    // when no judge endpoint is configured.
+                    let pol: any Policy = AXPolicy()
+                    return brainKind == .auto
+                        ? JudgedPolicy.wrapIfConfigured(pol, endpoint: decisionEp)
+                        : pol
                 },
                 s2: s2On ? LLMReasoner(endpoint: s2Ep) : nil,
                 speak: speakOn,
@@ -429,11 +388,13 @@ final class AppModel {
                     // button — a voice turn should show its steps, not just
                     // its status line.
                     self.steps = []
+                    self.appendFeed(.goal(ev.text))
                     self.status = "running"
                 case .step:
                     self.serveStatus = "running · \(ev.text)"
                     if let rec = ev.record {
                         self.steps.append(rec)
+                        self.appendFeed(.step(rec))
                         // Serve mode runs forever — cap the feed so a day
                         // of voice turns can't grow the array unboundedly.
                         if self.steps.count > 300 { self.steps.removeFirst(self.steps.count - 300) }
@@ -442,6 +403,7 @@ final class AppModel {
                 case .runDone:
                     self.serveStatus = ev.text
                     self.status = ev.text
+                    self.appendFeed(.reply(ev.text))
                     if let dir = ev.dir { self.runDir = dir }
                 case .sleeping: self.serveState = .idle; self.serveStatus = "idle (sleeping)"
                 case .stopped: self.serveState = .idle; self.serveStatus = "stopped"
@@ -556,27 +518,62 @@ final class AppModel {
         }
     }
 
-    /// Connect a provider family: apply every preset it ships — one click
-    /// wires S1/S2/STT/TTS for that provider. Keys still save per role
-    /// (same key, pasted once per role, or reuse across roles via Keychain).
+    /// Connect a provider family: apply its best preset per role — one
+    /// click wires S1/S2/STT/TTS for that provider.
     func connect(_ family: ProviderFamily) {
-        // One pick per role — recommended first, else the first listed.
         var seen = Set<String>()
         for p in family.presets.sorted(by: { ($0.recommended ?? false) && !($1.recommended ?? false) }) {
             guard seen.insert(p.role).inserted else { continue }
-            switch p.role {
-            case "decision": decisionBase = p.base; decisionModel = p.model
-            case "s2": s2Base = p.base; s2Model = p.model
-            case "vlm": vlmBase = p.base; vlmModel = p.model
-            case "grounder": grounderModel = p.model
-            case "stt": sttBase = p.base; sttModel = p.model
-            case "tts":
-                ttsBase = p.base; ttsModel = p.model
-                if let v = p.voice { ttsCloudVoice = v }
-            default: break
-            }
+            apply(p)
         }
-        status = "\(family.name) connected — save its API key under each pill's role below"
+        status = "\(family.name) connected"
+    }
+
+    /// Apply one preset's base+model to its role — the per-role model
+    /// picker on a provider card goes through here.
+    func apply(_ p: ProviderPreset) {
+        switch p.role {
+        case "decision": decisionBase = p.base; decisionModel = p.model
+        case "s2": s2Base = p.base; s2Model = p.model
+        case "vlm": vlmBase = p.base; vlmModel = p.model
+        case "grounder": grounderModel = p.model
+        case "stt": sttBase = p.base; sttModel = p.model
+        case "tts":
+            ttsBase = p.base; ttsModel = p.model
+            if let v = p.voice { ttsCloudVoice = v }
+        default: break
+        }
+        // connect() applies several presets at once — debounce so the
+        // companion restarts once, not per role.
+        scheduleRearm()
+    }
+
+    /// Provider-card key: one paste covers every role the family ships —
+    /// same credential, stored once per role's Keychain account.
+    func saveKey(_ key: String, forFamily fam: ProviderFamily) {
+        for r in fam.roles.compactMap(ModelRole.init(rawValue:)) { saveKey(key, for: r) }
+    }
+
+    /// "Connected" on the card = a saved key under at least one covered
+    /// role (keys store per role; one provider key unlocks all of them).
+    func familyHasKey(_ fam: ProviderFamily) -> Bool {
+        _ = keyRevision
+        return fam.roles.compactMap(ModelRole.init(rawValue:)).contains { hasKey($0) }
+    }
+
+    /// Auto-test gate: a role is worth probing when a model is set and it
+    /// has a credential — or its endpoint is local and needs none.
+    func roleReady(_ role: ModelRole) -> Bool {
+        let (base, name): (String, String) = switch role {
+        case .decision: (decisionBase, decisionModel)
+        case .s2: (s2Base, s2Model)
+        case .vlm: (vlmBase, vlmModel)
+        case .grounder: (vlmBase, grounderModel)
+        case .stt: (sttBase, sttModel)
+        case .tts: (ttsBase, ttsModel)
+        }
+        guard !name.isEmpty else { return false }
+        return hasKey(role) || Endpoints.isLocal(base)
     }
 
     /// The live decision endpoint (typed-but-unsaved edits count); env wins.
@@ -594,7 +591,7 @@ final class AppModel {
         var out: [String] = []
         let d = decisionModel.trimmingCharacters(in: .whitespaces)
         if !d.isEmpty, d.lowercased() != "off", !decisionIsLocal, !hasKey(.decision) { out.append("S1 (Jev)") }
-        if useS2, s2Endpoint().needsKey { out.append("S2 (\(URL(string: s2Base)?.host ?? "LLM"))") }
+        if s2Endpoint().needsKey { out.append("S2 (\(URL(string: s2Base)?.host ?? "LLM"))") }
         return out
     }
 
@@ -913,24 +910,19 @@ final class AppModel {
         try? FileManager.default.removeItem(atPath: killPath)
         running = true
         steps = []
+        appendFeed(.goal(goalText))
         runDir = nil
         status = "running"
 
-        // Honor `.auto` here too — the companion probes vlmAlive when it
-        // arms, but a window run can happen before (or without) arming, so
-        // kick a probe when the answer is unknown rather than silently
-        // degrading to the grammar.
-        if brain == .auto && vlmAlive.value == nil {
-            let box = vlmAlive
-            Task { box.value = await AutoPolicy.endpointAlive(vlmEndpoint()) }
-        }
-        let wantsModel = !vlmModel.isEmpty && (brain == .vlm || (brain == .auto && vlmAlive.value == true))
-        let pol = JudgedPolicy.wrapIfConfigured(
-            wantsModel ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot) : AXPolicy(),
-            endpoint: decisionEndpoint())
-        let reasoner: (any Reasoner)? = useS2 && !s2Endpoint().needsKey
-            ? LLMReasoner(endpoint: s2Endpoint())
-            : nil
+        // auto = grammar + judge model; ax = grammar alone. Hard steps
+        // always escalate to S2 when its endpoint has credentials.
+        let base: any Policy = AXPolicy()
+        let pol = brain == .auto
+            ? JudgedPolicy.wrapIfConfigured(base, endpoint: decisionEndpoint())
+            : base
+        let reasoner: (any Reasoner)? = s2Endpoint().needsKey
+            ? nil
+            : LLMReasoner(endpoint: s2Endpoint())
 
         do {
             let (report, logger) = try await S1Runner.run(
@@ -940,6 +932,7 @@ final class AppModel {
                 onStep: { [weak self] rec in
                     Task { @MainActor [weak self] in
                         self?.steps.append(rec)
+                        self?.appendFeed(.step(rec))
                         if let n = self?.steps.count, n > 300 { self?.steps.removeFirst(n - 300) }
                     }
                 })
@@ -972,18 +965,19 @@ final class AppModel {
             if recentGoals.count > 8 { recentGoals.removeLast() }
             saveConfig()
             running = false
-            if speakReply {
-                let lang = SpokenLanguage.detect(goalText, among: SpokenLanguage.candidates(for: locale))?
-                    .identifier ?? "en-US"
-                let id = lang.hasPrefix("id")
-                let reply: String = if let answer = report.answer { answer } else {
-                    switch report.status {
-                    case .done: id ? "Selesai" : "Done"
-                    case .needsHuman: id ? "Butuh kamu" : "Needs you"
-                    case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
-                    default: id ? "Berhenti" : "Stopped"
-                    }
+            let lang = SpokenLanguage.detect(goalText, among: SpokenLanguage.candidates(for: locale))?
+                .identifier ?? "en-US"
+            let id = lang.hasPrefix("id")
+            let reply: String = if let answer = report.answer { answer } else {
+                switch report.status {
+                case .done: id ? "Selesai" : "Done"
+                case .needsHuman: id ? "Butuh kamu" : "Needs you"
+                case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
+                default: id ? "Berhenti" : "Stopped"
                 }
+            }
+            appendFeed(.reply(status))
+            if speakReply {
                 // A user Stop means silence — never announce after the fact.
                 if !FileManager.default.fileExists(atPath: killPath) {
                     await speaker.say(reply, language: lang, voice: ttsVoice.isEmpty ? nil : ttsVoice)
@@ -1197,14 +1191,14 @@ final class LockedTail: @unchecked Sendable {
     }
 }
 
-/// Lock-protected tri-state read from @Sendable closures (the auto brain's
-/// endpoint probe lands off-actor; makePolicy reads it on whatever thread
-/// the serve loop calls it from).
-final class LockedFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _v: Bool?
-    var value: Bool? {
-        get { lock.lock(); defer { lock.unlock() }; return _v }
-        set { lock.lock(); _v = newValue; lock.unlock() }
+/// One entry in the main window's conversation feed — the goal the user
+/// asked for, a step the agent took, or the turn's closing line.
+struct FeedItem: Identifiable {
+    enum Kind {
+        case goal(String)
+        case step(StepRecord)
+        case reply(String)
     }
+    let kind: Kind
+    let id = UUID()
 }

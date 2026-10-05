@@ -33,11 +33,10 @@ private struct GeneralSettings: View {
                     ForEach(AppModel.Brain.allCases) { b in Text(b.title).tag(b) }
                 }
                 .pickerStyle(.inline)
-                Toggle("Escalate hard steps to S2 (reasoning LLM)", isOn: $model.useS2)
             } header: {
                 Text("System 1")
             } footer: {
-                Text("Simple commands (open, type, press, scroll) run on the built-in grammar with no model at all. Auto adds the optional vision model (Models → Advanced, off by default) only when the grammar can't place a step.")
+                Text("Auto pairs the instant grammar with the judge model (Models → S1) — the judge can only push a risky step to S2, never act unsafer. AX is the grammar alone: zero model calls. Hard steps always escalate to S2 when it's configured.")
             }
             Section("Companion") {
                 Toggle("Launch at login", isOn: Binding(
@@ -177,6 +176,12 @@ private struct GeneralSettings: View {
 @available(macOS 26, *)
 private struct VoiceSettings: View {
     @Bindable var model: AppModel
+    @State private var newWord = ""
+
+    private func addWord() {
+        model.addVocabularyWord(newWord)
+        newWord = ""
+    }
 
     private var voices: [AVSpeechSynthesisVoice] {
         let codes = Set(SpokenLanguage.candidates(for: model.locale).map(SpokenLanguage.code))
@@ -195,16 +200,52 @@ private struct VoiceSettings: View {
                     Text("English (US)").tag("en-US")
                     Text("English (UK)").tag("en-GB")
                 }
-                LabeledContent("Custom words") {
-                    TextField("e.g. Warp, JIRA", text: $model.vocabulary)
-                        .multilineTextAlignment(.trailing)
-                }
             } header: {
                 Text("Speech recognition")
             } footer: {
                 Text(model.locale == SpokenLanguage.auto
-                     ? "On-device. Automatic listens in \(SpokenLanguage.candidates(for: model.locale).map { Locale.current.localizedString(forIdentifier: $0.identifier) ?? $0.identifier }.joined(separator: " and ")) at once and keeps the one it's surest of. Installed app names are learned automatically."
-                     : "On-device. Installed app names are learned automatically.")
+                     ? "On-device. Automatic listens in \(SpokenLanguage.candidates(for: model.locale).map { Locale.current.localizedString(forIdentifier: $0.identifier) ?? $0.identifier }.joined(separator: " and ")) at once and keeps the one it's surest of."
+                     : "On-device.")
+            }
+            Section {
+                Toggle("Interrupt with my voice (barge-in)", isOn: $model.voiceInterrupt)
+                Picker("End-of-speech detection", selection: $model.vadMode) {
+                    Text("Automatic (Apple VAD + energy)").tag("auto")
+                    Text("Energy only (deterministic)").tag("energy")
+                }
+                Picker("End-of-speech sensitivity", selection: $model.vadSensitivity) {
+                    Text("Low — tolerates pauses").tag("low")
+                    Text("Medium").tag("medium")
+                    Text("High — ends the turn fast").tag("high")
+                }
+            } header: {
+                Text("Listening")
+            } footer: {
+                Text("Barge-in listens (energy only, echo-cancelled) while a run or reply is in flight — say anything and it stops, then keep talking for the next command. High sensitivity cuts the turn sooner after your last word.")
+            }
+            Section {
+                ForEach(model.vocabularyList, id: \.self) { w in
+                    HStack {
+                        Text(w)
+                        Spacer()
+                        Button { model.removeVocabularyWord(w) } label: {
+                            Image(systemName: "minus.circle")
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Remove \(w)")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    TextField("Add a word or name…", text: $newWord)
+                        .onSubmit(addWord)
+                    Button("Add", action: addWord)
+                        .disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: {
+                Text("Custom words")
+            } footer: {
+                Text("Names and jargon the recognizer misspells (Warp, JIRA, Eucaristo). s1 also learns automatically: installed app names, your saved skill names, and names in remembered facts — those don't clutter this list.")
             }
             Section {
                 Menu("Preset") {
@@ -224,28 +265,13 @@ private struct VoiceSettings: View {
                 TextField("Model (empty = on-device)", text: $model.sttModel)
                 if !model.sttModel.isEmpty {
                     KeyRow(model: model, role: .stt)
-                    TestRow(model: model, role: .stt)
+                    TestRow(model: model, role: .stt,
+                            watch: model.sttBase + "|" + model.sttModel)
                 }
             } header: {
                 Text("Cloud recognition (optional)")
             } footer: {
                 Text("Apple still listens on-device (end-of-speech detection, live text). With a model set, each finished turn is re-transcribed in the cloud for accuracy, using your custom words as the spelling hint, and falls back to on-device on any error. Audio leaves the Mac only when this is on.")
-            }
-            Section {
-                Toggle("Interrupt with my voice (barge-in)", isOn: $model.voiceInterrupt)
-                Picker("End-of-speech detection", selection: $model.vadMode) {
-                    Text("Automatic (Apple VAD + energy)").tag("auto")
-                    Text("Energy only (deterministic)").tag("energy")
-                }
-                Picker("End-of-speech sensitivity", selection: $model.vadSensitivity) {
-                    Text("Low — tolerates pauses").tag("low")
-                    Text("Medium").tag("medium")
-                    Text("High — ends the turn fast").tag("high")
-                }
-            } header: {
-                Text("Listening")
-            } footer: {
-                Text("Barge-in listens (energy only, echo-cancelled) while a run or reply is in flight — say anything and it stops, then keep talking for the next command. High sensitivity cuts the turn sooner after your last word.")
             }
             Section {
                 Toggle("Speak results", isOn: $model.speakReply)
@@ -279,7 +305,8 @@ private struct VoiceSettings: View {
                     TextField("Model", text: $model.ttsModel)
                     TextField("Voice", text: $model.ttsCloudVoice)
                     KeyRow(model: model, role: .tts)
-                    TestRow(model: model, role: .tts)
+                    TestRow(model: model, role: .tts,
+                            watch: model.ttsBase + "|" + model.ttsModel)
                 }
             } header: {
                 Text("Speech output")
@@ -341,18 +368,9 @@ struct ModelLibrarySection: View {
                                         .accessibilityHidden(true)
                                     Text(name).lineLimit(1).truncationMode(.tail)
                                     Spacer()
-                                    if name == model.vlmModel && model.brain == .vlm {
-                                        Text("S1").font(.caption.weight(.semibold))
-                                            .foregroundStyle(.tint)
-                                    }
-                                    if name == model.s2Model && model.useS2 {
+                                    if name == model.s2Model {
                                         Text("S2").font(.caption.weight(.semibold))
                                             .foregroundStyle(.purple)
-                                    }
-                                    if name == model.grounderModel {
-                                        Text("⌖").font(.caption.weight(.semibold))
-                                            .foregroundStyle(.orange)
-                                            .accessibilityLabel("click grounder")
                                     }
                                     if name.hasPrefix(model.decisionModel) && !model.decisionModel.isEmpty
                                         && model.decisionIsLocal {
@@ -361,13 +379,7 @@ struct ModelLibrarySection: View {
                                     }
                                     Menu {
                                         Button("Use as decision judge (S1)") { model.useAsDecision(name) }
-                                        Button("Use as brain (S1)") { model.useAsBrain(name) }
                                         Button("Use as reasoner (S2)") { model.useAsS2(name) }
-                                        if name == model.grounderModel {
-                                            Button("Stop using as click grounder") { model.grounderModel = "" }
-                                        } else {
-                                            Button("Use as click grounder") { model.useAsGrounder(name) }
-                                        }
                                     } label: {
                                         Image(systemName: "ellipsis.circle")
                                             .accessibilityLabel("Assign \(name)")
@@ -413,8 +425,7 @@ struct ModelLibrarySection: View {
                                         .frame(maxWidth: 110)
                                 } else {
                                     Button {
-                                        model.pullModel(entry.name, vision: entry.vision,
-                                                        grounding: entry.grounding, decision: entry.decision)
+                                        model.pullModel(entry.name, decision: entry.decision)
                                     } label: {
                                         Image(systemName: "arrow.down.circle")
                                     }
@@ -425,7 +436,7 @@ struct ModelLibrarySection: View {
                             }
                         }
                     }
-                    Text("One tap downloads the model and wires it in — ◆ decision judges check each step, vision models become the S1 brain, text models become S2, ⌖ grounders aim clicks.")
+                    Text("One tap downloads the model and wires it in — ◆ decision models judge each step, everything else becomes the S2 reasoner.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

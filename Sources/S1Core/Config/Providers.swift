@@ -154,25 +154,6 @@ public enum Providers {
               base: "http://localhost:11434/v1", model: "gemma3:4b",
               family: "ollama"),
 
-        // S1 vision brain (advanced — off is recommended).
-        .init(id: "vlm-off", label: "Off (recommended)", role: "vlm",
-              base: "", model: "", recommended: true, family: "builtin"),
-        .init(id: "opencode-vision", label: "OpenCode Go · DeepSeek V4 Flash Vision",
-              role: "vlm", base: Endpoints.defaultS2Base,
-              model: "deepseek-v4-flash-vision-exp",
-              note: "reuses the S2 key on the same provider", family: "opencode"),
-        .init(id: "openrouter-vlm", label: "OpenRouter", role: "vlm",
-              base: "https://openrouter.ai/api/v1", model: "",
-              family: "openrouter"),
-        .init(id: "gemini-vlm", label: "Google · Gemini vision", role: "vlm",
-              base: "https://generativelanguage.googleapis.com/v1beta/openai",
-              model: "gemini-2.5-flash", family: "gemini"),
-        .init(id: "xai-vlm", label: "xAI · Grok vision", role: "vlm",
-              base: "https://api.x.ai/v1", model: "grok-4", family: "xai"),
-        .init(id: "ollama-vlm", label: "Local · Ollama gemma3:4b", role: "vlm",
-              base: "http://localhost:11434/v1", model: "gemma3:4b",
-              family: "ollama"),
-
         // STT — OpenAI-compatible /v1/audio/transcriptions.
         .init(id: "stt-apple", label: "Off · on-device Apple (default)", role: "stt",
               base: "", model: "", recommended: true, family: "builtin"),
