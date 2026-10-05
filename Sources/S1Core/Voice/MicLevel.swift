@@ -48,20 +48,86 @@ public final class MicLevel: @unchecked Sendable {
         return samples.last ?? 0
     }
 
-    /// RMS of a PCM tap buffer → 0–1 display level.
-    /// -50 dB and quieter reads as silence, -10 dB as full bars.
-    public static func push(buffer: AVAudioPCMBuffer) {
-        guard let data = buffer.floatChannelData else { return }
+    /// RMS level of a PCM tap buffer in dBFS (-120 for digital silence).
+    public static func dB(of buffer: AVAudioPCMBuffer) -> Float? {
+        guard let data = buffer.floatChannelData else { return nil }
         let n = Int(buffer.frameLength)
-        guard n > 0 else { return }
+        let chans = Int(buffer.format.channelCount)
+        guard n > 0, chans > 0 else { return nil }
         var sum: Float = 0
-        for c in 0 ..< Int(buffer.format.channelCount) {
+        for c in 0 ..< chans {
             let ch = data[c]
             for i in 0 ..< n { sum += ch[i] * ch[i] }
         }
-        let rms = sqrt(sum / Float(n * Int(buffer.format.channelCount)))
-        guard rms > 0 else { shared.push(0); return }
-        let dB = 20 * log10(rms)
+        let rms = sqrt(sum / Float(n * chans))
+        return rms > 0 ? max(-120, 20 * log10(rms)) : -120
+    }
+
+    /// RMS of a PCM tap buffer → 0–1 display level.
+    /// -50 dB and quieter reads as silence, -10 dB as full bars.
+    /// Returns the buffer's dBFS so the tap can feed an `Endpointer` too.
+    @discardableResult
+    public static func push(buffer: AVAudioPCMBuffer) -> Float? {
+        guard let dB = dB(of: buffer) else { return nil }
         shared.push(max(0, min(1, (dB + 50) / 40)))
+        return dB
+    }
+}
+
+/// Energy endpointer: decides when the user has finished talking, from mic
+/// level alone — independent of the recognizer, which on some systems never
+/// declares an utterance final and kept the mic open for the whole turn.
+///
+/// Speech = level a margin above an adaptive noise floor. The turn ends
+/// after `minSpeech` of voice followed by `trailingSilence` of quiet, or
+/// after `noSpeechTimeout` if the user never spoke.
+public final class Endpointer: @unchecked Sendable {
+    public struct Config: Sendable {
+        public var margin: Float = 10          // dB above noise floor = voiced
+        public var absoluteMin: Float = -52    // never call quieter than this speech
+        public var minSpeech: Double = 0.2
+        public var trailingSilence: Double = 0.8
+        public var noSpeechTimeout: Double = 8
+        public init() {}
+    }
+
+    public enum State: Equatable, Sendable { case waiting, speaking, ended, timedOut }
+
+    private let lock = NSLock()
+    private let config: Config
+    private var floor: Float?
+    private var voiced = 0.0, silence = 0.0, elapsed = 0.0
+    private var _state = State.waiting
+
+    public init(config: Config = Config()) { self.config = config }
+
+    public var state: State { lock.lock(); defer { lock.unlock() }; return _state }
+    public var isDone: Bool { let s = state; return s == .ended || s == .timedOut }
+    public var heardSpeech: Bool { let s = state; return s == .speaking || s == .ended }
+
+    public func feed(buffer: AVAudioPCMBuffer, dB: Float?) {
+        guard let dB, buffer.format.sampleRate > 0 else { return }
+        feed(dB: dB, seconds: Double(buffer.frameLength) / buffer.format.sampleRate)
+    }
+
+    public func feed(dB: Float, seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        guard _state == .waiting || _state == .speaking else { return }
+        elapsed += seconds
+        // Floor drops instantly to quieter frames and creeps up slowly, so
+        // speech itself barely lifts it while room noise changes do.
+        let f = floor.map { dB < $0 ? dB : $0 + (dB - $0) * 0.02 } ?? dB
+        floor = f
+        let isVoice = dB > max(f + config.margin, config.absoluteMin)
+        switch _state {
+        case .waiting:
+            voiced = isVoice ? voiced + seconds : max(0, voiced - seconds)
+            if voiced >= config.minSpeech { _state = .speaking; silence = 0 }
+            else if elapsed >= config.noSpeechTimeout { _state = .timedOut }
+        case .speaking:
+            silence = isVoice ? 0 : silence + seconds
+            if silence >= config.trailingSilence { _state = .ended }
+        default: break
+        }
     }
 }

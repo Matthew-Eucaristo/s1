@@ -106,10 +106,14 @@ public enum Endpoints {
                            env: [String: String] = ProcessInfo.processInfo.environment,
                            config: S1Config = .load(),
         secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint {
-        Endpoint(
-            baseURL: base ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1",
+        let b = base ?? env["S1_VLM_BASE"] ?? config.vlm?.base ?? "http://localhost:11434/v1"
+        let s2Base = env["S1_S2_BASE"] ?? config.s2?.base ?? defaultS2Base
+        // Same provider as S2 (e.g. one OpenCode Go subscription) → one key.
+        let shared = sameHost(b, s2Base) ? (env["S1_S2_KEY"] ?? secret(.s2) ?? config.s2?.key) : nil
+        return Endpoint(
+            baseURL: b,
             model: model ?? env["S1_VLM_MODEL"] ?? config.vlm?.model ?? "gemma3:4b",
-            apiKey: env["S1_VLM_KEY"] ?? secret(.vlm) ?? config.vlm?.key,
+            apiKey: env["S1_VLM_KEY"] ?? secret(.vlm) ?? config.vlm?.key ?? shared,
             // 4k covers the decision prompt (AX digest + format) with room —
             // 8k just doubles the KV allocation on tight 16GB machines.
             numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.vlm?.numCtx ?? 4096)
@@ -119,8 +123,8 @@ public enum Endpoints {
                           config: S1Config = .load(),
         secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint {
         Endpoint(
-            baseURL: env["S1_S2_BASE"] ?? config.s2?.base ?? "http://localhost:11434/v1",
-            model: env["S1_S2_MODEL"] ?? config.s2?.model ?? "gemma3:4b",
+            baseURL: env["S1_S2_BASE"] ?? config.s2?.base ?? defaultS2Base,
+            model: env["S1_S2_MODEL"] ?? config.s2?.model ?? defaultS2Model,
             apiKey: env["S1_S2_KEY"] ?? secret(.s2) ?? config.s2?.key,
             numCtx: env["S1_NUM_CTX"].flatMap(Int.init) ?? config.s2?.numCtx ?? 8192)
     }
@@ -145,19 +149,23 @@ public enum Endpoints {
         SecretStore.get(account: role.rawValue)
     }
 
-    /// The local judge s1 uses when nothing is configured — the best
-    /// calibrated System One model that runs on a 16 GB Mac.
-    public static let defaultDecisionModel = "nimble"
+    /// Hosted defaults: TypeSafe Jev judges S1 steps, OpenCode Go serves
+    /// S2 (DeepSeek V4.1 Flash, OpenAI chat-completions). Local Ollama
+    /// models stay selectable in Settings but aren't the default.
+    public static let defaultDecisionBase = "https://api.typesafe.ai"
+    public static let defaultDecisionModel = "jev-latest"
+    public static let defaultS2Base = "https://opencode.ai/zen/go/v1"
+    public static let defaultS2Model = "deepseek-v4.1-flash"
 
     /// Decision-model endpoint, or nil when the judge is off. Base is the
     /// server root: `http://localhost:11434` (Ollama ≥ 0.35),
     /// `https://api.typesafe.ai` (Jev), or a full Cloudflare
     /// `…/ai/run/@cf/cloudflare/clef` URL.
     ///
-    /// Unset → `nimble` on local Ollama. An empty or "off" model turns the
-    /// judge off. A local Ollama model that isn't pulled yet resolves to nil
-    /// instead of failing every step — the judge is optional caution, never
-    /// a gate, so a missing model just means "no second opinion".
+    /// Unset → hosted Jev. An empty or "off" model turns the judge off. A
+    /// hosted judge with no API key, or a local Ollama model that isn't
+    /// pulled yet, resolves to nil instead of failing every step — the judge
+    /// is optional caution, never a gate.
     public static func decision(env: [String: String] = ProcessInfo.processInfo.environment,
                                 config: S1Config = .load(),
                                 secret: (ModelRole) -> String? = Endpoints.keychainSecret,
@@ -165,18 +173,26 @@ public enum Endpoints {
         let model = (env["S1_DECISION_MODEL"] ?? config.decision?.model ?? defaultDecisionModel)
             .trimmingCharacters(in: .whitespaces)
         guard !model.isEmpty, model.lowercased() != "off" else { return nil }
-        let base = env["S1_DECISION_BASE"] ?? config.decision?.base ?? "http://localhost:11434"
-        if isLocal(base), let have = installed(), !ModelPull.contains(have, model) { return nil }
-        return Endpoint(
-            baseURL: base,
-            model: model,
-            apiKey: env["S1_DECISION_KEY"] ?? secret(.decision) ?? config.decision?.key)
+        let base = env["S1_DECISION_BASE"] ?? config.decision?.base ?? defaultDecisionBase
+        let key = env["S1_DECISION_KEY"] ?? secret(.decision) ?? config.decision?.key
+        if isLocal(base) {
+            if let have = installed(), !ModelPull.contains(have, model) { return nil }
+        } else if (key ?? "").isEmpty {
+            return nil
+        }
+        return Endpoint(baseURL: base, model: model, apiKey: key)
     }
 
     /// `ollama list`, or nil when the Ollama CLI isn't here to ask (a remote
     /// or containerized server can't be checked, so it's trusted).
     public static func localModels() -> [String]? {
         ModelPull.ollamaBinary() == nil ? nil : ModelPull.installed()
+    }
+
+    static func sameHost(_ a: String, _ b: String) -> Bool {
+        guard let x = URL(string: a)?.host?.lowercased(), let y = URL(string: b)?.host?.lowercased(),
+              !isLocal(a) else { return false }
+        return x == y
     }
 
     static func isLocal(_ base: String) -> Bool {

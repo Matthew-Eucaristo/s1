@@ -15,7 +15,7 @@ public struct Grounder: Sendable {
 
     public init(endpoint: Endpoint) {
         self.endpoint = endpoint
-        self.client = ChatClient(endpoint: endpoint)
+        self.client = ChatClient(endpoint: endpoint, role: "s1-grounder")
     }
 
     /// The configured grounder, or nil when none is set.

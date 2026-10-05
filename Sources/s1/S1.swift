@@ -16,7 +16,7 @@ struct S1: AsyncParsableCommand {
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
                       ModelsCmd.self, PullCmd.self, GroundCmd.self, DecideCmd.self,
-                      KeyCmd.self])
+                      KeyCmd.self, UsageCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -134,7 +134,7 @@ struct RunCmd: AsyncParsableCommand {
         guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ValidationError("empty goal — pass --goal or --task")
         }
-        let s2: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        let s2: (any Reasoner)? = s2 ? hostedS2() : nil
         // A stale switch from an earlier `s1 stop` would abort this run at
         // step 0 — disarm it now that a run is genuinely starting.
         try? FileManager.default.removeItem(atPath: killSwitch)
@@ -375,7 +375,7 @@ struct ListenCmd: AsyncParsableCommand {
         default:
             pol = AXPolicy()
         }
-        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        let reasoner: (any Reasoner)? = s2 ? hostedS2() : nil
         // A fresh listen clears a stale kill switch — the user just asked for
         // a new run, so an old "stop" file must not silently abort step 0.
         let kill = NSTemporaryDirectory() + "s1-stop"
@@ -568,7 +568,7 @@ struct ServeCmd: AsyncParsableCommand {
         _ = try validatedSTTPolicy(policy)
         let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
                                vocabulary: sttVocabulary(vocabulary))
-        let reasoner: (any Reasoner)? = s2 ? LLMReasoner(endpoint: Endpoints.s2()) : nil
+        let reasoner: (any Reasoner)? = s2 ? hostedS2() : nil
         // Warm the speech model in the background — the first hotkey press
         // shouldn't pay the cold-load cost mid-conversation.
         Task { await stt.warmup() }
@@ -1240,5 +1240,41 @@ struct KeyCmd: AsyncParsableCommand {
                 print("\(r.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(SecretStore.has(account: r.rawValue) ? "keychain ✓" : "—")")
             }
         }
+    }
+}
+
+/// S2 reasoner, or nil (with a hint) when the hosted default has no key yet.
+func hostedS2() -> (any Reasoner)? {
+    let ep = Endpoints.s2()
+    if ep.needsKey {
+        FileHandle.standardError.write(Data("s2: no API key for \(ep.baseURL) — `s1 key set s2` (S2 off)\n".utf8))
+        return nil
+    }
+    return LLMReasoner(endpoint: ep)
+}
+
+struct UsageCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "usage",
+        abstract: "Model usage per role/model: calls, tokens, prompt-cache hits (from ~/.s1/usage.jsonl).")
+    @Option(help: "Only the last N days.") var days: Int = 30
+    @Flag(help: "Print raw JSONL records instead of the summary.") var raw = false
+
+    func run() async throws {
+        let recs = UsageLog.load(since: Date().addingTimeInterval(-Double(days) * 86_400))
+        if raw {
+            let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601; enc.outputFormatting = .sortedKeys
+            for r in recs { if let d = try? enc.encode(r) { print(String(decoding: d, as: UTF8.self)) } }
+            return
+        }
+        guard !recs.isEmpty else { print("no model calls logged in the last \(days) days"); return }
+        print("role          model                         calls  fail  input     output   cached  hit%  avg ms")
+        for s in UsageLog.summarize(recs) {
+            let hit = s.cacheHitRate.map { String(format: "%4.0f", $0 * 100) } ?? "   -"
+            print(String(format: "%@ %@ %5d %5d %9d %9d %8d  %@ %7d",
+                         s.role.padding(toLength: 13, withPad: " ", startingAt: 0),
+                         s.model.padding(toLength: 29, withPad: " ", startingAt: 0),
+                         s.calls, s.failures, s.input, s.output, s.cached, hit, s.avgMs))
+        }
+        print("log: \(UsageLog.path)")
     }
 }

@@ -30,6 +30,10 @@ public struct Endpoint: Sendable {
     /// 400s on unknown fields, so the wire body keeps them local-only.
     /// Match the HOST, not the URL text: "api.x.com/?next=localhost" or
     /// "mylocalhost.evil.com" are remote servers, not loopback.
+    /// A hosted endpoint with no API key can't answer — callers treat the
+    /// role as unconfigured instead of failing every request with a 401.
+    public var needsKey: Bool { !isLocal && (apiKey ?? "").isEmpty }
+
     public var isLocal: Bool {
         guard let host = URLComponents(string: baseURL)?.host?.lowercased(),
               !host.isEmpty else {
@@ -58,22 +62,23 @@ public struct ChatMessage: Codable, Sendable {
 /// Minimal OpenAI-compatible chat client — no SDK dependency, ~80 lines.
 public struct ChatClient: Sendable {
     public var endpoint: Endpoint
-    public init(endpoint: Endpoint) { self.endpoint = endpoint }
+    /// Who is calling — tags usage records (`s1-vlm`, `s1-grounder`, `s2`).
+    public var role: String
+    public init(endpoint: Endpoint, role: String = "chat") {
+        self.endpoint = endpoint
+        self.role = role
+    }
 
-    /// Send chat messages; returns the assistant text. When `imageBase64` is
-    /// set on a message it is sent as an OpenAI vision `image_url` part.
-    public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
-                     temperature: Double = 0.0) async throws -> String {
-        guard let url = URL(string: "\(endpoint.baseURL)/chat/completions") else {
-            throw S1Error.aborted("invalid endpoint base URL '\(endpoint.baseURL)' — check config")
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 300   // local models on CPU can be slow
-        if let key = endpoint.apiKey { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
+    /// DeepSeek V4 models think by default; a decision engine wants the
+    /// fast non-thinking path (official `thinking` toggle, OpenAI format).
+    static func providerExtras(model: String) -> [String: Any] {
+        model.lowercased().contains("deepseek") ? ["thinking": ["type": "disabled"]] : [:]
+    }
 
+    static func requestBody(endpoint: Endpoint, messages: [ChatMessage], maxTokens: Int,
+                            temperature: Double, extras: Bool = true) -> [String: Any] {
+        // Messages go out in order: stable system prompt first, volatile
+        // screen/state last — the prefix providers cache automatically.
         let wire: [[String: Any]] = messages.map { m in
             if let img = m.imageBase64 {
                 return ["role": m.role, "content": [
@@ -102,17 +107,70 @@ public struct ChatClient: Sendable {
             // Strict OpenAI spec: reasoning models only take the newer key,
             // chat models accept it too — the safe remote cap.
             body["max_completion_tokens"] = maxTokens
+            if extras { body.merge(providerExtras(model: endpoint.model)) { a, _ in a } }
         }
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return body
+    }
 
-        let (data, resp) = try await Self.session.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw S1Error.aborted("no http response") }
-        guard http.statusCode == 200 else {
-            throw S1Error.aborted("LLM \(http.statusCode): \(String(decoding: data.prefix(300), as: UTF8.self))")
+    /// Assistant text plus usage from a chat-completions reply. Falls back
+    /// to `reasoning_content` when a thinking model spent its turn there.
+    static func parse(_ data: Data) throws -> (text: String, served: String?, counts: TokenCounts) {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw S1Error.aborted("LLM reply not JSON")
         }
-        struct R: Decodable { struct C: Decodable { struct M: Decodable { let content: String }; let message: M }; let choices: [C] }
-        let r = try JSONDecoder().decode(R.self, from: data)
-        return r.choices.first?.message.content ?? ""
+        let msg = ((obj["choices"] as? [[String: Any]])?.first?["message"]) as? [String: Any]
+        var text = msg?["content"] as? String ?? ""
+        if text.isEmpty, let r = msg?["reasoning_content"] as? String { text = r }
+        return (text, obj["model"] as? String, UsageLog.counts(fromUsage: obj["usage"] as? [String: Any]))
+    }
+
+    /// Send chat messages; returns the assistant text. When `imageBase64` is
+    /// set on a message it is sent as an OpenAI vision `image_url` part.
+    /// Every call is metered to the usage log (numbers only, no content).
+    public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
+                     temperature: Double = 0.0) async throws -> String {
+        guard let url = URL(string: "\(endpoint.baseURL)/chat/completions") else {
+            throw S1Error.aborted("invalid endpoint base URL '\(endpoint.baseURL)' — check config")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 300   // local models on CPU can be slow
+        if let key = endpoint.apiKey, !key.isEmpty {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
+
+        let started = Date()
+        let host = URL(string: endpoint.baseURL)?.host ?? endpoint.baseURL
+        func record(ok: Bool, served: String? = nil, counts: TokenCounts = TokenCounts(), error: String? = nil) {
+            UsageLog.append(UsageRecord(role: role, host: host, model: endpoint.model, served: served,
+                input: counts.input, output: counts.output, cached: counts.cached,
+                cacheMiss: counts.cacheMiss, reasoning: counts.reasoning,
+                ms: Int(Date().timeIntervalSince(started) * 1000), ok: ok,
+                error: error.map(UsageLog.scrub)))
+        }
+        let withExtras = !endpoint.isLocal && !Self.providerExtras(model: endpoint.model).isEmpty
+        var attempt = 0
+        while true {
+            let body = Self.requestBody(endpoint: endpoint, messages: messages, maxTokens: maxTokens,
+                                        temperature: temperature, extras: attempt == 0)
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let data: Data, resp: URLResponse
+            do { (data, resp) = try await Self.session.data(for: req) }
+            catch { record(ok: false, error: error.localizedDescription); throw error }
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            // A gateway that rejects the provider toggle gets one plain retry.
+            if code == 400, withExtras, attempt == 0 { attempt += 1; continue }
+            guard code == 200 else {
+                let snippet = String(decoding: data.prefix(300), as: UTF8.self)
+                record(ok: false, error: "HTTP \(code): \(snippet)")
+                throw S1Error.aborted("LLM \(code): \(snippet)")
+            }
+            let r = try Self.parse(data)
+            record(ok: true, served: r.served, counts: r.counts)
+            return r.text
+        }
     }
 
     /// One session for the process — keeps TCP/TLS connections warm across

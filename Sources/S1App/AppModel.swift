@@ -40,7 +40,7 @@ final class AppModel {
     var locale = SpokenLanguage.auto { didSet { rearmServe(); invalidateStt() } }
     /// Pinned TTS voice identifier; "" = best installed voice per language.
     var ttsVoice = "" { didSet { rearmServe() } }
-    var useS2 = false { didSet { rearmServe() } }
+    var useS2 = true { didSet { rearmServe() } }
     var speakReply = true { didSet { rearmServe() } }
     /// Text fields debounce — rearming the hotkey per keystroke would tear
     /// the tap down and back up while the user is still typing.
@@ -48,8 +48,8 @@ final class AppModel {
     var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
     /// S2 (the escalation reasoner) gets its own endpoint — often a bigger
     /// model than S1's, or a cloud one behind an API key.
-    var s2Base = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
-    var s2Model = "gemma3:4b" { didSet { scheduleRearm() } }
+    var s2Base = Endpoints.defaultS2Base { didSet { scheduleRearm() } }
+    var s2Model = Endpoints.defaultS2Model { didSet { scheduleRearm() } }
     /// VLM brains see a screenshot every step when on (richer grounding,
     /// more tokens + Screen Recording needed); off = AX-tree-only prompts.
     var vlmScreenshot = true { didSet { scheduleRearm() } }
@@ -57,7 +57,7 @@ final class AppModel {
     /// from config by VLMPolicy at run time, so a save is enough.
     var grounderModel = "" { didSet { scheduleSave() } }
     /// S1 decision model (System One API) — empty = no judge.
-    var decisionBase = "http://localhost:11434" { didSet { scheduleRearm() } }
+    var decisionBase = Endpoints.defaultDecisionBase { didSet { scheduleRearm() } }
     var decisionModel = Endpoints.defaultDecisionModel { didSet { scheduleRearm() } }
     /// The configured judge model is pulled into local Ollama (or remote).
     var decisionReady: Bool {
@@ -292,7 +292,7 @@ final class AppModel {
         let langs = SpokenLanguage.candidates(for: locale)
         let voiceID = ttsVoice.isEmpty ? nil : ttsVoice
         let brainKind = brain
-        let s2On = useS2
+        let s2On = useS2 && !s2Endpoint().needsKey
         let speakOn = speakReply
         let shot = vlmScreenshot
         // Resolve endpoints now (MainActor) — the closures Serve holds are
@@ -438,7 +438,7 @@ final class AppModel {
             : .init(base: cfg.grounder?.base, model: grounderModel,
                     key: cfg.grounder?.key, numCtx: cfg.grounder?.numCtx)
         // Always written — an empty model is the explicit "judge off"; nil
-        // would fall back to the nimble default.
+        // would fall back to the hosted Jev default.
         cfg.decision = .init(base: decisionBase, model: decisionModel.trimmingCharacters(in: .whitespaces),
                              key: cfg.decision?.key, numCtx: nil)
         cfg.voice = ttsVoice.isEmpty ? nil : ttsVoice
@@ -451,6 +451,22 @@ final class AppModel {
         let m = decisionModel.trimmingCharacters(in: .whitespaces)
         cfg.decision = .init(base: decisionBase, model: m, key: cfg.decision?.key)
         return Endpoints.decision(config: cfg)
+    }
+
+    /// Hosted roles still waiting for an API key — drives the one-line
+    /// setup hint in the main window (nothing shows once keys are in).
+    var missingKeys: [String] {
+        _ = keyRevision
+        var out: [String] = []
+        let d = decisionModel.trimmingCharacters(in: .whitespaces)
+        if !d.isEmpty, d.lowercased() != "off", !decisionIsLocal, !hasKey(.decision) { out.append("S1 (Jev)") }
+        if useS2, s2Endpoint().needsKey { out.append("S2 (\(URL(string: s2Base)?.host ?? "LLM"))") }
+        return out
+    }
+
+    /// Last 30 days of metered model calls, grouped by role + model.
+    func usageSummary() -> [UsageLog.Summary] {
+        UsageLog.summarize(UsageLog.load(since: Date().addingTimeInterval(-30 * 86_400)))
     }
 
     func hasKey(_ role: ModelRole) -> Bool {
@@ -703,7 +719,7 @@ final class AppModel {
         let pol = JudgedPolicy.wrapIfConfigured(
             wantsModel ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot) : AXPolicy(),
             endpoint: decisionEndpoint())
-        let reasoner: (any Reasoner)? = useS2
+        let reasoner: (any Reasoner)? = useS2 && !s2Endpoint().needsKey
             ? LLMReasoner(endpoint: s2Endpoint())
             : nil
 

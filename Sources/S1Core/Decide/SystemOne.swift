@@ -77,6 +77,17 @@ public struct DecisionAnswer: Codable, Sendable, Equatable {
 public struct DecisionResult: Codable, Sendable {
     public var model: String?
     public var answers: [String: DecisionAnswer]
+    public var usage: DecisionUsage?
+
+    public init(model: String? = nil, answers: [String: DecisionAnswer], usage: DecisionUsage? = nil) {
+        self.model = model; self.answers = answers; self.usage = usage
+    }
+}
+
+/// System One usage block (`input_tokens`/`output_tokens`; Jev bills input).
+public struct DecisionUsage: Codable, Sendable, Equatable {
+    public var input_tokens: Int?
+    public var output_tokens: Int?
 }
 
 /// Anything that answers typed questions about a state.
@@ -145,14 +156,29 @@ public struct SystemOneClient: DecisionJudge {
         }
         for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         req.httpBody = try Self.body(model: endpoint.model, state: state, questions: questions)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let started = Date()
+        let host = url.host ?? endpoint.baseURL
+        func record(_ ok: Bool, _ r: DecisionResult? = nil, error: String? = nil) {
+            UsageLog.append(UsageRecord(role: "s1-decision", host: host, model: endpoint.model,
+                served: r?.model, input: r?.usage?.input_tokens, output: r?.usage?.output_tokens,
+                ms: Int(Date().timeIntervalSince(started) * 1000), ok: ok,
+                error: error.map(UsageLog.scrub)))
+        }
+        let data: Data, resp: URLResponse
+        do { (data, resp) = try await URLSession.shared.data(for: req) }
+        catch { record(false, error: error.localizedDescription); throw error }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else {
             // Error bodies never carry our key — but keep them short.
             let snippet = String(decoding: data.prefix(200), as: UTF8.self).terminalSafe
+            record(false, error: "HTTP \(code): \(snippet)")
             throw S1Error.aborted("decision model HTTP \(code): \(snippet)")
         }
-        return try Self.decode(data)
+        do {
+            let r = try Self.decode(data)
+            record(true, r)
+            return r
+        } catch { record(false, error: "undecodable reply"); throw error }
     }
 }
 

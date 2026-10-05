@@ -386,23 +386,25 @@ public struct SpeechToText: Sendable {
             req.endAudio()
             MicLevel.shared.reset()
         }
+        let endpointer = Endpointer()
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            MicLevel.push(buffer: buffer)
+            endpointer.feed(buffer: buffer, dB: MicLevel.push(buffer: buffer))
             req.append(buffer)
         }
         tapInstalled = true
         engine.prepare()
         try engine.start()
-        // Listen for the full turn — but bail the moment recognition fails,
-        // or a final transcript lands early (the recognizer decided the
-        // utterance ended; burning the rest of the turn adds only silence).
+        // End the turn when the user stops talking (energy endpointer), when
+        // recognition fails, or when a final transcript lands early — this
+        // recognizer rarely declares "final" on its own mid-stream.
         var waited = 0.0
-        while waited < maxSeconds, failure.value == nil, !finished.get {
-            try await Task.sleep(nanoseconds: 200_000_000)
-            waited += 0.2
+        while waited < maxSeconds, failure.value == nil, !finished.get, !endpointer.isDone {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            waited += 0.1
         }
-        // Give the final result a moment to arrive, then settle.
-        for _ in 0 ..< 20 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
+        // Close the audio so the recognizer finalizes what it has now.
+        req.endAudio()
+        for _ in 0 ..< 15 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
         task.finish()
         // finish() delivers the final result asynchronously — give that
         // callback a beat too, or the last words get read as silence.
@@ -463,8 +465,9 @@ public struct SpeechToText: Sendable {
         if needsConversion, converter == nil {
             throw S1Error.aborted("cannot convert mic audio to the speech analyzer's format")
         }
+        let endpointer = Endpointer()
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            MicLevel.push(buffer: buffer)
+            endpointer.feed(buffer: buffer, dB: MicLevel.push(buffer: buffer))
             let feed: AVAudioPCMBuffer
             if needsConversion {
                 guard let converter, let best,
@@ -519,16 +522,21 @@ public struct SpeechToText: Sendable {
             let stream = streams[i].0
             inputTasks.append(Task { try await a.start(inputSequence: stream) })
         }
-        // End the turn on speech, not on the clock: VAD says the utterance
-        // ended, or once a final segment has landed a short grace catches
+        // End the turn on speech, not on the clock: VAD (SpeechDetector or
+        // the energy endpointer) says the utterance ended, or once a final
+        // segment has landed a short grace catches
         // trailing words. Burning the full maxSeconds after every command
         // made every voice turn feel frozen.
         var waited = 0.0
         while waited < maxSeconds {
             try await Task.sleep(nanoseconds: 150_000_000)
             waited += 0.15
-            if speechEnded.get { break }
-            if await collectors[0].hasContent, await collectors[0].idleFor(0.9) { break }
+            if speechEnded.get || endpointer.isDone { break }
+            var settled = false
+            for c in collectors {
+                if await c.hasContent, await c.idleFor(0.9) { settled = true; break }
+            }
+            if settled { break }
         }
         continuations.forEach { $0.finish() }
         var laneErrors: [Error] = []

@@ -12,6 +12,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 14) {
             if !model.permissions.ready { onboardingBanner }
+            else if !model.missingKeys.isEmpty { keysBanner }
             commandCard
             controlRow
             companionRow
@@ -34,6 +35,20 @@ struct ContentView: View {
     }
 
     // MARK: - pieces
+
+    /// Hosted brains need a key once; until then s1 still runs on its
+    /// deterministic grammar, so this is a hint, not a gate.
+    private var keysBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "key.fill").foregroundStyle(.orange).accessibilityHidden(true)
+            Text("Add an API key for \(model.missingKeys.joined(separator: " and ")) to turn on the hosted models.")
+                .font(.callout)
+            Spacer()
+            SettingsLink { Text("Add Key…") }
+        }
+        .padding(10)
+        .glassEffect(in: .rect(cornerRadius: 12))
+    }
 
     private var commandCard: some View {
         GlassEffectContainer {

@@ -13,27 +13,27 @@ struct ConnectionsView: View {
                 decisionStatus
                 Section {
                     presetMenu([
-                        ("Ollama · nimble 9B (local)", "http://localhost:11434", "nimble"),
-                        ("Ollama · tev1 4B (local)", "http://localhost:11434", "tev1"),
-                        ("Ollama · tev1 0.8B (local, fastest)", "http://localhost:11434", "tev1:0.8b"),
-                        ("Ollama · clef-flash 9B (local, vision)", "http://localhost:11434", "clef-flash"),
-                        ("TypeSafe · Jev (hosted)", "https://api.typesafe.ai", "jev-latest"),
+                        ("TypeSafe · Jev (recommended)", Endpoints.defaultDecisionBase, Endpoints.defaultDecisionModel),
                         ("Cloudflare · Clef (Workers AI)",
                          "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef", "clef"),
+                        ("Local · Ollama nimble 9B (advanced)", "http://localhost:11434", "nimble"),
+                        ("Local · Ollama tev1 4B (advanced)", "http://localhost:11434", "tev1"),
+                        ("Local · Ollama clef-flash 9B (advanced)", "http://localhost:11434", "clef-flash"),
                     ]) { model.decisionBase = $0; model.decisionModel = $1 }
                     TextField("Server", text: $model.decisionBase)
-                    TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text("nimble"))
+                    TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text(Endpoints.defaultDecisionModel))
                     KeyRow(model: model, role: .decision)
                     TestRow(model: model, role: .decision)
                 } header: {
                     Text("S1 · Decision model")
                 } footer: {
-                    Text("Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
+                    Text("Default: TypeSafe Jev (get a key at typesafe.ai). Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
                 }
                 Section {
                     presetMenu([
-                        ("Ollama (local)", "http://localhost:11434/v1", model.vlmModel),
+                        ("OpenCode Go · DeepSeek V4 Flash Vision", Endpoints.defaultS2Base, "deepseek-v4-flash-vision-exp"),
                         ("OpenRouter", "https://openrouter.ai/api/v1", model.vlmModel),
+                        ("Local · Ollama (advanced)", "http://localhost:11434/v1", "gemma3:4b"),
                     ]) { model.vlmBase = $0; model.vlmModel = $1 }
                     TextField("Base URL", text: $model.vlmBase)
                     TextField("Vision model", text: $model.vlmModel)
@@ -45,14 +45,17 @@ struct ConnectionsView: View {
                 } header: {
                     Text("S1 · Vision + click grounder")
                 } footer: {
-                    Text("OpenAI-compatible chat with images. Used when the brain is VLM (or Auto with the server up).")
+                    Text("OpenAI-compatible chat with images. Used when the brain is VLM (or Auto with the server up). On the same provider as S2 the S2 key is reused.")
                 }
                 Section {
                     presetMenu([
-                        ("Ollama (local)", "http://localhost:11434/v1", "gemma3:4b"),
+                        ("OpenCode Go · DeepSeek V4.1 Flash (recommended)", Endpoints.defaultS2Base, Endpoints.defaultS2Model),
+                        ("OpenCode Go · DeepSeek V4 Pro", Endpoints.defaultS2Base, "deepseek-v4-pro"),
+                        ("DeepSeek API · V4.1 Flash", "https://api.deepseek.com", "deepseek-flash"),
                         ("OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-oss-120b"),
                         ("OpenAI", "https://api.openai.com/v1", model.s2Model),
                         ("Groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
+                        ("Local · Ollama (advanced)", "http://localhost:11434/v1", "gemma3:4b"),
                     ]) { model.s2Base = $0; model.s2Model = $1 }
                     TextField("Base URL", text: $model.s2Base)
                     TextField("Model", text: $model.s2Model)
@@ -63,8 +66,9 @@ struct ConnectionsView: View {
                 } header: {
                     Text("S2 · Reasoning LLM")
                 } footer: {
-                    Text("Any OpenAI-compatible /v1/chat/completions server. Gets low-confidence and judge-vetoed steps.")
+                    Text("Recommended: OpenCode Go subscription key + DeepSeek V4.1 Flash. Any OpenAI-compatible /v1/chat/completions server works. Gets low-confidence and judge-vetoed steps. Local models are optional and not recommended.")
                 }
+                UsageSection(model: model)
                 ModelLibrarySection(model: model)
                 Section {
                 } footer: {
@@ -158,5 +162,40 @@ private struct TestRow: View {
             .disabled(testing)
             Text(result).font(.caption).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         }
+    }
+}
+
+/// Metered calls per role/model — numbers only, from ~/.s1/usage.jsonl.
+@available(macOS 26, *)
+private struct UsageSection: View {
+    @Bindable var model: AppModel
+    @State private var rows: [UsageLog.Summary] = []
+
+    var body: some View {
+        Section {
+            if rows.isEmpty {
+                Text("No model calls yet.").foregroundStyle(.secondary)
+            }
+            ForEach(rows, id: \.self) { r in
+                LabeledContent {
+                    Text(Self.line(r)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                } label: {
+                    Text("\(r.role) · \(r.model)")
+                }
+            }
+            Button("Refresh") { rows = model.usageSummary() }
+        } header: {
+            Text("Usage · last 30 days")
+        } footer: {
+            Text("Tokens and prompt-cache hits as each provider reports them. Full log: s1 usage, or ~/.s1/usage.jsonl.")
+        }
+        .onAppear { rows = model.usageSummary() }
+    }
+
+    static func line(_ r: UsageLog.Summary) -> String {
+        var s = "\(r.calls) calls · \(r.input) in / \(r.output) out"
+        if let h = r.cacheHitRate, r.cached > 0 { s += " · cache \(Int(h * 100))%" }
+        if r.failures > 0 { s += " · \(r.failures) failed" }
+        return s + " · \(r.avgMs) ms avg"
     }
 }

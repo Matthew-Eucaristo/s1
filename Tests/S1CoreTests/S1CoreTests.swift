@@ -1427,7 +1427,11 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(e.numCtx == 4096)   // VLM decision prompts fit in 4k; 8k doubled KV
     let s = Endpoints.s2(env: ["S1_S2_MODEL": "big-model"], config: S1Config())
     #expect(s.model == "big-model")
-    #expect(s.baseURL == "http://localhost:11434/v1")  // env base unset → default
+    #expect(s.baseURL == "https://opencode.ai/zen/go/v1")  // env base unset → hosted default
+    let d = Endpoints.s2(env: [:], config: S1Config(), secret: { _ in nil })
+    #expect(d.model == "deepseek-v4.1-flash")
+    #expect(d.needsKey)
+    #expect(!Endpoints.s2(env: [:], config: S1Config(), secret: { _ in "k" }).needsKey)
 }
 
 @Test func endpointTrimsTrailingSlash() {
@@ -1889,15 +1893,24 @@ private struct StubJudge: DecisionJudge {
 @Test func endpointKeysPreferEnvThenKeychainThenFile() {
     var cfg = S1Config()
     cfg.s2 = .init(base: "https://openrouter.ai/api/v1", model: "x", key: "file-key")
-    cfg.decision = .init(model: "nimble")
+    cfg.decision = .init(base: "http://localhost:11434", model: "nimble")
     #expect(Endpoints.s2(env: [:], config: cfg, secret: { _ in nil }).apiKey == "file-key")
     #expect(Endpoints.s2(env: [:], config: cfg, secret: { $0 == .s2 ? "kc-key" : nil }).apiKey == "kc-key")
     #expect(Endpoints.s2(env: ["S1_S2_KEY": "env-key"], config: cfg, secret: { _ in "kc-key" }).apiKey == "env-key")
     #expect(Endpoints.decision(env: [:], config: cfg, secret: { _ in nil }, installed: { nil })?.baseURL == "http://localhost:11434")
 }
 
-@Test func decisionDefaultsToNimbleOnlyWhenPulled() {
+@Test func decisionDefaultsToHostedJevOnlyWithKey() {
     let none = S1Config()
+    let jevDefault = Endpoints.decision(env: [:], config: none, secret: { $0 == .decision ? "k" : nil }, installed: { [] })
+    #expect(jevDefault?.model == "jev-latest")
+    #expect(jevDefault?.baseURL == "https://api.typesafe.ai")
+    // No key yet → judge quietly off, deterministic S1 keeps working.
+    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil }, installed: { nil }) == nil)
+}
+
+@Test func localDecisionModelOnlyWhenPulled() {
+    var none = S1Config(); none.decision = .init(base: "http://localhost:11434", model: "nimble")
     #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
                                installed: { ["nimble:latest"] })?.model == "nimble")
     // Not pulled → judge quietly off instead of failing every step.
@@ -1978,4 +1991,99 @@ private struct StubJudge: DecisionJudge {
         .decide(observation: NullPerceiver().observation, goal: "open TextEdit", history: [])
     #expect(d.confidence > 0.5)
     #expect(!d.rationale.contains("judge"))
+}
+
+@Test func vlmReusesS2KeyOnSameProvider() {
+    var cfg = S1Config()
+    cfg.vlm = .init(base: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash-vision-exp")
+    #expect(Endpoints.vlm(env: [:], config: cfg, secret: { $0 == .s2 ? "go" : nil }).apiKey == "go")
+    cfg.vlm = .init(base: "https://openrouter.ai/api/v1", model: "x")
+    #expect(Endpoints.vlm(env: [:], config: cfg, secret: { $0 == .s2 ? "go" : nil }).apiKey == nil)
+}
+
+@Test func usageCountsFromEveryProviderShape() {
+    let openai = UsageLog.counts(fromUsage: ["prompt_tokens": 100, "completion_tokens": 9,
+        "prompt_tokens_details": ["cached_tokens": 64], "completion_tokens_details": ["reasoning_tokens": 3]])
+    #expect(openai == TokenCounts(input: 100, output: 9, cached: 64, cacheMiss: nil, reasoning: 3))
+    let ds = UsageLog.counts(fromUsage: ["prompt_tokens": 100, "completion_tokens": 5,
+        "prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 20])
+    #expect(ds.cached == 80 && ds.cacheMiss == 20)
+    let jev = UsageLog.counts(fromUsage: ["input_tokens": 392, "output_tokens": 65])
+    #expect(jev.input == 392 && jev.output == 65 && jev.cached == nil)
+    #expect(UsageLog.counts(fromUsage: nil) == TokenCounts())
+}
+
+@Test func chatParseReadsUsageAndReasoningFallback() throws {
+    let body = #"{"model":"deepseek-v4.1-flash","choices":[{"message":{"content":"","reasoning_content":"{\"x\":1}"}}],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_cache_hit_tokens":8}}"#
+    let r = try ChatClient.parse(Data(body.utf8))
+    #expect(r.text == #"{"x":1}"#)
+    #expect(r.served == "deepseek-v4.1-flash")
+    #expect(r.counts.cached == 8)
+}
+
+@Test func deepseekGetsNonThinkingToggleRemoteOnly() {
+    let ep = Endpoint(baseURL: "https://opencode.ai/zen/go/v1", model: "deepseek-v4.1-flash", apiKey: "k")
+    let b = ChatClient.requestBody(endpoint: ep, messages: [ChatMessage(role: "user", content: "hi")],
+                                   maxTokens: 10, temperature: 0)
+    #expect((b["thinking"] as? [String: String])?["type"] == "disabled")
+    #expect(b["max_completion_tokens"] as? Int == 10)
+    #expect(ChatClient.requestBody(endpoint: ep, messages: [], maxTokens: 10, temperature: 0, extras: false)["thinking"] == nil)
+    let other = Endpoint(baseURL: "https://api.openai.com/v1", model: "gpt-5", apiKey: "k")
+    #expect(ChatClient.requestBody(endpoint: other, messages: [], maxTokens: 10, temperature: 0)["thinking"] == nil)
+}
+
+@Test func s2SystemPromptIsStableForCaching() {
+    // The cacheable prefix must not depend on the goal or screen.
+    #expect(!LLMReasoner.systemPrompt.contains("Goal:"))
+    #expect(LLMReasoner.systemPrompt.contains("UNTRUSTED"))
+}
+
+@Test func usageLogRoundTripsAndSummarizes() throws {
+    let path = NSTemporaryDirectory() + "usage-\(UUID().uuidString).jsonl"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    UsageLog.append(UsageRecord(role: "s2", host: "opencode.ai", model: "m", input: 100, output: 5, cached: 50, ms: 200, ok: true), path: path)
+    UsageLog.append(UsageRecord(role: "s2", host: "opencode.ai", model: "m", input: 100, output: 5, ms: 400, ok: false, error: "x"), path: path)
+    let recs = UsageLog.load(path: path)
+    #expect(recs.count == 2)
+    let s = UsageLog.summarize(recs)
+    #expect(s.count == 1 && s[0].calls == 2 && s[0].failures == 1 && s[0].cached == 50 && s[0].avgMs == 300)
+    #expect(s[0].cacheHitRate == 0.25)
+    #expect(!UsageLog.scrub("bad key Bearer sk-abcdef123456789").contains("abcdef123456789"))
+}
+
+@Test func decisionResultDecodesJevUsage() throws {
+    let r = try SystemOneClient.decode(Data(#"{"model":"jev-1.13.0","answers":{},"usage":{"input_tokens":392,"output_tokens":65}}"#.utf8))
+    #expect(r.model == "jev-1.13.0" && r.usage?.input_tokens == 392)
+}
+
+@Test func endpointerEndsAfterTrailingSilence() {
+    let e = Endpointer()
+    for _ in 0 ..< 5 { e.feed(dB: -70, seconds: 0.1) }      // room noise
+    #expect(e.state == .waiting)
+    for _ in 0 ..< 10 { e.feed(dB: -30, seconds: 0.1) }     // speech
+    #expect(e.state == .speaking)
+    for _ in 0 ..< 5 { e.feed(dB: -68, seconds: 0.1) }      // brief pause
+    #expect(e.state == .speaking)
+    e.feed(dB: -30, seconds: 0.1)                            // resumes
+    for _ in 0 ..< 9 { e.feed(dB: -68, seconds: 0.1) }
+    #expect(e.state == .ended)
+}
+
+@Test func endpointerTimesOutWithoutSpeechAndIgnoresClicks() {
+    let e = Endpointer()
+    e.feed(dB: -70, seconds: 0.1)
+    e.feed(dB: -20, seconds: 0.05)                           // a click, too short to be speech
+    for _ in 0 ..< 79 { e.feed(dB: -70, seconds: 0.1) }
+    #expect(e.state == .timedOut)
+    #expect(!e.heardSpeech)
+}
+
+@Test func endpointerAdaptsToNoisyRoom() {
+    let e = Endpointer()
+    for _ in 0 ..< 20 { e.feed(dB: -40, seconds: 0.1) }      // steady fan noise
+    #expect(e.state == .waiting)
+    for _ in 0 ..< 5 { e.feed(dB: -22, seconds: 0.1) }
+    #expect(e.state == .speaking)
+    for _ in 0 ..< 9 { e.feed(dB: -40, seconds: 0.1) }
+    #expect(e.state == .ended)
 }
