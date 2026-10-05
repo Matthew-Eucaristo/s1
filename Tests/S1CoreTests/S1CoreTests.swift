@@ -1422,7 +1422,7 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
 @Test func endpointDefaultsWhenNothingSet() {
     let e = Endpoints.vlm(env: [:], config: S1Config())
     #expect(e.baseURL == "http://localhost:11434/v1")
-    #expect(e.model == "gemma3:4b")
+    #expect(e.model == "")   // vision is opt-in
     #expect(e.apiKey == nil)
     #expect(e.numCtx == 4096)   // VLM decision prompts fit in 4k; 8k doubled KV
     let s = Endpoints.s2(env: ["S1_S2_MODEL": "big-model"], config: S1Config())
@@ -2106,4 +2106,43 @@ private struct StubJudge: DecisionJudge {
     try custom.save(to: path)
     let c = S1Config.load(from: path)
     #expect(c.s2?.model == "x" && c.decision?.model == "tev1")
+}
+
+@Test func visionOffByDefaultAndOldLocalVLMMigratesOff() async throws {
+    #expect(await AutoPolicy.endpointAlive(Endpoints.vlm(env: [:], config: S1Config())) == false)
+    let path = NSTemporaryDirectory() + "cfg-\(UUID().uuidString).json"
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    var old = S1Config(vlm: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"))
+    old.defaultsVersion = 2
+    try old.save(to: path)
+    #expect(S1Config.load(from: path).vlm?.model == "")
+    var picked = S1Config(vlm: .init(base: "http://localhost:11434/v1", model: "qwen3-vl:4b"))
+    picked.defaultsVersion = 2
+    try picked.save(to: path)
+    #expect(S1Config.load(from: path).vlm?.model == "qwen3-vl:4b")
+}
+
+@Test func endpointerEndsDespiteDigitalSilenceStartAndRoomNoise() {
+    let e = Endpointer()
+    for _ in 0 ..< 3 { e.feed(dB: -120, seconds: 0.085) }   // engine warm-up zeros
+    for _ in 0 ..< 6 { e.feed(dB: -46, seconds: 0.085) }    // room noise
+    for _ in 0 ..< 15 { e.feed(dB: -18, seconds: 0.085) }   // speech
+    #expect(e.state == .speaking)
+    for _ in 0 ..< 12 { e.feed(dB: -45, seconds: 0.085) }   // back to room noise
+    #expect(e.state == .ended)
+}
+
+@Test func onlyClefJudgesGetImages() throws {
+    #expect(SystemOneClient.acceptsImages(model: "clef-flash"))
+    #expect(!SystemOneClient.acceptsImages(model: "jev-latest"))
+    let q: [String: DecisionQuestion] = ["a": .noul("ok?")]
+    let with = String(decoding: try SystemOneClient.body(model: "clef", state: .string("s"), questions: q, images: ["QUJD"]), as: UTF8.self)
+    #expect(with.contains(#""images":["QUJD"]"#))
+    let without = String(decoding: try SystemOneClient.body(model: "jev-latest", state: .string("s"), questions: q), as: UTF8.self)
+    #expect(!without.contains("images"))
+}
+
+@Test func onlyAccessibilityGatesReady() {
+    #expect(PermissionReport(accessibility: true, screenRecording: false).ready)
+    #expect(!PermissionReport(accessibility: false, screenRecording: true).ready)
 }

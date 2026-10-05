@@ -7,6 +7,7 @@ import S1Core
 @available(macOS 26, *)
 struct ConnectionsView: View {
     @Bindable var model: AppModel
+    @State private var showVision = false
 
     var body: some View {
         Form {
@@ -30,22 +31,26 @@ struct ConnectionsView: View {
                     Text("Default: TypeSafe Jev (get a key at typesafe.ai). Typed yes/no · choice · score with probabilities (System One API). Judges every proposed step against the goal, the screen, and the run so far — a low score sends the step to S2 instead of acting. It can only add caution; the safety gate still decides.")
                 }
                 Section {
-                    presetMenu([
-                        ("OpenCode Go · DeepSeek V4 Flash Vision", Endpoints.defaultS2Base, "deepseek-v4-flash-vision-exp"),
-                        ("OpenRouter", "https://openrouter.ai/api/v1", model.vlmModel),
-                        ("Local · Ollama (advanced)", "http://localhost:11434/v1", "gemma3:4b"),
-                    ]) { model.vlmBase = $0; model.vlmModel = $1 }
-                    TextField("Base URL", text: $model.vlmBase)
-                    TextField("Vision model", text: $model.vlmModel)
-                    Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
-                    ModelStatusRow(status: model.vlmStatus)
-                    TextField("Click grounder (empty = VLM grounds)", text: $model.grounderModel)
-                    KeyRow(model: model, role: .vlm)
-                    TestRow(model: model, role: .vlm)
-                } header: {
-                    Text("S1 · Vision + click grounder")
+                    DisclosureGroup(isExpanded: $showVision) {
+                        presetMenu([
+                            ("Off (recommended)", model.vlmBase, ""),
+                            ("OpenCode Go · DeepSeek V4 Flash Vision", Endpoints.defaultS2Base, "deepseek-v4-flash-vision-exp"),
+                            ("OpenRouter", "https://openrouter.ai/api/v1", model.vlmModel),
+                            ("Local · Ollama gemma3:4b", "http://localhost:11434/v1", "gemma3:4b"),
+                        ]) { model.vlmBase = $0; model.vlmModel = $1 }
+                        TextField("Base URL", text: $model.vlmBase)
+                        TextField("Vision model (empty = off)", text: $model.vlmModel)
+                        Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
+                        if !model.vlmModel.isEmpty { ModelStatusRow(status: model.vlmStatus) }
+                        TextField("Click grounder (empty = VLM grounds)", text: $model.grounderModel)
+                        KeyRow(model: model, role: .vlm)
+                        TestRow(model: model, role: .vlm)
+                    } label: {
+                        LabeledContent("Advanced · S1 vision + click grounder",
+                                       value: model.vlmModel.isEmpty ? "Off" : model.vlmModel)
+                    }
                 } footer: {
-                    Text("OpenAI-compatible chat with images. Used when the brain is VLM (or Auto with the server up). On the same provider as S2 the S2 key is reused.")
+                    Text("Not needed for most commands: the AX grammar handles open/type/press/scroll and labeled buttons, S2 plans from the AX text, Jev judges. Turn on only for targets with no accessibility label (images, canvases, games). Reuses the S2 key on the same provider.")
                 }
                 Section {
                     presetMenu([

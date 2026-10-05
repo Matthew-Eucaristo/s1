@@ -89,9 +89,7 @@ struct ContentView: View {
     /// Names the grants still missing — the banner claims exactly what
     /// isn't granted yet rather than a hardcoded pair.
     private var missingPermissions: String {
-        [model.permissions.accessibility ? nil : "Accessibility",
-         model.permissions.screenRecording ? nil : "Screen Recording"]
-            .compactMap { $0 }.joined(separator: " + ")
+        "Accessibility"
     }
 
     /// First-run guidance: without AX + Screen Recording nothing works,
@@ -106,11 +104,13 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Grant \(missingPermissions) to begin")
                         .font(.callout.weight(.semibold))
-                    Text("Settings → Permissions has a shortcut for each. Relaunch after granting Screen Recording.")
+                    Text("Turn on S1 in Privacy & Security → Accessibility. Already on but still here? Click Fix — an updated app needs a fresh grant.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Fix") { model.resetAccessibility() }
+                    .controlSize(.small)
                 Button("Grant…") { model.requestPermissions() }
                     .buttonStyle(.glassProminent)
                     .controlSize(.small)

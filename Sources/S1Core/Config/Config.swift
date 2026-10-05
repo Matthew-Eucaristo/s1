@@ -55,7 +55,7 @@ public struct S1Config: Codable, Sendable {
     public var voice: String?
     /// Which built-in defaults this file was written under (nil = pre-hosted).
     public var defaultsVersion: Int?
-    public static let currentDefaults = 2
+    public static let currentDefaults = 3
 
     public init(vlm: ModelEndpoint? = nil, s2: ModelEndpoint? = nil,
                 locale: String? = nil, speak: Bool? = nil,
@@ -91,8 +91,11 @@ public struct S1Config: Codable, Sendable {
     /// — local nimble judge, local gemma3:4b S2, S2 off — to Jev + OpenCode
     /// Go; anything the user picked themselves stays. Keys are kept.
     public mutating func migrateToHostedDefaults() {
-        guard (defaultsVersion ?? 0) < Self.currentDefaults else { return }
+        let v = defaultsVersion ?? 0
+        guard v < Self.currentDefaults else { return }
         defaultsVersion = Self.currentDefaults
+        migrateVisionOff(from: v)
+        guard v < 2 else { return }
         if let d = decision, Endpoints.isLocal(d.base ?? "http://localhost:11434"), d.model == "nimble" {
             decision = .init(base: Endpoints.defaultDecisionBase, model: Endpoints.defaultDecisionModel, key: d.key)
         }
@@ -100,6 +103,14 @@ public struct S1Config: Codable, Sendable {
             s2 = .init(base: Endpoints.defaultS2Base, model: Endpoints.defaultS2Model, key: s.key, numCtx: s.numCtx)
             if useS2 == false { useS2 = true }
         }
+    }
+
+    /// v3: vision + grounder are opt-in — an untouched local gemma3:4b VLM
+    /// (the old default) becomes "off" so Auto stays on the AX grammar.
+    private mutating func migrateVisionOff(from v: Int) {
+        guard v < 3, let m = vlm, Endpoints.isLocal(m.base ?? "http://localhost:11434/v1"),
+              (m.model ?? "gemma3:4b") == "gemma3:4b" else { return }
+        vlm = .init(base: m.base, model: "", key: m.key, numCtx: m.numCtx)
     }
 
     public func save(to path: String = S1Config.path) throws {
@@ -132,7 +143,7 @@ public enum Endpoints {
         let shared = sameHost(b, s2Base) ? (env["S1_S2_KEY"] ?? secret(.s2) ?? config.s2?.key) : nil
         return Endpoint(
             baseURL: b,
-            model: model ?? env["S1_VLM_MODEL"] ?? config.vlm?.model ?? "gemma3:4b",
+            model: model ?? env["S1_VLM_MODEL"] ?? config.vlm?.model ?? "",
             apiKey: env["S1_VLM_KEY"] ?? secret(.vlm) ?? config.vlm?.key ?? shared,
             // 4k covers the decision prompt (AX digest + format) with room —
             // 8k just doubles the KV allocation on tight 16GB machines.

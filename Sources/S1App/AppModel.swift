@@ -45,7 +45,7 @@ final class AppModel {
     /// Text fields debounce — rearming the hotkey per keystroke would tear
     /// the tap down and back up while the user is still typing.
     var vlmBase = "http://localhost:11434/v1" { didSet { scheduleRearm() } }
-    var vlmModel = "gemma3:4b" { didSet { scheduleRearm() } }
+    var vlmModel = "" { didSet { scheduleRearm() } }
     /// S2 (the escalation reasoner) gets its own endpoint — often a bigger
     /// model than S1's, or a cloud one behind an API key.
     var s2Base = Endpoints.defaultS2Base { didSet { scheduleRearm() } }
@@ -108,7 +108,7 @@ final class AppModel {
     /// picked a brain (still on the default) and exactly one catalog-vision
     /// model is installed, adopt it — the pull's intent was obvious.
     private func adoptPulledBrainIfUnset(_ installed: [String]) {
-        guard vlmModel == "gemma3:4b", !installed.contains("gemma3:4b") else { return }
+        guard vlmModel.isEmpty else { return }
         let vision = installed.filter { n in
             guard let e = ModelPull.catalog.first(where: { $0.name == n }) else { return false }
             return e.vision && !e.grounding
@@ -265,6 +265,17 @@ final class AppModel {
                 refreshPermissions()
             }
         }
+        // AXIsProcessTrusted is live — poll while a grant is missing so the
+        // banner clears the moment the toggle flips, focus change or not.
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.5))
+                guard let self else { return }
+                if !self.permissions.accessibility || !self.permissions.inputMonitoring {
+                    self.refreshPermissions()
+                }
+            }
+        }
     }
 
     /// Arm the companion: installs the global hotkey (double-tap Shift and
@@ -325,8 +336,8 @@ final class AppModel {
         let s = Serve(
             config: .init(
                 makePolicy: {
-                    let wantsModel = brainKind == .vlm
-                        || (brainKind == .auto && box.value == true)
+                    let wantsModel = !vlmEp.model.isEmpty && (brainKind == .vlm
+                        || (brainKind == .auto && box.value == true))
                     let pol: any Policy = wantsModel
                         ? VLMPolicy(endpoint: vlmEp, useScreenshot: shot)
                         : AXPolicy()
@@ -597,6 +608,19 @@ final class AppModel {
 
     func requestPermissions() {
         permissions = Preflight.check(request: true)
+        if !permissions.accessibility { PermRow.open("Privacy_Accessibility") }
+    }
+
+    /// A toggle that's ON in System Settings but not honored belongs to an
+    /// older build (ad-hoc signatures change every update, TCC pins the old
+    /// one). Drop S1's stale entry, then ask again so the current build is
+    /// the one listed.
+    func resetAccessibility() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "com.matthew.s1.app"]
+        try? p.run(); p.waitUntilExit()
+        requestPermissions()
     }
 
     /// File-picker STT path — also the testable path on mic-less machines.
@@ -715,7 +739,7 @@ final class AppModel {
             let box = vlmAlive
             Task { box.value = await AutoPolicy.endpointAlive(vlmEndpoint()) }
         }
-        let wantsModel = brain == .vlm || (brain == .auto && vlmAlive.value == true)
+        let wantsModel = !vlmModel.isEmpty && (brain == .vlm || (brain == .auto && vlmAlive.value == true))
         let pol = JudgedPolicy.wrapIfConfigured(
             wantsModel ? VLMPolicy(endpoint: vlmEndpoint(), useScreenshot: vlmScreenshot) : AXPolicy(),
             endpoint: decisionEndpoint())

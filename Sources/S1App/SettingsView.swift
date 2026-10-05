@@ -35,7 +35,7 @@ private struct GeneralSettings: View {
             } header: {
                 Text("System 1")
             } footer: {
-                Text("Simple commands (open, type, press, scroll) run on the built-in grammar with no model at all. Auto adds the vision model only when the grammar can't place a step.")
+                Text("Simple commands (open, type, press, scroll) run on the built-in grammar with no model at all. Auto adds the optional vision model (Models → Advanced, off by default) only when the grammar can't place a step.")
             }
             Section("Companion") {
                 Toggle("Launch at login", isOn: Binding(
@@ -121,9 +121,12 @@ private struct PermissionSettings: View {
                 PermRow(label: "Screen Recording", ok: model.permissions.screenRecording, pane: "Privacy_ScreenCapture")
                 PermRow(label: "Microphone", ok: model.permissions.microphone, pane: "Privacy_Microphone")
                 PermRow(label: "Input Monitoring", ok: model.permissions.inputMonitoring, pane: "Privacy_ListenEvent")
-                Button("Request / re-check") { model.requestPermissions() }
+                HStack {
+                    Button("Request / re-check") { model.requestPermissions() }
+                    Button("Fix stuck Accessibility") { model.resetAccessibility() }
+                }
             } footer: {
-                Text("Screen Recording grants apply on the next launch.")
+                Text("Only Accessibility is required. Toggle on but still missing? Fix removes the old build's entry and asks again. Screen Recording is optional (screenshots, vision) and applies on next launch.")
             }
         }
         .formStyle(.grouped)
@@ -295,6 +298,13 @@ struct ModelStatusRow: View {
 
 @available(macOS 26, *)
 struct PermRow: View {
+    /// macOS 13+ System Settings deep link (the old com.apple.preference.security
+    /// URL still resolves but lands on the pane root on newer releases).
+    static func open(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(pane)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
     let label: String
     let ok: Bool
     let pane: String
@@ -306,11 +316,7 @@ struct PermRow: View {
             Text(label).font(.callout)
             if !ok {
                 Spacer()
-                Button("Open Settings") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
+                Button("Open Settings") { Self.open(pane) }
                 .controlSize(.mini)
             }
         }

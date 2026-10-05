@@ -93,7 +93,19 @@ public struct DecisionUsage: Codable, Sendable, Equatable {
 /// Anything that answers typed questions about a state.
 public protocol DecisionJudge: Sendable {
     var model: String { get }
+    /// Vision-capable decision models (Clef family) also get the screenshot.
+    var acceptsImages: Bool { get }
     func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult
+    func evaluate(state: JSONValue, questions: [String: DecisionQuestion],
+                  images: [String]) async throws -> DecisionResult
+}
+
+public extension DecisionJudge {
+    var acceptsImages: Bool { false }
+    func evaluate(state: JSONValue, questions: [String: DecisionQuestion],
+                  images: [String]) async throws -> DecisionResult {
+        try await evaluate(state: state, questions: questions)
+    }
 }
 
 /// HTTP client for the System One API (`POST …/v1/systemone`). One client
@@ -103,6 +115,12 @@ public struct SystemOneClient: DecisionJudge {
     public var endpoint: Endpoint
     public var timeout: TimeInterval
     public var model: String { endpoint.model }
+    /// Clef / Clef Flash take base64 `images` (Ollama + Workers AI); Jev,
+    /// nimble and tev1 are text-only.
+    public var acceptsImages: Bool { Self.acceptsImages(model: endpoint.model) }
+    public static func acceptsImages(model: String) -> Bool {
+        model.lowercased().contains("clef")
+    }
 
     public init(endpoint: Endpoint, timeout: TimeInterval = 30) {
         self.endpoint = endpoint
@@ -121,15 +139,18 @@ public struct SystemOneClient: DecisionJudge {
     }
 
     public static func body(model: String, state: JSONValue,
-                            questions: [String: DecisionQuestion]) throws -> Data {
+                            questions: [String: DecisionQuestion],
+                            images: [String] = []) throws -> Data {
         struct Body: Encodable {
             var model: String
             var state: JSONValue
             var questions: [String: DecisionQuestion]
+            var images: [String]?
         }
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys]
-        return try enc.encode(Body(model: model, state: state, questions: questions))
+        return try enc.encode(Body(model: model, state: state, questions: questions,
+                                   images: images.isEmpty ? nil : Array(images.prefix(4))))
     }
 
     /// Decode a reply — bare `{model, answers}` or Cloudflare's
@@ -144,6 +165,11 @@ public struct SystemOneClient: DecisionJudge {
     }
 
     public func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult {
+        try await evaluate(state: state, questions: questions, images: [])
+    }
+
+    public func evaluate(state: JSONValue, questions: [String: DecisionQuestion],
+                         images: [String]) async throws -> DecisionResult {
         guard let url = Self.url(for: endpoint.baseURL) else {
             throw S1Error.aborted("bad decision endpoint URL")
         }
@@ -155,7 +181,8 @@ public struct SystemOneClient: DecisionJudge {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
         for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
-        req.httpBody = try Self.body(model: endpoint.model, state: state, questions: questions)
+        req.httpBody = try Self.body(model: endpoint.model, state: state, questions: questions,
+                                     images: acceptsImages ? images : [])
         let started = Date()
         let host = url.host ?? endpoint.baseURL
         func record(_ ok: Bool, _ r: DecisionResult? = nil, error: String? = nil) {
@@ -251,7 +278,7 @@ public struct JudgedPolicy: Policy {
     }
 
     public var name: String { inner.name }
-    public var wantsScreenshot: Bool { inner.wantsScreenshot }
+    public var wantsScreenshot: Bool { inner.wantsScreenshot || judge.acceptsImages }
     public var judgeable: Bool { inner.judgeable }
 
     static let questions: [String: DecisionQuestion] = [
@@ -275,8 +302,13 @@ public struct JudgedPolicy: Policy {
         let state = DecisionContext.state(goal: goal, observation: observation,
                                           history: history, proposed: action)
         do {
+            // Vision judges see the same downscaled frame the VLM would.
+            let images = judge.acceptsImages
+                ? observation.screenshotPath.flatMap { VLMPolicy.downscaledJPEG(path: $0) }.map { [$0] } ?? []
+                : []
             let r = try await judge.evaluate(state: state,
-                                             questions: isDone ? Self.doneQuestions : Self.questions)
+                                             questions: isDone ? Self.doneQuestions : Self.questions,
+                                             images: images)
             var p = r.answers["advances"]?.noul ?? 1
             if let rep = r.answers["repeats_failure"]?.noul, rep > 0.7 { p = min(p, 1 - rep) }
             let tag = String(format: "judge %@ p=%.2f", judge.model, p)

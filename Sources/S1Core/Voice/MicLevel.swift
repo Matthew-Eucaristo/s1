@@ -88,6 +88,9 @@ public final class Endpointer: @unchecked Sendable {
         public var minSpeech: Double = 0.2
         public var trailingSilence: Double = 0.8
         public var noSpeechTimeout: Double = 8
+        /// Once speaking, frames this far under the speech peak count as silence
+        /// — room noise above a too-low floor can't hold the turn open.
+        public var peakDrop: Float = 22
         public init() {}
     }
 
@@ -96,6 +99,7 @@ public final class Endpointer: @unchecked Sendable {
     private let lock = NSLock()
     private let config: Config
     private var floor: Float?
+    private var peak: Float = -120
     private var voiced = 0.0, silence = 0.0, elapsed = 0.0
     private var _state = State.waiting
 
@@ -116,9 +120,15 @@ public final class Endpointer: @unchecked Sendable {
         elapsed += seconds
         // Floor drops instantly to quieter frames and creeps up slowly, so
         // speech itself barely lifts it while room noise changes do.
-        let f = floor.map { dB < $0 ? dB : $0 + (dB - $0) * 0.02 } ?? dB
+        // Digital-silence frames at engine start (-120) must not pin the
+        // floor so low that ordinary room noise reads as speech forever.
+        let lvl = max(dB, -80)
+        let f = floor.map { lvl < $0 ? lvl : $0 + (lvl - $0) * 0.02 } ?? lvl
         floor = f
-        let isVoice = dB > max(f + config.margin, config.absoluteMin)
+        var threshold = max(f + config.margin, config.absoluteMin)
+        if _state == .speaking { threshold = max(threshold, peak - config.peakDrop) }
+        let isVoice = dB > threshold
+        if isVoice { peak = max(peak, dB) }
         switch _state {
         case .waiting:
             voiced = isVoice ? voiced + seconds : max(0, voiced - seconds)

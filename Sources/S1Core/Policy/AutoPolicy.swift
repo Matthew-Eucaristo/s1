@@ -38,7 +38,8 @@ public enum AutoPolicy {
 
     /// The boolean form the policy resolver and callers already use.
     public static func endpointAlive(_ ep: Endpoint) async -> Bool {
-        await probe(ep) == .reachableWithModel
+        guard !ep.model.isEmpty else { return false }   // vision off
+        return await probe(ep) == .reachableWithModel
     }
 
     /// Does a model-list response contain the model we want?

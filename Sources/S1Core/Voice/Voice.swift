@@ -339,6 +339,9 @@ public struct SpeechToText: Sendable {
                      locale: l)
     }
 
+    /// Seconds of unchanged transcript after words arrived that end a turn.
+    static let textSettle = 1.2
+
     private func transcribeMicLegacy(maxSeconds: Double, locale: Locale,
                                      onPartial: (@Sendable (String) -> Void)?) async throws -> String {
         guard let rec = SFSpeechRecognizer(locale: locale), rec.isAvailable else {
@@ -351,12 +354,13 @@ public struct SpeechToText: Sendable {
             throw S1Error.aborted("no microphone input available")
         }
         let req = SFSpeechAudioBufferRecognitionRequest()
-        req.shouldReportPartialResults = onPartial != nil
+        req.shouldReportPartialResults = true
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         let collected = Locked<String>("")
         let failure = Locked<Error?>(nil)
         let finished = FinishedFlag()
+        let lastText = Locked<Date?>(nil)
         let task = rec.recognitionTask(with: req) { result, error in
             // First terminal callback wins — a trailing error must not erase
             // a final transcript that already landed.
@@ -373,6 +377,7 @@ public struct SpeechToText: Sendable {
             } else if let r = result {
                 // Partial hypothesis — volatile best-guess while the user
                 // is still mid-word; live UI transcript, never persisted.
+                lastText.value = Date()
                 onPartial?(r.bestTranscription.formattedString)
             }
         }
@@ -399,6 +404,7 @@ public struct SpeechToText: Sendable {
         // recognizer rarely declares "final" on its own mid-stream.
         var waited = 0.0
         while waited < maxSeconds, failure.value == nil, !finished.get, !endpointer.isDone {
+            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { break }
             try await Task.sleep(nanoseconds: 100_000_000)
             waited += 0.1
         }
@@ -426,7 +432,8 @@ public struct SpeechToText: Sendable {
         // SpeechDetector is Apple's VAD module — its results tell us when
         // speech actually ended rather than guessing from transcript-idle
         // timeouts, so a mid-word pause can't cut the turn early.
-        let detector = SpeechDetector()
+        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium),
+                                      reportResults: true)
         let analyzers = lanes.enumerated().map { i, lane in
             SpeechAnalyzer(modules: i == 0 ? [lane.1, detector] : [lane.1])
         }
@@ -485,6 +492,7 @@ public struct SpeechToText: Sendable {
         let collectors = lanes.map { _ in TextCollector() }
         let leader = Locked<[Double]>(Array(repeating: -1, count: lanes.count))
         let speechEnded = FinishedFlag()
+        let lastText = Locked<Date?>(nil)
         // VAD: speechDetected true→false means the utterance is over —
         // close the turn promptly even when the final segment lags.
         detectorTask = Task {
@@ -501,6 +509,7 @@ public struct SpeechToText: Sendable {
             resultsTasks.append(Task {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
+                    if !text.trimmingCharacters(in: .whitespaces).isEmpty { lastText.value = Date() }
                     if result.isFinal {
                         await collected.append(text, confidence: Self.confidence(of: result.text))
                         let mean = await collected.meanConfidence ?? 0
@@ -532,6 +541,8 @@ public struct SpeechToText: Sendable {
             try await Task.sleep(nanoseconds: 150_000_000)
             waited += 0.15
             if speechEnded.get || endpointer.isDone { break }
+            // The recognizer is a VAD too: words stopped changing → turn over.
+            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { break }
             var settled = false
             for c in collectors {
                 if await c.hasContent, await c.idleFor(0.9) { settled = true; break }

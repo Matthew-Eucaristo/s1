@@ -23,7 +23,10 @@ public struct PermissionReport: Sendable {
         self.notes = notes
     }
 
-    public var ready: Bool { accessibility && screenRecording }
+    /// Accessibility is the only hard gate: the AX grammar, S2 and the judge
+    /// all run on the accessibility tree. Screen Recording only matters for
+    /// screenshots / the optional vision brain.
+    public var ready: Bool { accessibility }
 }
 
 /// Checks the TCC gates this agent needs and explains what's missing.
