@@ -2281,3 +2281,17 @@ private struct DelegatingReasoner: Reasoner {
     c.stop()
     #expect(!c.holding && c.stopped)
 }
+
+@Test func cuaMapsOnlySupportedActions() {
+    let t = CuaDriver.call(for: .typeText("hi \"x\""), pid: 42)
+    #expect(t?.tool == "type_text")
+    #expect(t?.args == #"{"pid":42,"session":"s1","text":"hi \"x\""}"#)
+    #expect(CuaDriver.call(for: .keyCombo(keys: ["Cmd", "s"]), pid: 7)?.args == #"{"keys":["cmd","s"],"pid":7,"session":"s1"}"#)
+    #expect(CuaDriver.call(for: .openApp(name: "Notes"), pid: nil, bundleID: { _ in "com.apple.Notes" })?.tool == "launch_app")
+    #expect(CuaDriver.call(for: .typeText("x"), pid: nil) == nil)
+    #expect(CuaDriver.call(for: .click(x: 1, y: 2), pid: 1) == nil)
+    var cfg = S1Config(); cfg.executor = "cua"
+    #expect(CuaDriver.enabled(cfg, env: [:]))
+    #expect(!CuaDriver.enabled(S1Config(), env: [:]))
+    #expect(CuaDriver.binary(env: ["CUA_DRIVER_PATH": "/bin/ls"]) == "/bin/ls")
+}

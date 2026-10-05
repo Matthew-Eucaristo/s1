@@ -53,6 +53,8 @@ public struct S1Config: Codable, Sendable {
     public var decision: ModelEndpoint?
     /// TTS voice identifier ("" / nil = best installed voice per language).
     public var voice: String?
+    /// Action executor: nil/"cgevent" (default) or "cua" (Cua Driver, background).
+    public var executor: String?
     /// Which built-in defaults this file was written under (nil = pre-hosted).
     public var defaultsVersion: Int?
     public static let currentDefaults = 3

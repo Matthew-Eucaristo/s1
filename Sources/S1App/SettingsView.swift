@@ -46,6 +46,23 @@ private struct GeneralSettings: View {
                 LabeledContent("Launcher") { Text("⌥Space").foregroundStyle(.secondary) }
                 LabeledContent("Dictate") { Text("⌃⌥D — hold to talk, or tap; text pastes where you type").foregroundStyle(.secondary) }
             }
+            Section {
+                Toggle("Background executor: Cua Driver (beta)", isOn: Binding(
+                    get: { S1Config.load().executor == "cua" },
+                    set: { on in
+                        var c = S1Config.load(); c.executor = on ? "cua" : nil
+                        try? c.save()
+                    }))
+                .disabled(CuaDriver.binary() == nil && S1Config.load().executor != "cua")
+            } header: {
+                Text("Executor")
+            } footer: {
+                if CuaDriver.binary() == nil {
+                    Text("Optional. Install Cua Driver to type, press keys and launch apps without stealing focus. [cua.ai/docs/cua-driver](https://cua.ai/docs/cua-driver)")
+                } else {
+                    Text("Typing, shortcuts and app launches go through Cua Driver in the background; everything else, and any failed Cua call, uses the normal path. The safety gate runs first either way.")
+                }
+            }
         }
         .formStyle(.grouped)
     }

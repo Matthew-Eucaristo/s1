@@ -215,7 +215,7 @@ public enum S1Runner {
         // Bounded BEFORE the run so the new dir is never the one deleted.
         ArtifactStore.prune(root: root)
 
-        let actuator: any Actuator = dryRun ? DryRunActuator() : CGEventActuator()
+        let actuator: any Actuator = dryRun ? DryRunActuator() : Executors.live()
 
         let logger = try RunLogger(
             goal: goal, root: root,
