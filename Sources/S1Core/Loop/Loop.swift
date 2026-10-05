@@ -54,6 +54,11 @@ public struct AgentLoop {
     public func run(goal: String, policy: any Policy, logger: RunLogger,
                     onPhase: (@Sendable (String) -> Void)? = nil) async throws -> RunReport {
         var history: [StepRecord] = []
+        // S2 → S1 delegation: subgoals S1 runs with its own scoped history.
+        var queue: [String] = []
+        var subHistory: [StepRecord] = []
+        var delegations = 0
+        var forceS2: String?
         var escalations = 0
         var status: RunStatus = .maxStepsReached
 
@@ -91,18 +96,44 @@ public struct AgentLoop {
                 throw error
             }
             let rec: StepRecord
+            let delegated: [String]?
+            let sub = queue.first
             do {
-                rec = try await step(i, goal: goal, policy: policy, obs: obs,
-                                     history: history, logger: logger, onPhase: onPhase)
+                (rec, delegated) = try await step(i, goal: goal, s1Goal: sub ?? goal, policy: policy, obs: obs,
+                                                  history: history, s1History: sub == nil ? history : subHistory,
+                                                  forceS2: forceS2, logger: logger, onPhase: onPhase)
+                forceS2 = nil
             } catch is S1Error {
                 // A kill-switch abort landing mid-decision ends the run as
                 // aborted — not as an abstention that escalates to S2.
                 status = .aborted
                 break
             }
-            history.append(rec)
-
             if rec.escalation != nil { escalations += 1 }
+
+            if let delegated {
+                history.append(rec)
+                delegations += 1
+                // A planner that keeps re-planning isn't converging.
+                if delegations > 3 { status = .stuckLoop; break }
+                queue = Array(delegated.prefix(8)); subHistory = []
+                onPhase?("S1: \(queue.count) subgoal\(queue.count == 1 ? "" : "s")")
+                continue
+            }
+            if let sub {
+                if case .done? = rec.action, rec.escalation == nil {
+                    // Subgoal finished — not the run. Next subgoal, or back to S2.
+                    queue.removeFirst(); subHistory = []
+                    if queue.isEmpty {
+                        forceS2 = "delegated subgoals finished — check the screen; reply done (with the answer, if one was asked) when the goal is met"
+                    }
+                    _ = sub
+                    continue
+                }
+                if rec.escalation != nil { queue = []; subHistory = [] }   // S2 took over
+                else { subHistory.append(rec) }
+            }
+            history.append(rec)
 
             switch rec.action {
             case .done(let summary)?: status = .done; return RunReport(status: status, steps: i + 1, runDir: logger.runDir.path, escalations: escalations, summary: summary)
@@ -140,20 +171,23 @@ public struct AgentLoop {
         return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)
     }
 
-    private func step(_ i: Int, goal: String, policy: any Policy, obs input: Snapshot,
-                      history: [StepRecord], logger: RunLogger,
-                      onPhase: (@Sendable (String) -> Void)?) async throws -> StepRecord {
+    private func step(_ i: Int, goal: String, s1Goal: String, policy: any Policy, obs input: Snapshot,
+                      history: [StepRecord], s1History: [StepRecord], forceS2: String?,
+                      logger: RunLogger,
+                      onPhase: (@Sendable (String) -> Void)?) async throws -> (StepRecord, [String]?) {
         var obs = input
         // A throwing policy counts as abstention — logged like any other
         // low-confidence step instead of crashing the run.
         var decision: Decision
-        do {
+        if let forceS2, s2 != nil {
+            decision = Decision(action: nil, confidence: 0, rationale: forceS2)
+        } else { do {
             // Raced against the kill file — a model request would otherwise
             // sit out the whole HTTP timeout before `s1 stop` is noticed.
             let decisionObs = obs
             onPhase?("thinking…")
             decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
-                try await policy.decide(observation: decisionObs, goal: goal, history: history)
+                try await policy.decide(observation: decisionObs, goal: s1Goal, history: s1History)
             }
         } catch {
             if let k = config.killSwitchPath, FileManager.default.fileExists(atPath: k) {
@@ -167,7 +201,7 @@ public struct AgentLoop {
             }
             decision = Decision(action: nil, confidence: 0,
                                 rationale: "policy error: \(error.localizedDescription)")
-        }
+        } }
         var decidedBy = "s1:\(policy.name)"
         var esc: StepRecord.Escalation?
 
@@ -175,9 +209,11 @@ public struct AgentLoop {
         if lowConf, case .done = decision.action { /* done is always final */ }
         else if lowConf {
             if let s2 {
-                let reason = decision.action == nil
-                    ? "s1 abstained (conf \(decision.confidence))"
-                    : "s1 conf \(decision.confidence) < \(config.confidenceThreshold)"
+                var why = forceS2 ?? (decision.action == nil
+                    ? "s1 abstained (conf \(decision.confidence)): \(decision.rationale)"
+                    : "s1 conf \(decision.confidence) < \(config.confidenceThreshold)")
+                if forceS2 == nil, s1Goal != goal { why = "subgoal '\(s1Goal)' failed — \(why)" }
+                let reason = why
                 esc = StepRecord.Escalation(to: "s2:\(s2.name)", reason: reason)
                 do {
                     let s2Obs = obs
@@ -211,17 +247,25 @@ public struct AgentLoop {
                                gate: "-", out: "suppressed: below threshold, no S2",
                                ver: nil, esc: esc, reply: decision.rawReply)
                 try await logger.log(r)
-                return r
+                return (r, nil)
             }
         }
 
+        if decision.action == nil, let goals = decision.delegate, !goals.isEmpty, esc != nil {
+            let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
+                           rat: decision.rationale, action: nil, gate: "-",
+                           out: "delegated to S1: " + goals.joined(separator: " | "),
+                           ver: nil, esc: esc, reply: decision.rawReply)
+            try await logger.log(r)
+            return (r, goals)
+        }
         guard let action = decision.action else {
             let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
                            rat: decision.rationale, action: nil,
                            gate: "-", out: "no action", ver: nil, esc: esc,
                            reply: decision.rawReply)
             try await logger.log(r)
-            return r
+            return (r, nil)
         }
 
         // Screenshot on demand: the reason comes from the decision payload.
@@ -312,7 +356,7 @@ public struct AgentLoop {
                        gate: verdict.label, out: outcome, ver: verified, esc: esc,
                        reply: decision.rawReply)
         try await logger.log(r)
-        return r
+        return (r, nil)
     }
 
     /// Post-action check: re-observe and see if the expectation is visible in

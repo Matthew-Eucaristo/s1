@@ -8,8 +8,12 @@ public struct Decision: Codable, Sendable {
     public var rationale: String
     /// Raw model reply, when the policy is LLM-backed — part of the evidence trail.
     public var rawReply: String?
+    /// S2 only: hand these plain-language subgoals to System 1, in order.
+    public var delegate: [String]?
 
-    public init(action: Action?, confidence: Double, rationale: String, rawReply: String? = nil) {
+    public init(action: Action?, confidence: Double, rationale: String, rawReply: String? = nil,
+                delegate: [String]? = nil) {
+        self.delegate = delegate
         self.action = action
         self.confidence = confidence
         self.rationale = rationale

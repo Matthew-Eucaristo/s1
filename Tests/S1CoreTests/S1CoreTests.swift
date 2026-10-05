@@ -2186,3 +2186,34 @@ private struct StubJudge: DecisionJudge {
     #expect(AXPolicy.intents(of: "type copy and paste").count == 1)
     #expect(try await p.decide(observation: obs, goal: "paste it into Notes", history: []).action == nil)
 }
+
+private struct DelegatingReasoner: Reasoner {
+    let name = "planner"
+    func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+        if history.isEmpty {
+            return Decision(action: nil, confidence: 0.9, rationale: "plan",
+                            delegate: ["open TextEdit", "type hello"])
+        }
+        return Decision(action: .done(summary: "all set"), confidence: 0.9, rationale: reason)
+    }
+}
+
+@Test func s2DelegatesSubgoalsToS1ThenConfirms() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "t", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate(), s2: DelegatingReasoner())
+    let report = try await loop.run(goal: "get TextEdit ready with a greeting", policy: AXPolicy(), logger: logger)
+    #expect(report.status == .done)
+    #expect(report.answer == "all set")
+    let text = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+    #expect(text.contains("delegated to S1: open TextEdit | type hello"))
+    #expect(text.contains("\"typeText\""))
+    #expect(text.contains("delegated subgoals finished"))
+}
+
+@Test func codecParsesDelegate() {
+    let d = LLMDecisionCodec.parse(#"{"action":{"type":"delegate","goals":["open Notes","type hi"]},"confidence":0.8,"rationale":"r"}"#)
+    #expect(d?.delegate == ["open Notes", "type hi"])
+    #expect(d?.action == nil)
+}

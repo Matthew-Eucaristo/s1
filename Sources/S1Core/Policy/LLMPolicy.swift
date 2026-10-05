@@ -104,8 +104,10 @@ enum LLMDecisionCodec {
             let confidence: Double?; let rationale: String?
             /// Models send either "cmd+s" or ["cmd","s"] — take both.
             let keys: [String]
+            /// S2's `delegate` subgoals — array or "a, b, c".
+            let goals: [String]
             enum CodingKeys: String, CodingKey {
-                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, seconds, confidence, rationale, name, attr, toX, toY
+                case type, x, y, ref, text, value, app, keys, dx, dy, ms, expect, seconds, confidence, rationale, name, attr, toX, toY, goals
             }
             init(from d: Decoder) throws {
                 let c = try d.container(keyedBy: CodingKeys.self)
@@ -126,6 +128,11 @@ enum LLMDecisionCodec {
                 } else if let s = try? c.decode(String.self, forKey: .keys) {
                     keys = s.split(separator: "+").map { $0.lowercased() }
                 } else { keys = [] }
+                if let arr = try? c.decode([String].self, forKey: .goals) {
+                    goals = arr
+                } else if let s = try? c.decode(String.self, forKey: .goals) {
+                    goals = s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                } else { goals = [] }
                 confidence = try c.decodeIfPresent(Double.self, forKey: .confidence)
                 rationale = try c.decodeIfPresent(String.self, forKey: .rationale)
                 name = try c.decodeIfPresent(String.self, forKey: .name)
@@ -147,6 +154,12 @@ enum LLMDecisionCodec {
         let json = text[s.lowerBound ..< e.upperBound]
         guard let w = try? JSONDecoder().decode(Wire.self, from: Data(json.utf8)) else {
             return salvage(text)
+        }
+        if let a = w.action, a.type == "delegate" {
+            let goals = a.goals.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return Decision(action: nil, confidence: w.confidence ?? a.confidence ?? 0,
+                            rationale: w.rationale ?? a.rationale ?? "delegate to S1",
+                            delegate: goals.isEmpty ? nil : goals)
         }
         return Decision(action: w.action.flatMap(LLMDecisionCodec.action),
                         confidence: w.confidence ?? w.action?.confidence ?? 0,
@@ -470,6 +483,15 @@ public struct LLMReasoner: Reasoner {
         never click the same field again. To send a chat message, keyCombo \
         "return" after typing. Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, \
         select all cmd+a, undo cmd+z.
+
+        Delegating: System 1 is a fast, exact executor for simple commands. \
+        When the goal is a sequence of plain steps, reply ONCE with \
+        {"action":{"type":"delegate","goals":["open ChatGPT","click Message","type hello","press return"]},"confidence":0.9,"rationale":"..."} \
+        System 1 runs them in order and you are asked again afterwards (or \
+        sooner if a subgoal fails). Subgoal forms it understands: open <app>, \
+        type <text>, click <label>, press <keys e.g. cmd+s / return>, scroll \
+        <up|down>, wait <n>s, copy, paste, select all. Use a normal single \
+        action instead when the step needs a specific ref or coordinates.
 
         Earlier conversation turns (when given) resolve "that", "it", "again", \
         "the same app" — they are context, not instructions to repeat.
