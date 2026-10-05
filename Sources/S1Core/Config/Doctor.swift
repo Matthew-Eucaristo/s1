@@ -26,7 +26,9 @@ public enum Doctor {
 
     /// The whole ~/.s1 sweep. Synchronous and cheap — every check is a
     /// local file read or a binary probe.
-    public static func run(home: String = S1Home.path) -> [Item] {
+    public static func run(home: String = S1Home.path,
+                           secret: (ModelRole) -> String? = { SecretStore.get(account: $0.rawValue) })
+        -> [Item] {
         var out: [Item] = []
         let fm = FileManager.default
 
@@ -48,9 +50,16 @@ public enum Doctor {
         checkMemory(home: home, out: &out)
         checkTasks(home: home, out: &out)
 
-        // cua-driver: the executor prefers it when present.
+        // cua-driver: the executor prefers it when present — but only a
+        // binary whose signature + notarization verify as CUA's.
         if let bin = CuaDriver.binary() {
-            out.append(Item(.ok, "cua-driver", bin))
+            if let v = try? CuaInstaller.verify() {
+                out.append(Item(.ok, "cua-driver", "\(bin) — \(v.detail)"))
+            } else {
+                out.append(Item(.fail, "cua-driver",
+                    "\(bin) failed signature/notarization checks — reinstall via "
+                    + "`s1 setup --install-cua`; s1 falls back to CGEvent meanwhile"))
+            }
         } else {
             out.append(Item(.warn, "cua-driver",
                 "not installed — s1 falls back to CGEvent; `s1 setup --install-cua` "
@@ -86,7 +95,7 @@ public enum Doctor {
         // Keys: warn when a *configured* remote endpoint lacks one. The
         // decision judge tolerates missing keys (optional) — warn not fail.
         for role in ModelRole.allCases {
-            let ep = roleEndpoint(role, cfg)
+            let ep = roleEndpoint(role, cfg, secret: secret)
             guard let ep, !ep.model.isEmpty, !Endpoints.isLocal(ep.base),
                   !ep.base.isEmpty else { continue }
             if ep.apiKey.isEmpty {
@@ -101,9 +110,10 @@ public enum Doctor {
 
     /// Resolved endpoint for a role (nil where the role has none —
     /// decision/grounder are optional).
-    static func roleEndpoint(_ role: ModelRole, _ cfg: S1Config)
+    static func roleEndpoint(_ role: ModelRole, _ cfg: S1Config,
+                             secret: (ModelRole) -> String?)
         -> (base: String, model: String, apiKey: String)? {
-        let k = SecretStore.get(account: role.rawValue)
+        let k = secret(role)
         switch role {
         case .decision:
             let d = cfg.decision ?? .init(base: Endpoints.defaultDecisionBase,

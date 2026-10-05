@@ -3,6 +3,7 @@ import ApplicationServices
 import AVFoundation
 import CoreGraphics
 import IOKit.hid
+import Speech
 
 public struct PermissionReport: Sendable {
     public var accessibility: Bool
@@ -51,7 +52,17 @@ public enum Preflight {
         if #available(macOS 14, *) {
             mic = AVCaptureDeviceAuthStatus() == .authorized
         }
-        if !mic { notes.append("Microphone: needed only for voice (P4)") }
+        if !mic {
+            // Without the request calls nothing ever lands in the Microphone
+            // or Speech Recognition panes — the user would have to "+"-add
+            // the app by hand. requestAccess/requestAuthorization register
+            // the entries AND show the system prompt in one step.
+            if request {
+                AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                SFSpeechRecognizer.requestAuthorization { _ in }
+            }
+            notes.append("Microphone: needed only for voice (P4)")
+        }
 
         var inputMon = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
         if !inputMon {

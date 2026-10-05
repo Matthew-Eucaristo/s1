@@ -528,6 +528,14 @@ final class AppModel {
                 }
             }
             cuaInstallLog += "✓ installed — s1's executor will use it\n"
+            // The driver carries its own TCC identity — without its own
+            // Accessibility + Screen Recording grants every call fails over
+            // to CGEvent. CUA's grant flow opens the real permission dialogs
+            // attributed to com.trycua.driver; run it detached so the wizard
+            // isn't pinned while the user clicks through System Settings.
+            Task.detached {
+                try? await CuaInstaller.grantPermissions { _ in }
+            }
         } catch {
             cuaInstallLog += "✗ \(error.localizedDescription)\n"
         }
@@ -932,8 +940,8 @@ final class AppModel {
                 let id = lang.hasPrefix("id")
                 let reply: String = if let answer = report.answer { answer } else {
                     switch report.status {
-                    case .done: id ? "Selesai: \(goalText)" : "Done: \(goalText)"
-                    case .needsHuman: id ? "Butuh kamu: \(goalText)" : "Needs you: \(goalText)"
+                    case .done: id ? "Selesai" : "Done"
+                    case .needsHuman: id ? "Butuh kamu" : "Needs you"
                     case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
                     default: id ? "Berhenti" : "Stopped"
                     }

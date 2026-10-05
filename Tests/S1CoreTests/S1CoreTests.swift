@@ -2296,6 +2296,46 @@ private struct DelegatingReasoner: Reasoner {
     #expect(CuaDriver.binary(env: ["CUA_DRIVER_PATH": "/bin/ls"]) == "/bin/ls")
 }
 
+@Test func cuaScrollCallMapsDirectionAndAmount() {
+    // dy dominates → vertical; amount = wheel notches (|dy|/120), clamped.
+    let c = CuaDriver.scrollCall(dx: 0, dy: -360, pid: 42)
+    #expect(c?.tool == "scroll")
+    #expect(c?.args == #"{"amount":3,"by":"line","direction":"up","pid":42,"session":"s1"}"#)
+    let huge = CuaDriver.scrollCall(dx: 0, dy: 99999, pid: 1)
+    #expect(huge?.args.contains(#""amount":10"#) == true)
+    #expect(huge?.args.contains(#""direction":"down""#) == true)
+    let horiz = CuaDriver.scrollCall(dx: 240, dy: 10, pid: 1)
+    #expect(horiz?.args.contains(#""direction":"right""#) == true)
+}
+
+@Test func cuaWindowLocalConversion() {
+    // A window at screen (100,50) size 400x300; a point at (300,200) is
+    // 200pt/150pt into it. Scale comes from the real display (≥1).
+    let w = CuaDriver.CuaWindow(id: 7, pid: 1, x: 100, y: 50, w: 400, h: 300, z: 1)
+    let l = CuaDriver.windowLocal(CGPoint(x: 300, y: 200), in: [w])
+    #expect(l?.win.id == 7)
+    #expect((l?.x ?? 0) >= 200)   // ×scale on Retina
+    #expect((l?.y ?? 0) >= 150)
+    // A point outside every frame lands on the topmost (max z) window.
+    let low = CuaDriver.CuaWindow(id: 8, pid: 1, x: 0, y: 0, w: 10, h: 10, z: 5)
+    let top = CuaDriver.CuaWindow(id: 9, pid: 1, x: 500, y: 500, w: 10, h: 10, z: 9)
+    let stray = CuaDriver.windowLocal(CGPoint(x: 9999, y: 9999), in: [low, top])
+    #expect(stray?.win.id == 9)
+    #expect(CuaDriver.windowLocal(CGPoint(x: 1, y: 1), in: []) == nil)
+}
+
+@Test func cuaInstallerVerifiesRealDriver() throws {
+    // Only meaningful where the real driver is installed; otherwise the
+    // signature check must fail rather than pass vacuously.
+    if FileManager.default.fileExists(atPath: CuaInstaller.appPath) {
+        let v = try CuaInstaller.verify()
+        #expect(v.detail.contains("Cua AI"))
+        #expect(v.sha256.count == 64)
+    } else {
+        #expect(throws: S1Error.self) { try CuaInstaller.verify() }
+    }
+}
+
 @Test func liquidAndClefFlashEndpoints() {
     #expect(SystemOneClient.url(for: "https://api.liquid.ai/decisions")?.absoluteString
             == "https://api.liquid.ai/decisions/v1/systemone")
@@ -2563,7 +2603,9 @@ struct DoneEachSubgoal: Policy {
     try? "[{\"id\": 1}]".write(toFile: home + "/providers.json", atomically: true, encoding: .utf8)
     try? "{\"name\":\"x\",\"steps\":[]}".write(toFile: home + "/skills/x.json",
                                              atomically: true, encoding: .utf8)
-    let items = Doctor.run(home: home)
+    // No real keychain: reading the login service from a test binary pops a
+    // SecurityAgent prompt on whoever's Mac runs the suite.
+    let items = Doctor.run(home: home, secret: { _ in nil })
     #expect(items.contains { $0.level == .fail && $0.what == "config.json" })
     #expect(items.contains { $0.level == .fail && $0.what == "providers.json" })
     #expect(items.contains { $0.level == .warn && $0.what == "skills" })

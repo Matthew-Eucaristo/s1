@@ -1413,6 +1413,12 @@ struct SetupCmd: AsyncParsableCommand {
         // 3 · Cua Driver — recommended, via CUA's own installer.
         if CuaInstaller.installed {
             print("✓ cua-driver already installed")
+            if interactive {
+                // The driver carries its own TCC identity — without its own
+                // AX/Screen Recording grants every call falls back to CGEvent.
+                do { try await CuaInstaller.grantPermissions { print("  " + $0) } }
+                catch { print("- cua permissions grant skipped: \(error.localizedDescription)") }
+            }
         } else if noCua {
             print("- cua-driver skipped (--no-cua); CGEvent executor stays active")
         } else if installCua || (interactive && askYes("Install Cua Driver? (recommended — CUA's official installer) [Y/n] ")) {
@@ -1420,6 +1426,9 @@ struct SetupCmd: AsyncParsableCommand {
                 print("  running: \(CuaInstaller.officialCommand)")
                 try await CuaInstaller.install { print("  " + $0) }
                 print("✓ cua-driver installed — s1's executor will use it")
+                // Same again: the driver needs its own TCC grants (its own
+                // identity), so run CUA's grant flow right after install.
+                try await CuaInstaller.grantPermissions { print("  " + $0) }
             } catch {
                 FileHandle.standardError.write(
                     "✗ \(error.localizedDescription)\n  s1 still works — CGEvent is the fallback.\n".data(using: .utf8)!)

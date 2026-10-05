@@ -325,7 +325,7 @@ public final class Serve: @unchecked Sendable {
                 let id = lang.hasPrefix("id")
                 let reply: String = if let answer = report.answer { answer } else {
                     switch report.status {
-                    case .done: id ? "Selesai: \(goal)" : "Done: \(goal)"
+                    case .done: id ? "Selesai" : "Done"
                     case .needsHuman: id ? "Butuh kamu" : "Needs you"
                     case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
                     default: id ? "Berhenti" : "Stopped"
