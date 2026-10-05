@@ -52,7 +52,7 @@ git clone "https://github.com/$TAP_REPO" "$TAP_DIR"
 mkdir -p "$TAP_DIR/Casks" "$TAP_DIR/releases/$TAG"
 
 if [[ $RELEASE_URLS == 1 ]]; then
-    ZIP_URL="https://github.com/$REPO/releases/download/$TAG/S1-\#{version}-app.zip"
+    ZIP_URL="https://github.com/$REPO/releases/download/$TAG/S1-#{version}-app.zip"
 else
     cp "dist/$ZIP" "$TAP_DIR/releases/$TAG/"
     # Commit the artifact FIRST so the cask URL can pin to the commit sha —
@@ -63,7 +63,7 @@ else
     git diff --cached --quiet || git commit -m "s1 $VERSION artifact"
     ART_SHA=$(git rev-parse HEAD)
     cd - >/dev/null
-    ZIP_URL="https://raw.githubusercontent.com/$TAP_REPO/$ART_SHA/releases/$TAG/S1-\#{version}-app.zip"
+    ZIP_URL="https://raw.githubusercontent.com/$TAP_REPO/$ART_SHA/releases/$TAG/S1-#{version}-app.zip"
 fi
 
 cat > "$TAP_DIR/Casks/s1.rb" <<EOF
