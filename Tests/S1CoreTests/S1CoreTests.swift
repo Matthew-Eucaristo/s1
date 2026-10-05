@@ -2217,3 +2217,46 @@ private struct DelegatingReasoner: Reasoner {
     #expect(d?.delegate == ["open Notes", "type hi"])
     #expect(d?.action == nil)
 }
+
+@Test func launcherCalcParsesSafely() {
+    #expect(Calc.evaluate("2+3*4") == 14)
+    #expect(Calc.evaluate("(1.5+2)^2") == 12.25)
+    #expect(Calc.evaluate("15% * 80") == 12)
+    #expect(Calc.evaluate("-3 - -2") == -1)
+    #expect(Calc.evaluate("hello") == nil)
+    #expect(Calc.evaluate("2+") == nil)
+    #expect(Calc.evaluate("1/0") == nil)
+    #expect(Calc.format(14) == "14")
+}
+
+@Test func launcherRanksAndFallsBackToAsk() {
+    let apps = [(name: "Visual Studio Code", path: "/A/VSC.app"), (name: "Safari", path: "/A/Safari.app"),
+                (name: "Notes", path: "/A/Notes.app")]
+    let r = Launcher.search("saf", apps: apps, snippets: [], clips: [], recents: [])
+    #expect(r.first?.title == "Safari")
+    #expect(r.last?.kind == .ask)
+    #expect(Launcher.search("vsc", apps: apps, snippets: [], clips: [], recents: []).first?.title == "Visual Studio Code")
+    #expect(Launcher.search("12*3", apps: apps, snippets: [], clips: [], recents: []).first?.payload == "36")
+    #expect(Launcher.search("left half", apps: apps, snippets: [], clips: [], recents: []).first?.kind == .window)
+    let s = Launcher.search("sig", apps: [], snippets: [Snippet(keyword: "sig", text: "Best")], clips: ["a sig here"], recents: [])
+    #expect(s.first?.kind == .snippet)
+    #expect(s.contains { $0.kind == .clip })
+}
+
+@Test func clipboardSkipsPasswordManagers() {
+    #expect(ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text"], text: "hi"))
+    #expect(!ClipboardPolicy.shouldRecord(types: ["public.utf8-plain-text", "org.nspasteboard.ConcealedType"], text: "pw"))
+    #expect(!ClipboardPolicy.shouldRecord(types: [], text: "  "))
+}
+
+@Test func windowLayoutFrames() {
+    let v = CGRect(x: 0, y: 25, width: 1000, height: 800)
+    #expect(WindowLayout.leftHalf.frame(in: v, current: .zero) == CGRect(x: 0, y: 25, width: 500, height: 800))
+    #expect(WindowLayout.bottomHalf.frame(in: v, current: .zero) == CGRect(x: 0, y: 425, width: 1000, height: 400))
+    #expect(WindowLayout.center.frame(in: v, current: CGSize(width: 400, height: 200)) == CGRect(x: 300, y: 325, width: 400, height: 200))
+}
+
+@Test func snippetPlaceholders() {
+    #expect(!Snippets.expand("{date}").contains("{"))
+    #expect(Snippets.expand("x") == "x")
+}

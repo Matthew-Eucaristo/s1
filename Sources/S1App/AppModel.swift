@@ -256,6 +256,7 @@ final class AppModel {
         refreshModels()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         startServe()
+        LauncherController.shared.install()
         // TCC grants land in System Settings while s1 is open — re-check
         // when the app reactivates so the sidebar stops showing stale ⚠
         // without forcing a relaunch.

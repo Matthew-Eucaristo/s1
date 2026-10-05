@@ -37,6 +37,8 @@ struct S1App: App {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 Button(model.listening ? "Stop Dictation" : "Dictate Command") { model.toggleListen() }
                     .keyboardShortcut("l", modifiers: .command)
+                Button("Show Launcher") { LauncherController.shared.show() }
+                    .keyboardShortcut(.space, modifiers: .option)
                 Divider()
                 Button("Clear Steps") { model.clearFeed() }
                     .keyboardShortcut("k", modifiers: .command)

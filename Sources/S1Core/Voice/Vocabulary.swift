@@ -37,7 +37,7 @@ public enum Vocabulary {
 /// Display names of installed apps — the source of STT's auto vocabulary.
 /// Directory scan only (fast, deterministic, no Spotlight stall).
 public enum InstalledApps {
-    static let appDirs = [
+    public static let appDirs = [
         "/System/Applications",
         "/System/Applications/Utilities",
         "/Applications",
