@@ -331,8 +331,29 @@ public struct SpeechToText: Sendable {
         }
         let lanes = await lanes(reportingOptions: [.volatileResults])
         if !lanes.isEmpty {
-            return try await transcribeMicAnalyzer(maxSeconds: maxSeconds, lanes: lanes,
-                                                  control: control, onPartial: onPartial)
+            // Optional cloud STT: Apple still runs VAD + the live line; the
+            // finished turn is re-transcribed by the configured model.
+            let cloud = Endpoints.stt()
+            let wav = cloud == nil ? nil : FileManager.default.temporaryDirectory
+                .appendingPathComponent("s1-turn-\(UUID().uuidString).wav")
+            defer { if let wav { try? FileManager.default.removeItem(at: wav) } }
+            var heard = try await transcribeMicAnalyzer(maxSeconds: maxSeconds, lanes: lanes,
+                                                        control: control, record: wav, onPartial: onPartial)
+            if let cloud, let wav, !heard.text.isEmpty {
+                let started = Date()
+                do {
+                    // Fixed language → hint it; Automatic → let Whisper detect.
+                    let hint = locales.count == 1 ? SpokenLanguage.code(locale) : nil
+                    let t = try await CloudSpeech.transcribe(wav, endpoint: cloud, language: hint,
+                                                             vocabulary: vocabulary)
+                    if !t.isEmpty { heard.text = t }
+                    DebugTrace.event("voice", ["cloud": cloud.model, "ok": true,
+                                               "ms": Int(Date().timeIntervalSince(started) * 1000)])
+                } catch {
+                    DebugTrace.event("voice", ["cloud": cloud.model, "ok": false, "error": "\(error)"])
+                }
+            }
+            return heard
         }
         let l = legacyMicLocale
         return Heard(text: try await transcribeMicLegacy(maxSeconds: maxSeconds, locale: l, control: control, onPartial: onPartial),
@@ -431,7 +452,7 @@ public struct SpeechToText: Sendable {
     /// One mic tap feeds every candidate-language analyzer the same
     /// converted buffers; the VAD rides on the first lane only.
     private func transcribeMicAnalyzer(maxSeconds: Double, lanes: [(Locale, SpeechTranscriber)],
-                                       control: MicControl?,
+                                       control: MicControl?, record: URL? = nil,
                                        onPartial: (@Sendable (String) -> Void)?) async throws -> Heard {
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -483,8 +504,10 @@ public struct SpeechToText: Sendable {
             throw S1Error.aborted("cannot convert mic audio to the speech analyzer's format")
         }
         let endpointer = Endpointer()
+        let recorder = record.flatMap { TurnRecorder(url: $0, format: format) }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
             endpointer.feed(buffer: buffer, dB: MicLevel.push(buffer: buffer))
+            recorder?.write(buffer)
             let feed: AVAudioPCMBuffer
             if needsConversion {
                 guard let converter, let best,
@@ -566,6 +589,7 @@ public struct SpeechToText: Sendable {
         }
         DebugTrace.event("voice", ["path": "analyzer", "end": endReason, "seconds": waited,
                                    "lanes": collectors.count])
+        recorder?.close()
         continuations.forEach { $0.finish() }
         var laneErrors: [Error] = []
         for (i, t) in inputTasks.enumerated() {
@@ -684,10 +708,45 @@ private final class OnceFlag: @unchecked Sendable {
     }
 }
 
-/// On-device text-to-speech — AVSpeechSynthesizer, works fully offline.
-public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDelegate {
+/// The finished mic turn as 16-bit WAV, for cloud re-transcription. Written
+/// from the audio tap; `close` is idempotent and stops later writes.
+final class TurnRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var file: AVAudioFile?
+
+    init?(url: URL, format: AVAudioFormat) {
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount, AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+        ]
+        guard let f = try? AVAudioFile(forWriting: url, settings: settings,
+                                       commonFormat: format.commonFormat,
+                                       interleaved: format.isInterleaved) else { return nil }
+        file = f
+    }
+
+    func write(_ buffer: AVAudioPCMBuffer) {
+        lock.lock(); defer { lock.unlock() }
+        try? file?.write(from: buffer)
+    }
+
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        file?.close()
+        file = nil
+    }
+}
+
+/// Text-to-speech — on-device AVSpeechSynthesizer by default (fully
+/// offline); an optional cloud voice (`Endpoints.tts`) when configured,
+/// falling back to Apple on any failure.
+public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     let synth = AVSpeechSynthesizer()
     private let lock = NSLock()
+    private var player: AVAudioPlayer?
+    /// Bumped by `stop` — a cloud reply that lands after Stop stays silent.
+    private var generation = 0
     var finished: CheckedContinuation<Void, Never>?
     /// Serializes concurrent `say` calls — two overlapping callers would
     /// overwrite `finished` and leak the first caller's continuation.
@@ -748,6 +807,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
 
     private func speakOnce(_ text: String, language: String, voice: String?, timeout: Double) async {
         self.stop()
+        if await speakCloud(text, language: language, timeout: timeout) { return }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
                 let u = AVSpeechUtterance(string: text)
@@ -768,10 +828,51 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         }
     }
 
+    /// Cloud TTS when configured and it speaks this language; false = use Apple.
+    private func speakCloud(_ text: String, language: String, timeout: Double) async -> Bool {
+        let cfg = S1Config.load()
+        guard let ep = Endpoints.tts(config: cfg),
+              CloudSpeech.ttsSpeaks(model: ep.model, language: language) else { return false }
+        let gen = lock.withLock { generation }
+        let voice = cfg.ttsCloudVoice ?? CloudSpeech.defaultVoice(for: ep)
+        guard let data = try? await CloudSpeech.synthesize(text, endpoint: ep, voice: voice),
+              let p = try? AVAudioPlayer(data: data) else { return false }
+        // Stopped while the audio was in flight → swallow it, don't fall back.
+        guard lock.withLock({ generation == gen }) else { return true }
+        p.delegate = self
+        lock.withLock { player = p }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [self] in
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    self.lock.lock()
+                    self.finished = c
+                    let pl = self.player
+                    self.lock.unlock()
+                    if pl?.play() != true { self.stop() }
+                }
+            }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9)) }
+            _ = await group.next()
+            group.cancelAll()
+            self.stop()
+        }
+        return true
+    }
+
+    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+        lock.lock()
+        finished?.resume()
+        finished = nil
+        lock.unlock()
+    }
+
     /// Cut speech immediately; also unblocks a pending `say` continuation.
     public func stop() {
         synth.stopSpeaking(at: .immediate)
         lock.lock()
+        player?.stop()
+        player = nil
+        generation += 1
         finished?.resume()
         finished = nil
         lock.unlock()

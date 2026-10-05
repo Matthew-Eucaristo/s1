@@ -2304,3 +2304,36 @@ private struct DelegatingReasoner: Reasoner {
     #expect(!SystemOneClient.acceptsImages(model: "jev-latest"))
     #expect(!SystemOneClient.acceptsImages(model: "d10x"))
 }
+
+@Test func cloudSpeechWire() {
+    #expect(CloudSpeech.sttURL("https://api.groq.com/openai/v1/")?.absoluteString
+            == "https://api.groq.com/openai/v1/audio/transcriptions")
+    #expect(CloudSpeech.prompt(vocabulary: [" Warp ", "", "JIRA"]) == "Warp, JIRA")
+    #expect(CloudSpeech.prompt(vocabulary: []) == nil)
+    let body = String(decoding: CloudSpeech.multipart(file: Data("RIFF".utf8), filename: "t.wav",
+                                                      fields: [("model", "whisper-large-v3-turbo")], boundary: "B"), as: UTF8.self)
+    #expect(body.contains("name=\"model\"\r\n\r\nwhisper-large-v3-turbo\r\n"))
+    #expect(body.hasSuffix("RIFF\r\n--B--\r\n"))
+    #expect(!CloudSpeech.ttsSpeaks(model: "canopylabs/orpheus-v1-english", language: "id-ID"))
+    #expect(CloudSpeech.ttsSpeaks(model: "gpt-4o-mini-tts", language: "id-ID"))
+    var cfg = S1Config()
+    cfg.stt = .init(base: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo")
+    #expect(Endpoints.stt(env: [:], config: cfg, secret: { _ in nil }) == nil)   // hosted, no key
+    #expect(Endpoints.stt(env: [:], config: cfg, secret: { _ in "k" })?.model == "whisper-large-v3-turbo")
+    #expect(Endpoints.stt(env: [:], config: S1Config(), secret: { _ in "k" }) == nil) // default off
+    #expect(Endpoints.tts(env: [:], config: S1Config(), secret: { _ in "k" }) == nil)
+}
+
+@Test func turnRecorderWritesPCM16Wav() throws {
+    let fmt = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("s1-rec-\(UUID()).wav")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let rec = try #require(TurnRecorder(url: url, format: fmt))
+    let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: 4800)!
+    buf.frameLength = 4800
+    for i in 0..<4800 { buf.floatChannelData![0][i] = sin(Float(i) / 10) * 0.5 }
+    rec.write(buf); rec.write(buf); rec.close(); rec.write(buf)   // write after close is a no-op
+    let f = try AVAudioFile(forReading: url)
+    #expect(f.length == 9600)
+    #expect(f.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int == 16)
+}

@@ -101,6 +101,34 @@ private struct VoiceSettings: View {
                      : "On-device. Installed app names are learned automatically.")
             }
             Section {
+                Menu("Preset") {
+                    Button("Off · on-device Apple (default)") { model.sttModel = "" }
+                    Button("Groq · Whisper Large v3 Turbo (fast)") {
+                        model.sttBase = "https://api.groq.com/openai/v1"; model.sttModel = "whisper-large-v3-turbo"
+                    }
+                    Button("Groq · Whisper Large v3 (most accurate)") {
+                        model.sttBase = "https://api.groq.com/openai/v1"; model.sttModel = "whisper-large-v3"
+                    }
+                    Button("OpenAI · gpt-4o-mini-transcribe") {
+                        model.sttBase = "https://api.openai.com/v1"; model.sttModel = "gpt-4o-mini-transcribe"
+                    }
+                    Button("Local · OpenAI-compatible server (Speaches, NVIDIA NIM…)") {
+                        model.sttBase = "http://localhost:8000/v1"; model.sttModel = "Systran/faster-whisper-large-v3"
+                    }
+                }
+                .fixedSize()
+                TextField("Base URL", text: $model.sttBase)
+                TextField("Model (empty = on-device)", text: $model.sttModel)
+                if !model.sttModel.isEmpty {
+                    KeyRow(model: model, role: .stt)
+                    TestRow(model: model, role: .stt)
+                }
+            } header: {
+                Text("Cloud recognition (optional)")
+            } footer: {
+                Text("Apple still listens on-device (end-of-speech detection, live text). With a model set, each finished turn is re-transcribed in the cloud for accuracy, using your custom words as the spelling hint, and falls back to on-device on any error. Audio leaves the Mac only when this is on.")
+            }
+            Section {
                 Toggle("Speak results", isOn: $model.speakReply)
                 Picker("Voice", selection: $model.ttsVoice) {
                     Text("Automatic (best installed)").tag("")
@@ -112,6 +140,29 @@ private struct VoiceSettings: View {
                 .disabled(!model.speakReply)
                 Button("Preview") { model.previewVoice() }
                     .disabled(!model.speakReply)
+                Menu("Cloud voice") {
+                    Button("Off · Apple voices (default)") { model.ttsModel = "" }
+                    Button("Groq · Orpheus English") {
+                        model.ttsBase = "https://api.groq.com/openai/v1"; model.ttsModel = "canopylabs/orpheus-v1-english"
+                        model.ttsCloudVoice = "troy"
+                    }
+                    Button("OpenAI · gpt-4o-mini-tts") {
+                        model.ttsBase = "https://api.openai.com/v1"; model.ttsModel = "gpt-4o-mini-tts"
+                        model.ttsCloudVoice = "alloy"
+                    }
+                    Button("Local · OpenAI-compatible server") {
+                        model.ttsBase = "http://localhost:8000/v1"; model.ttsModel = "tts-1"
+                    }
+                }
+                .fixedSize()
+                .disabled(!model.speakReply)
+                if !model.ttsModel.isEmpty {
+                    TextField("Base URL", text: $model.ttsBase)
+                    TextField("Model", text: $model.ttsModel)
+                    TextField("Voice", text: $model.ttsCloudVoice)
+                    KeyRow(model: model, role: .tts)
+                    TestRow(model: model, role: .tts)
+                }
             } header: {
                 Text("Speech output")
             } footer: {

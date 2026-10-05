@@ -76,6 +76,12 @@ final class AppModel {
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
+    /// Optional cloud speech (empty model = on-device Apple speech).
+    var sttBase = "https://api.groq.com/openai/v1" { didSet { scheduleRearm() } }
+    var sttModel = "" { didSet { scheduleRearm() } }
+    var ttsBase = "https://api.groq.com/openai/v1" { didSet { scheduleRearm() } }
+    var ttsModel = "" { didSet { scheduleRearm() } }
+    var ttsCloudVoice = "" { didSet { scheduleRearm() } }
     /// Floating status pill under the camera notch while s1 is doing
     /// something. Off = the window never exists (see NotchHUD.swift).
     var notchHUD = true { didSet { if !notchHUD { hud.hide() }; scheduleSave() } }
@@ -238,6 +244,9 @@ final class AppModel {
         if let s = cfg.speak { speakReply = s }
         if let v = cfg.vocabulary { vocabulary = v.joined(separator: ", ") }
         if let r = cfg.recent { recentGoals = r }
+        if let e = cfg.stt { sttBase = e.base ?? sttBase; sttModel = e.model ?? "" }
+        if let e = cfg.tts { ttsBase = e.base ?? ttsBase; ttsModel = e.model ?? "" }
+        if let v = cfg.ttsCloudVoice { ttsCloudVoice = v }
         if let vs = cfg.vlmScreenshot { vlmScreenshot = vs }
         if let b = cfg.brain, let kind = Brain(rawValue: b) { brain = kind }
         if let u = cfg.useS2 { useS2 = u }
@@ -454,6 +463,9 @@ final class AppModel {
         cfg.decision = .init(base: decisionBase, model: decisionModel.trimmingCharacters(in: .whitespaces),
                              key: cfg.decision?.key, numCtx: nil)
         cfg.voice = ttsVoice.isEmpty ? nil : ttsVoice
+        cfg.stt = .init(base: sttBase, model: sttModel, key: cfg.stt?.key)
+        cfg.tts = .init(base: ttsBase, model: ttsModel, key: cfg.tts?.key)
+        cfg.ttsCloudVoice = ttsCloudVoice.isEmpty ? nil : ttsCloudVoice
         try? cfg.save()
     }
 
@@ -489,6 +501,8 @@ final class AppModel {
         case .s2: return c.s2?.key != nil
         case .grounder: return c.grounder?.key != nil
         case .decision: return c.decision?.key != nil
+        case .stt: return c.stt?.key != nil
+        case .tts: return c.tts?.key != nil
         }
     }
 
@@ -530,6 +544,17 @@ final class AppModel {
                 return "✓ \(r.model ?? ep.model) answered p(yes)=\(p) in \(ms())"
             } catch {
                 return "✗ \(error.localizedDescription)"
+            }
+        case .stt, .tts:
+            var cfg = S1Config.load()
+            cfg.stt = .init(base: sttBase, model: sttModel); cfg.tts = .init(base: ttsBase, model: ttsModel)
+            guard let ep = role == .stt ? Endpoints.stt(config: cfg) : Endpoints.tts(config: cfg) else {
+                return (role == .stt ? sttModel : ttsModel).isEmpty ? "off — on-device" : "needs an API key"
+            }
+            switch await AutoPolicy.probe(ep) {
+            case .reachableWithModel: return "✓ \(ep.model) available (\(ms()))"
+            case .reachableMissingModel: return "server up, but '\(ep.model)' isn't listed"
+            case .unreachable: return "✗ \(ep.baseURL) unreachable or key rejected"
             }
         case .vlm, .grounder, .s2:
             let ep = role == .s2 ? s2Endpoint() : vlmEndpoint()

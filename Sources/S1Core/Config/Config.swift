@@ -55,6 +55,11 @@ public struct S1Config: Codable, Sendable {
     public var voice: String?
     /// Action executor: nil/"cgevent" (default) or "cua" (Cua Driver, background).
     public var executor: String?
+    /// Optional cloud STT / TTS (nil = on-device Apple speech).
+    public var stt: ModelEndpoint?
+    public var tts: ModelEndpoint?
+    /// Cloud TTS voice name (provider-specific, e.g. "troy", "alloy").
+    public var ttsCloudVoice: String?
     /// Which built-in defaults this file was written under (nil = pre-hosted).
     public var defaultsVersion: Int?
     public static let currentDefaults = 3
@@ -246,6 +251,8 @@ public extension S1Config {
         case .s2: guard c.s2?.key != nil else { return }; c.s2?.key = nil
         case .grounder: guard c.grounder?.key != nil else { return }; c.grounder?.key = nil
         case .decision: guard c.decision?.key != nil else { return }; c.decision?.key = nil
+        case .stt: guard c.stt?.key != nil else { return }; c.stt?.key = nil
+        case .tts: guard c.tts?.key != nil else { return }; c.tts?.key = nil
         }
         try c.save(to: path)
     }

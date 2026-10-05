@@ -63,6 +63,10 @@ public enum ModelRole: String, CaseIterable, Sendable {
     case grounder
     /// S2 reasoner — any OpenAI-compatible LLM.
     case s2
+    /// Optional cloud speech-to-text (OpenAI-compatible audio API).
+    case stt
+    /// Optional cloud text-to-speech (OpenAI-compatible audio API).
+    case tts
 
     public var envPrefix: String { "S1_\(rawValue.uppercased())" }
 }

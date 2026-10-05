@@ -117,7 +117,7 @@ struct ConnectionsView: View {
         }
     }
 
-    private func presetMenu(_ items: [(String, String, String)],
+    func presetMenu(_ items: [(String, String, String)],
                             apply: @escaping (String, String) -> Void) -> some View {
         Menu("Preset") {
             ForEach(items, id: \.0) { item in
@@ -129,7 +129,7 @@ struct ConnectionsView: View {
 }
 
 @available(macOS 26, *)
-private struct KeyRow: View {
+struct KeyRow: View {
     @Bindable var model: AppModel
     let role: ModelRole
     @State private var draft = ""
@@ -153,7 +153,7 @@ private struct KeyRow: View {
 }
 
 @available(macOS 26, *)
-private struct TestRow: View {
+struct TestRow: View {
     @Bindable var model: AppModel
     let role: ModelRole
     @State private var result = ""
