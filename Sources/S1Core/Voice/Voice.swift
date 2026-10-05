@@ -742,23 +742,26 @@ final class TurnRecorder: @unchecked Sendable {
 /// offline); an optional cloud voice (`Endpoints.tts`) when configured,
 /// falling back to Apple on any failure.
 public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
-    let synth = AVSpeechSynthesizer()
+    // `AVAudioPlayerDelegate` is @MainActor in the macOS 27 SDK, which infers
+    // this class's members MainActor. State is lock-guarded by design, so the
+    // nonisolated(unsafe) opt-outs below keep the original any-thread access.
+    nonisolated(unsafe) let synth = AVSpeechSynthesizer()
     private let lock = NSLock()
-    private var player: AVAudioPlayer?
+    nonisolated(unsafe) private var player: AVAudioPlayer?
     /// Bumped by `stop` — a cloud reply that lands after Stop stays silent.
-    private var generation = 0
-    var finished: CheckedContinuation<Void, Never>?
+    nonisolated(unsafe) private var generation = 0
+    nonisolated(unsafe) var finished: CheckedContinuation<Void, Never>?
     /// Serializes concurrent `say` calls — two overlapping callers would
     /// overwrite `finished` and leak the first caller's continuation.
     private var sayTail: Task<Void, Never>?
 
-    public override init() {
+    public nonisolated override init() {
         super.init()
         synth.delegate = self
     }
 
     /// Available on-device voices for a BCP-47 prefix ("id", "en").
-    public static func voices(matching prefix: String) -> [AVSpeechSynthesisVoice] {
+    public nonisolated static func voices(matching prefix: String) -> [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(prefix) }
     }
 
@@ -766,7 +769,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     /// default. `AVSpeechSynthesisVoice(language:)` picks whatever Apple
     /// marked default, which is the base quality even when the user
     /// downloaded the enhanced variant in Accessibility settings.
-    static func preferredVoice(language: String) -> AVSpeechSynthesisVoice? {
+    nonisolated static func preferredVoice(language: String) -> AVSpeechSynthesisVoice? {
         let prefix = String(language.prefix(2))
         let candidates = voices(matching: language.isEmpty ? prefix : language)
             .isEmpty ? voices(matching: prefix) : voices(matching: language)
@@ -797,7 +800,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         await t.value
     }
 
-    static func voice(for language: String, pinned: String?) -> AVSpeechSynthesisVoice? {
+    nonisolated static func voice(for language: String, pinned: String?) -> AVSpeechSynthesisVoice? {
         if let id = pinned, !id.isEmpty, let v = AVSpeechSynthesisVoice(identifier: id),
            v.language.prefix(2) == language.prefix(2) {
             return v
@@ -859,7 +862,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         return true
     }
 
-    public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+    public nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
         lock.lock()
         finished?.resume()
         finished = nil
@@ -867,7 +870,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     }
 
     /// Cut speech immediately; also unblocks a pending `say` continuation.
-    public func stop() {
+    public nonisolated func stop() {
         synth.stopSpeaking(at: .immediate)
         lock.lock()
         player?.stop()
@@ -878,7 +881,7 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
         lock.unlock()
     }
 
-    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish _: AVSpeechUtterance) {
+    public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish _: AVSpeechUtterance) {
         lock.lock()
         finished?.resume()
         finished = nil
