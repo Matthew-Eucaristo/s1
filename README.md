@@ -456,7 +456,7 @@ Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
 ## How S1 thinks
 
 - **Auto policy** (`--policy auto`, default): a real decision model when the VLM endpoint answers (one 3s probe at start, never per step), the deterministic AX policy when it doesn't — zero-config for both worlds.
-- **AX policy** (`--policy ax`): zero model, parses `open X, type Y, done` intents and executes deterministically — the baseline every smarter S1 must beat.
+- **AX policy** (`--policy ax`): zero model, parses `open X, type Y, done` intents and executes deterministically — the baseline every smarter S1 must beat. The grammar is wider than open/type: window + tab + app control (`close`, `new tab`, `back`, `reload`, `switch`, `lock`, `zoom in`), media keys (`play`, `skip`, `mute`, `volume up`), click flavors (`double click`, `klik kanan`), `find X` (⌘F + type), and Indonesian mirrors throughout — all keyCombos, no model call.
 - **VLM policy** (`--policy vlm`): goal → deterministic intent cursor (shared grammar with AX policy) → the model grounds ONE intent per step. Small local models decide actions; they don't track whole plans. Truncated/malformed JSON is salvaged field-by-field before a strict-JSON retry.
 - **S2** (`--s2`): any OpenAI-compatible endpoint; called only below the confidence threshold, with the reason logged.
 - Defaults on this project: `gemma3:4b` via Ollama for VLM and S2 (benchmarked on an arm64 VM: correct JSON ≈1min/step on CPU; much faster on a real Mac). Set `S1_VLM_MODEL` / `S1_S2_MODEL` to swap.
