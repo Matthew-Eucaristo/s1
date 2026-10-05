@@ -134,8 +134,8 @@ public struct ChatClient: Sendable {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 300   // local models on CPU can be slow
+        for (k, v) in Self.headers(for: endpoint) { req.setValue(v, forHTTPHeaderField: k) }
         if let key = endpoint.apiKey, !key.isEmpty {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
@@ -157,9 +157,16 @@ public struct ChatClient: Sendable {
                                         temperature: temperature, extras: attempt == 0)
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             let data: Data, resp: URLResponse
+            let sent = Date()
             do { (data, resp) = try await Self.session.data(for: req) }
-            catch { record(ok: false, error: error.localizedDescription); throw error }
+            catch {
+                DebugTrace.http(role: role, url: url, status: 0, ms: Int(Date().timeIntervalSince(sent) * 1000),
+                                request: req.httpBody, response: nil, error: error.localizedDescription)
+                record(ok: false, error: error.localizedDescription); throw error
+            }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            DebugTrace.http(role: role, url: url, status: code, ms: Int(Date().timeIntervalSince(sent) * 1000),
+                            request: req.httpBody, response: data)
             // A gateway that rejects the provider toggle gets one plain retry.
             if code == 400, withExtras, attempt == 0 { attempt += 1; continue }
             guard code == 200 else {
@@ -171,6 +178,16 @@ public struct ChatClient: Sendable {
             record(ok: true, served: r.served, counts: r.counts)
             return r.text
         }
+    }
+
+    /// Non-secret headers. OpenCode Go rejects requests without a stable
+    /// per-conversation `x-opencode-session` (400 MissingSessionID) and asks
+    /// clients to identify themselves — same id → same cache-warm backend.
+    public static func headers(for endpoint: Endpoint,
+                               session: String = Conversation.shared.sessionID()) -> [String: String] {
+        var h = ["Content-Type": "application/json", "User-Agent": "s1/\(S1Info.version)"]
+        if !endpoint.isLocal { h["x-opencode-session"] = session; h["x-session-id"] = session }
+        return h
     }
 
     /// One session for the process — keeps TCP/TLS connections warm across

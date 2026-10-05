@@ -94,7 +94,7 @@ public struct AXPolicy: Policy {
                 // A trailing conjunction can't open a new command — "buka
                 // notes lalu" must not hunt for an app literally called
                 // "notes lalu". Text verbs are exempt: their arg is literal.
-                if !["type", "ketik", "write", "tulis"].contains(verb) {
+                if !typeVerbs.contains(verb) {
                     arg = stripTrailingConjunction(arg)
                 }
                 return Intent(verb: verb, arg: arg)
@@ -106,8 +106,21 @@ public struct AXPolicy: Policy {
     /// Includes verbs the grammar doesn't implement: "buka Notes dan tutup"
     /// must still split so the second half abstains cleanly instead of
     /// polluting the first half's argument ("Notes dan tutup").
+    /// Every way people say "put this text here".
+    static let typeVerbs: Set<String> = ["type", "ketik", "write", "tulis", "chat", "input",
+                                         "reply", "balas", "enter", "masukkan"]
+    /// Clipboard/edit verbs. They split "and/then" only outside typed text —
+    /// "type copy and paste" still types all three words.
+    static let editVerbs: Set<String> = ["copy", "salin", "paste", "tempel", "cut", "potong",
+                                         "undo", "redo", "save", "simpan"]
+
+    static func startsWithTypeVerb(_ s: String) -> Bool {
+        typeVerbs.contains(s.split(separator: " ", maxSplits: 1).first?.lowercased() ?? "")
+    }
+
     static let verbs: Set<String> = [
         "open", "buka", "launch", "type", "ketik", "write", "tulis",
+        "chat", "input", "reply", "balas", "masukkan",
         "key", "keys", "hotkey", "wait", "tunggu",
         "screenshot", "capture", "screencap", "tangkap", "tangkapan",
         "foto", "potret", "ambil", "scroll", "gulir", "geser",
@@ -157,7 +170,7 @@ public struct AXPolicy: Policy {
                               range: searchFrom ..< s.endIndex) {
             let next = s[r.upperBound...]
                 .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
-            if verbs.contains(next) {
+            if verbs.contains(next) || (editVerbs.contains(next) && !startsWithTypeVerb(s)) {
                 return splitOnConj(String(s[..<r.lowerBound]), conj: conj) +
                        splitOnConj(String(s[r.upperBound...]), conj: conj)
             }
@@ -175,7 +188,7 @@ public struct AXPolicy: Policy {
                               range: searchFrom ..< s.endIndex) {
             let next = s[r.upperBound...]
                 .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
-            if verbs.contains(next) {
+            if verbs.contains(next) || (editVerbs.contains(next) && !startsWithTypeVerb(s)) {
                 return splitConjunctions(String(s[..<r.lowerBound])) +
                        splitConjunctions(String(s[r.upperBound...]))
             }
@@ -257,7 +270,12 @@ public struct AXPolicy: Policy {
             }
             return Decision(action: .openApp(name: intent.arg), confidence: 0.9,
                             rationale: "open \(intent.arg)")
-        case "type", "ketik", "write", "tulis":
+        case _ where Self.typeVerbs.contains(intent.verb):
+            // A bare "enter" after typing is the Return key, not text.
+            if intent.arg.isEmpty, intent.verb == "enter" {
+                return Decision(action: .keyCombo(keys: ["return"]), confidence: 0.95,
+                                rationale: "key press enter")
+            }
             guard !intent.arg.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs text")
@@ -397,6 +415,30 @@ public struct AXPolicy: Policy {
             let confidence = min(0.95, score * (runnerUp > score - 0.15 ? 0.75 : 1.0))
             return Decision(action: action, confidence: confidence,
                             rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? node.desc ?? node.help ?? "")\" score=\(score)")
+        case _ where Self.editVerbs.contains(intent.verb),
+             "select", "pilih":
+            // Standard edit shortcuts on whatever is focused/selected. A real
+            // object ("paste it into Notes", "copy the link") needs S2.
+            let a = intent.arg.lowercased().trimmingCharacters(in: .punctuationCharacters)
+            let bare = ["", "it", "this", "that", "selection", "the selection", "text", "the text",
+                        "ini", "itu", "teks", "teksnya", "here", "di sini", "disini"]
+            let all = ["all", "everything", "semua", "semuanya", "all text"]
+            let combo: [String]?
+            switch intent.verb {
+            case "copy", "salin": combo = bare.contains(a) ? ["cmd", "c"] : nil
+            case "paste", "tempel": combo = bare.contains(a) ? ["cmd", "v"] : nil
+            case "cut", "potong": combo = bare.contains(a) ? ["cmd", "x"] : nil
+            case "undo": combo = a.isEmpty ? ["cmd", "z"] : nil
+            case "redo": combo = a.isEmpty ? ["cmd", "shift", "z"] : nil
+            case "save", "simpan": combo = bare.contains(a) ? ["cmd", "s"] : nil
+            default: combo = all.contains(a) ? ["cmd", "a"] : nil     // select/pilih all
+            }
+            guard let combo else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "'\(intent.verb) \(intent.arg)' needs a target — S2")
+            }
+            return Decision(action: .keyCombo(keys: combo), confidence: 0.95,
+                            rationale: "\(intent.verb) (\(combo.joined(separator: "+")))")
         default:
             return Decision(action: nil, confidence: 0.1,
                             rationale: "unknown verb '\(intent.verb)' — needs a smarter brain")

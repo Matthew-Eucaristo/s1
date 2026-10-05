@@ -323,11 +323,13 @@ public final class Serve: @unchecked Sendable {
                 let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
                 let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
                 let id = lang.hasPrefix("id")
-                let reply: String = switch report.status {
-                case .done: id ? "Selesai: \(goal)" : "Done: \(goal)"
-                case .needsHuman, .escalatedToS2:
-                    id ? "Butuh kamu" : "Needs you"
-                default: id ? "Berhenti" : "Stopped"
+                let reply: String = if let answer = report.answer { answer } else {
+                    switch report.status {
+                    case .done: id ? "Selesai: \(goal)" : "Done: \(goal)"
+                    case .needsHuman: id ? "Butuh kamu" : "Needs you"
+                    case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
+                    default: id ? "Berhenti" : "Stopped"
+                    }
                 }
                 await speaker.say(reply, language: lang, voice: config.voice)
             }

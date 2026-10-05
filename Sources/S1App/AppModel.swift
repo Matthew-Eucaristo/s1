@@ -774,6 +774,11 @@ final class AppModel {
                     why = String(why.dropFirst("needsHuman(".count).dropLast())
                 }
                 status = "needs human — \(why)"
+            } else if let answer = report.answer {
+                status = answer
+            } else if report.status == .escalatedToS2,
+                      let last = recorded.last(where: { $0.escalation != nil }) {
+                status = "S2 couldn't decide — \((last.rationale ?? "").prefix(160))"
             } else {
                 status = report.status.rawValue
             }
@@ -786,13 +791,18 @@ final class AppModel {
                 let lang = SpokenLanguage.detect(goalText, among: SpokenLanguage.candidates(for: locale))?
                     .identifier ?? "en-US"
                 let id = lang.hasPrefix("id")
-                let reply: String = switch report.status {
-                case .done: id ? "Selesai" : "Done"
-                case .needsHuman, .escalatedToS2: id ? "Butuh kamu" : "Needs you"
-                default: id ? "Berhenti" : "Stopped"
+                let reply: String = if let answer = report.answer { answer } else {
+                    switch report.status {
+                    case .done: id ? "Selesai: \(goalText)" : "Done: \(goalText)"
+                    case .needsHuman: id ? "Butuh kamu: \(goalText)" : "Needs you: \(goalText)"
+                    case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
+                    default: id ? "Berhenti" : "Stopped"
+                    }
                 }
-                await speaker.say("\(reply): \(goalText)", language: lang,
-                                  voice: ttsVoice.isEmpty ? nil : ttsVoice)
+                // A user Stop means silence — never announce after the fact.
+                if !FileManager.default.fileExists(atPath: killPath) {
+                    await speaker.say(reply, language: lang, voice: ttsVoice.isEmpty ? nil : ttsVoice)
+                }
             }
         } catch {
             status = "error: \(error.localizedDescription)"

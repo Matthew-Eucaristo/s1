@@ -403,11 +403,17 @@ public struct SpeechToText: Sendable {
         // recognition fails, or when a final transcript lands early — this
         // recognizer rarely declares "final" on its own mid-stream.
         var waited = 0.0
-        while waited < maxSeconds, failure.value == nil, !finished.get, !endpointer.isDone {
-            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { break }
+        var endReason = "timeout"
+        while waited < maxSeconds {
+            if failure.value != nil { endReason = "error"; break }
+            if finished.get { endReason = "final"; break }
+            if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
+            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
             try await Task.sleep(nanoseconds: 100_000_000)
             waited += 0.1
         }
+        DebugTrace.event("voice", ["path": "legacy", "end": endReason, "seconds": waited,
+                                   "locale": locale.identifier])
         // Close the audio so the recognizer finalizes what it has now.
         req.endAudio()
         for _ in 0 ..< 15 where !finished.get { try await Task.sleep(nanoseconds: 100_000_000) }
@@ -537,18 +543,22 @@ public struct SpeechToText: Sendable {
         // trailing words. Burning the full maxSeconds after every command
         // made every voice turn feel frozen.
         var waited = 0.0
+        var endReason = "timeout"
         while waited < maxSeconds {
             try await Task.sleep(nanoseconds: 150_000_000)
             waited += 0.15
-            if speechEnded.get || endpointer.isDone { break }
+            if speechEnded.get { endReason = "speechDetector"; break }
+            if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
             // The recognizer is a VAD too: words stopped changing → turn over.
-            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { break }
+            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
             var settled = false
             for c in collectors {
                 if await c.hasContent, await c.idleFor(0.9) { settled = true; break }
             }
-            if settled { break }
+            if settled { endReason = "collectorIdle"; break }
         }
+        DebugTrace.event("voice", ["path": "analyzer", "end": endReason, "seconds": waited,
+                                   "lanes": collectors.count])
         continuations.forEach { $0.finish() }
         var laneErrors: [Error] = []
         for (i, t) in inputTasks.enumerated() {

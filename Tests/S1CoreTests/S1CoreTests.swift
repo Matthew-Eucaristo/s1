@@ -2146,3 +2146,43 @@ private struct StubJudge: DecisionJudge {
     #expect(PermissionReport(accessibility: true, screenRecording: false).ready)
     #expect(!PermissionReport(accessibility: false, screenRecording: true).ready)
 }
+
+@Test func openCodeGetsStableSessionHeader() {
+    let ep = Endpoint(baseURL: "https://opencode.ai/zen/go/v1", model: "deepseek-v4.1-flash")
+    let h = ChatClient.headers(for: ep, session: "abc")
+    #expect(h["x-opencode-session"] == "abc")
+    #expect(h["User-Agent"]?.hasPrefix("s1/") == true)
+    #expect(h["Authorization"] == nil)
+    let local = Endpoint(baseURL: "http://localhost:11434/v1", model: "gemma3:4b")
+    #expect(ChatClient.headers(for: local)["x-opencode-session"] == nil)
+}
+
+@Test func conversationKeepsIdAndTurnsUntilIdle() {
+    let c = Conversation(idleReset: 60)
+    let t0 = Date()
+    let id = c.sessionID(now: t0)
+    c.record(goal: "open notes", outcome: "done", now: t0.addingTimeInterval(10))
+    #expect(c.sessionID(now: t0.addingTimeInterval(20)) == id)
+    #expect(c.recent().map(\.goal) == ["open notes"])
+    #expect(c.sessionID(now: t0.addingTimeInterval(200)) != id)
+    #expect(c.recent().isEmpty)
+}
+
+@Test func s2PromptCarriesConversationAndAnswerRule() {
+    let p = LLMReasoner.userPrompt(observation: Snapshot(timestamp: Date(), windows: []), goal: "type more",
+                                   history: [], reason: "x",
+                                   conversation: [.init(goal: "open ChatGPT", outcome: "done")])
+    #expect(p.contains("Earlier in this conversation:\n- open ChatGPT → done"))
+    #expect(LLMReasoner.systemPrompt.contains("QUESTION"))
+}
+
+@Test func chatVerbTypesAndEditVerbsAreShortcuts() async throws {
+    let obs = Snapshot(timestamp: Date(), windows: [])
+    let p = AXPolicy()
+    #expect(try await p.decide(observation: obs, goal: "chat hello world", history: []).action == .typeText("hello world"))
+    #expect(try await p.decide(observation: obs, goal: "copy", history: []).action == .keyCombo(keys: ["cmd", "c"]))
+    #expect(try await p.decide(observation: obs, goal: "select all", history: []).action == .keyCombo(keys: ["cmd", "a"]))
+    #expect(AXPolicy.intents(of: "copy this then paste it").map(\.verb) == ["copy", "paste"])
+    #expect(AXPolicy.intents(of: "type copy and paste").count == 1)
+    #expect(try await p.decide(observation: obs, goal: "paste it into Notes", history: []).action == nil)
+}

@@ -177,6 +177,7 @@ public struct SystemOneClient: DecisionJudge {
         req.httpMethod = "POST"
         req.timeoutInterval = timeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("s1/\(S1Info.version)", forHTTPHeaderField: "User-Agent")
         if let key = endpoint.apiKey, !key.isEmpty {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
@@ -193,8 +194,14 @@ public struct SystemOneClient: DecisionJudge {
         }
         let data: Data, resp: URLResponse
         do { (data, resp) = try await URLSession.shared.data(for: req) }
-        catch { record(false, error: error.localizedDescription); throw error }
+        catch {
+            DebugTrace.http(role: "s1-decision", url: url, status: 0, ms: Int(Date().timeIntervalSince(started) * 1000),
+                            request: req.httpBody, response: nil, error: error.localizedDescription)
+            record(false, error: error.localizedDescription); throw error
+        }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        DebugTrace.http(role: "s1-decision", url: url, status: code, ms: Int(Date().timeIntervalSince(started) * 1000),
+                        request: req.httpBody, response: data)
         guard code == 200 else {
             // Error bodies never carry our key — but keep them short.
             let snippet = String(decoding: data.prefix(200), as: UTF8.self).terminalSafe

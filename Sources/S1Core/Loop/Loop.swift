@@ -19,6 +19,15 @@ public struct RunReport: Sendable {
     public var steps: Int
     public var runDir: String
     public var escalations: Int
+    /// The done summary — S2's answer when the goal was a question.
+    public var summary: String? = nil
+
+    /// A real answer worth showing/speaking (not the grammar's boilerplate).
+    public var answer: String? {
+        guard status == .done, let s = summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !s.isEmpty, !["done", "goal completed"].contains(s.lowercased()) else { return nil }
+        return s
+    }
 }
 
 /// The see → decide → gate → act → verify → log cycle. S1 decides; below the
@@ -96,7 +105,7 @@ public struct AgentLoop {
             if rec.escalation != nil { escalations += 1 }
 
             switch rec.action {
-            case .done(let summary)?: status = .done; _ = summary; return RunReport(status: status, steps: i + 1, runDir: logger.runDir.path, escalations: escalations)
+            case .done(let summary)?: status = .done; return RunReport(status: status, steps: i + 1, runDir: logger.runDir.path, escalations: escalations, summary: summary)
             default: break
             }
             if case .needsHuman = gateVerdict(rec.gate) { status = .needsHuman; break }

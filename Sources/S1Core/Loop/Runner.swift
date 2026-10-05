@@ -237,8 +237,16 @@ public enum S1Runner {
                              gate: gate, s2: s2)
 
         print("run dir: \(logger.runDir.path)")
-        let report = try await loop.run(goal: goal, policy: policy, logger: logger,
-                                        onPhase: onPhase)
+        DebugTrace.event("run", ["goal": goal, "policy": policy.name, "s2": s2?.name ?? "none",
+                                 "session": Conversation.shared.sessionID(), "dir": logger.runDir.path])
+        let report = try await DebugTrace.$runDir.withValue(logger.runDir) {
+            try await loop.run(goal: goal, policy: policy, logger: logger, onPhase: onPhase)
+        }
+        Conversation.shared.record(goal: goal, outcome: report.answer ?? report.status.rawValue)
+        DebugTrace.$runDir.withValue(logger.runDir) {
+            DebugTrace.event("runEnd", ["status": report.status.rawValue, "steps": report.steps,
+                                        "answer": report.answer ?? ""])
+        }
         print("status: \(report.status.rawValue) | steps: \(report.steps) | escalations: \(report.escalations)")
         return (report, logger)
     }
