@@ -9,11 +9,13 @@ struct SettingsView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        TabView {
-            Tab("General", systemImage: "gearshape") { GeneralSettings(model: model) }
-            Tab("Voice", systemImage: "waveform") { VoiceSettings(model: model) }
-            Tab("Models", systemImage: "cpu") { ConnectionsView(model: model) }
-            Tab("Permissions", systemImage: "hand.raised") { PermissionSettings(model: model) }
+        TabView(selection: $model.settingsTab) {
+            Tab("General", systemImage: "gearshape", value: "general") { GeneralSettings(model: model) }
+            Tab("Voice", systemImage: "waveform", value: "voice") { VoiceSettings(model: model) }
+            Tab("Models", systemImage: "cpu", value: "models") { ConnectionsView(model: model) }
+            Tab("Snippets", systemImage: "text.badge.plus", value: "snippets") { SnippetSettings() }
+            Tab("Permissions", systemImage: "hand.raised", value: "permissions") { PermissionSettings(model: model) }
+            Tab("About", systemImage: "info.circle", value: "about") { AboutSettings() }
         }
         .scenePadding()
         .frame(width: 620, height: 640)
@@ -47,20 +49,20 @@ private struct GeneralSettings: View {
                 LabeledContent("Dictate") { Text("⌃⌥D — hold to talk, or tap; text pastes where you type").foregroundStyle(.secondary) }
             }
             Section {
-                Toggle("Background executor: Cua Driver (beta)", isOn: Binding(
-                    get: { S1Config.load().executor == "cua" },
+                Toggle("Use Cua Driver when installed", isOn: Binding(
+                    get: { CuaDriver.enabled() },
                     set: { on in
-                        var c = S1Config.load(); c.executor = on ? "cua" : nil
+                        var c = S1Config.load(); c.executor = on ? nil : "cgevent"
                         try? c.save()
                     }))
-                .disabled(CuaDriver.binary() == nil && S1Config.load().executor != "cua")
+                .disabled(CuaDriver.binary() == nil)
             } header: {
                 Text("Executor")
             } footer: {
                 if CuaDriver.binary() == nil {
                     Text("Optional. Install Cua Driver to type, press keys and launch apps without stealing focus. [cua.ai/docs/cua-driver](https://cua.ai/docs/cua-driver)")
                 } else {
-                    Text("Typing, shortcuts and app launches go through Cua Driver in the background; everything else, and any failed Cua call, uses the normal path. The safety gate runs first either way.")
+                    Text(CuaDriver.enabled() ? "Cua Driver found. Typing, shortcuts and app launches go through it in the background (no focus stealing); everything else, and any failed Cua call, uses s1's own fast path. The safety gate runs first either way." : "Cua Driver is installed but turned off; s1 uses its own input path.")
                 }
             }
         }
@@ -390,5 +392,110 @@ struct PermRow: View {
                 .controlSize(.mini)
             }
         }
+    }
+}
+
+/// Snippet editor over ~/.s1/snippets.json — type the keyword in the
+/// ⌥Space launcher, Enter pastes the expansion into the app you were in.
+@available(macOS 26, *)
+private struct SnippetSettings: View {
+    @State private var items: [Snippet] = Snippets.load()
+    @State private var selection: Int?
+    @State private var note = ""
+
+    var body: some View {
+        Form {
+            Section {
+                List(selection: $selection) {
+                    ForEach(items.indices, id: \.self) { i in
+                        HStack {
+                            Text(items[i].keyword.isEmpty ? "untitled" : items[i].keyword).bold()
+                            Text(items[i].text.replacingOccurrences(of: "\n", with: " ⏎ "))
+                                .foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .tag(i)
+                    }
+                }
+                .frame(minHeight: 200)
+                HStack {
+                    Button("Add") {
+                        items.append(Snippet(keyword: "new", text: ""))
+                        selection = items.count - 1
+                    }
+                    Button("Remove") {
+                        if let s = selection, items.indices.contains(s) { items.remove(at: s); selection = nil }
+                    }
+                    .disabled(selection == nil)
+                    Spacer()
+                    Button("Restore Defaults") { items = Snippets.defaults; selection = nil }
+                    Button("Open JSON") { Snippets.ensureFile(); NSWorkspace.shared.open(Snippets.path) }
+                    Button("Save") {
+                        do { try Snippets.save(items); note = "Saved" } catch { note = error.localizedDescription }
+                    }
+                    .keyboardShortcut("s", modifiers: .command)
+                }
+            } footer: {
+                Text(note.isEmpty ? "Placeholders: {date} {time} {datetime} {isodate} {weekday} {name} {uuid} {clipboard}. Stored in ~/.s1/snippets.json." : note)
+            }
+            if let s = selection, items.indices.contains(s) {
+                Section("Edit") {
+                    TextField("Keyword", text: $items[s].keyword)
+                    TextEditor(text: $items[s].text)
+                        .font(.body.monospaced())
+                        .frame(minHeight: 90)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { items = Snippets.load() }
+    }
+}
+
+/// Version, license and the open-source projects s1 builds on.
+@available(macOS 26, *)
+private struct AboutSettings: View {
+    private struct Credit: Identifiable {
+        let name, license, url, use: String
+        var id: String { name }
+    }
+
+    private let credits: [Credit] = [
+        .init(name: "Cua Driver (trycua/cua)", license: "MIT", url: "https://github.com/trycua/cua",
+              use: "Optional background executor, used when installed"),
+        .init(name: "swift-argument-parser (Apple)", license: "Apache-2.0", url: "https://github.com/apple/swift-argument-parser",
+              use: "s1 command-line interface"),
+        .init(name: "AeriVoice", license: "MIT", url: "https://github.com/DanielOu1208/aerivoice",
+              use: "Design inspiration: hold-to-talk, live notch transcript, paste-and-restore"),
+        .init(name: "Pi agent harness", license: "MIT", url: "https://github.com/badlogic/pi-mono",
+              use: "Design inspiration: JSON event stream, session history, text-file skills"),
+        .init(name: "Frankfurter", license: "MIT", url: "https://frankfurter.dev",
+              use: "Currency rates (European Central Bank reference data)"),
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("s1", value: "\(S1Info.version)")
+                LabeledContent("License", value: "MIT")
+                Link("github.com/Matthew-Eucaristo/s1", destination: URL(string: "https://github.com/Matthew-Eucaristo/s1")!)
+            }
+            Section {
+                ForEach(credits) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Link(c.name, destination: URL(string: c.url)!)
+                            Spacer()
+                            Text(c.license).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(c.use).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Open source")
+            } footer: {
+                Text("Thanks to everyone who builds and maintains these projects. Hosted models (Jev, OpenCode Go, Liquid d1, Cloudflare Clef, Groq, OpenAI) are third-party services under their own terms.")
+            }
+        }
+        .formStyle(.grouped)
     }
 }

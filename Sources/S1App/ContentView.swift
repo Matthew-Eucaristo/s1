@@ -8,6 +8,7 @@ struct ContentView: View {
     @Bindable var model: AppModel
 
     @FocusState private var goalFocused: Bool
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 14) {
@@ -22,6 +23,7 @@ struct ContentView: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .frame(minWidth: 620, minHeight: 500)
+        .onAppear { model.openSettingsAction = { openSettings() } }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 SettingsLink {

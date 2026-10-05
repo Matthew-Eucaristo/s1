@@ -4,7 +4,7 @@ import Foundation
 
 /// One row in the ⌥Space launcher.
 public struct LauncherItem: Identifiable, Sendable, Equatable {
-    public enum Kind: String, Sendable { case app, snippet, clip, calc, window, recent, ask, command }
+    public enum Kind: String, Sendable { case app, snippet, clip, calc, window, recent, ask, command, file, spotlight, web }
     public var kind: Kind
     public var title: String
     public var subtitle: String
@@ -41,7 +41,8 @@ public enum Launcher {
 
     public static func search(_ query: String, apps: [(name: String, path: String)],
                               snippets: [Snippet], clips: [String], recents: [String],
-                              limit: Int = 9) -> [LauncherItem] {
+                              files: [String] = [], rates: FX.Rates? = nil,
+                              limit: Int = 11) -> [LauncherItem] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty {
             let base = Array((clips.prefix(4).map { clipItem($0) }
@@ -55,6 +56,13 @@ public enum Launcher {
         if let v = Calc.evaluate(q) {
             let s = Calc.format(v)
             scored.append((2, LauncherItem(kind: .calc, title: "= \(s)", subtitle: "Enter copies the result", payload: s)))
+        }
+        if let c = Convert.item(q, rates: rates) { scored.append((2, c)) }
+        for f in files {
+            let url = URL(fileURLWithPath: f)
+            let dir = url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+            scored.append((max(score(q, url.lastPathComponent), 0.5) * 0.85,
+                           LauncherItem(kind: .file, title: url.lastPathComponent, subtitle: dir, payload: f)))
         }
         for a in apps {
             let sc = score(q, a.name)
@@ -84,8 +92,11 @@ public enum Launcher {
         }.map(\.element.1)
         var seen = Set<String>()
         let unique = top.filter { seen.insert($0.id).inserted }
-        return Array(unique.prefix(limit - 1))
-            + [LauncherItem(kind: .ask, title: "Ask s1: \(q)", subtitle: "Run as a command", payload: q)]
+        return Array(unique.prefix(limit - 3)) + [
+            LauncherItem(kind: .ask, title: "Ask s1: \(q)", subtitle: "Run as a command", payload: q),
+            LauncherItem(kind: .spotlight, title: "Search Spotlight for “\(q)”", subtitle: "Spotlight", payload: q),
+            LauncherItem(kind: .web, title: "Search the web for “\(q)”", subtitle: "Default browser", payload: q),
+        ]
     }
 
     static func clipItem(_ c: String) -> LauncherItem {
@@ -119,31 +130,62 @@ public struct Snippet: Codable, Sendable, Equatable {
 public enum Snippets {
     public static var path: URL { URL(fileURLWithPath: S1Home.path + "/snippets.json") }
 
+    /// Ready out of the box; the file (once saved) replaces them entirely.
+    public static let defaults: [Snippet] = [
+        Snippet(keyword: "today", text: "{date}"),
+        Snippet(keyword: "now", text: "{datetime}"),
+        Snippet(keyword: "time", text: "{time}"),
+        Snippet(keyword: "isodate", text: "{isodate}"),
+        Snippet(keyword: "sig", text: "Best regards,\n{name}"),
+        Snippet(keyword: "thanks", text: "Thanks so much! Let me know if you have any questions."),
+        Snippet(keyword: "ty", text: "Thank you!"),
+        Snippet(keyword: "omw", text: "On my way!"),
+        Snippet(keyword: "brb", text: "Be right back."),
+        Snippet(keyword: "call", text: "Are you free for a quick call this week? A few times that work for me:\n- \n- "),
+        Snippet(keyword: "followup", text: "Hi! Just following up on my previous message. Any update when you have a moment?"),
+        Snippet(keyword: "lgtm", text: "Looks good to me, thanks!"),
+        Snippet(keyword: "quote", text: "> {clipboard}"),
+        Snippet(keyword: "codeblock", text: "```\n{clipboard}\n```"),
+        Snippet(keyword: "uuid", text: "{uuid}"),
+        Snippet(keyword: "shrug", text: "¯\\_(ツ)_/¯"),
+        Snippet(keyword: "terimakasih", text: "Terima kasih banyak!"),
+        Snippet(keyword: "salam", text: "Salam,\n{name}"),
+    ]
+
     public static func load() -> [Snippet] {
-        guard let d = try? Data(contentsOf: path) else { return [] }
-        return (try? JSONDecoder().decode([Snippet].self, from: d)) ?? []
+        guard let d = try? Data(contentsOf: path) else { return defaults }
+        return (try? JSONDecoder().decode([Snippet].self, from: d)) ?? defaults
     }
 
-    /// Creates the file with examples so "Edit Snippets…" opens something useful.
+    public static func save(_ snippets: [Snippet]) throws {
+        S1Home.ensurePrivate()
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try enc.encode(snippets.filter { !$0.keyword.trimmingCharacters(in: .whitespaces).isEmpty })
+            .write(to: path, options: .atomic)
+    }
+
+    /// Writes the defaults so "Edit Snippets…" opens something useful.
     public static func ensureFile() {
         guard !FileManager.default.fileExists(atPath: path.path) else { return }
-        S1Home.ensurePrivate()
-        let ex = [Snippet(keyword: "email", text: "me@example.com"),
-                  Snippet(keyword: "sig", text: "Best,\n{name}"),
-                  Snippet(keyword: "today", text: "{date}")]
-        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? enc.encode(ex).write(to: path, options: .atomic)
+        try? save(defaults)
     }
 
-    /// `{date}`, `{time}`, `{datetime}`, `{name}` placeholders.
-    public static func expand(_ text: String, now: Date = Date()) -> String {
+    /// `{date}`, `{time}`, `{datetime}`, `{isodate}`, `{weekday}`, `{name}`,
+    /// `{uuid}`, `{clipboard}` placeholders.
+    public static func expand(_ text: String, now: Date = Date(), clipboard: String? = nil) -> String {
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
         let tf = DateFormatter(); tf.dateStyle = .none; tf.timeStyle = .short
+        let wf = DateFormatter(); wf.dateFormat = "EEEE"
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withFullDate]
         return text
             .replacingOccurrences(of: "{datetime}", with: df.string(from: now) + " " + tf.string(from: now))
+            .replacingOccurrences(of: "{isodate}", with: iso.string(from: now))
             .replacingOccurrences(of: "{date}", with: df.string(from: now))
             .replacingOccurrences(of: "{time}", with: tf.string(from: now))
+            .replacingOccurrences(of: "{weekday}", with: wf.string(from: now))
             .replacingOccurrences(of: "{name}", with: NSFullUserName())
+            .replacingOccurrences(of: "{uuid}", with: UUID().uuidString.lowercased())
+            .replacingOccurrences(of: "{clipboard}", with: clipboard ?? "")
     }
 }
 

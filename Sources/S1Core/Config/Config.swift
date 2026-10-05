@@ -53,7 +53,7 @@ public struct S1Config: Codable, Sendable {
     public var decision: ModelEndpoint?
     /// TTS voice identifier ("" / nil = best installed voice per language).
     public var voice: String?
-    /// Action executor: nil/"cgevent" (default) or "cua" (Cua Driver, background).
+    /// Action executor: nil/"cua" = Cua Driver when installed (default), "cgevent" = never Cua.
     public var executor: String?
     /// Optional cloud STT / TTS (nil = on-device Apple speech).
     public var stt: ModelEndpoint?

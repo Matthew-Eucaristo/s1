@@ -2234,7 +2234,7 @@ private struct DelegatingReasoner: Reasoner {
                 (name: "Notes", path: "/A/Notes.app")]
     let r = Launcher.search("saf", apps: apps, snippets: [], clips: [], recents: [])
     #expect(r.first?.title == "Safari")
-    #expect(r.last?.kind == .ask)
+    #expect(r.suffix(3).map(\.kind) == [.ask, .spotlight, .web])
     #expect(Launcher.search("vsc", apps: apps, snippets: [], clips: [], recents: []).first?.title == "Visual Studio Code")
     #expect(Launcher.search("12*3", apps: apps, snippets: [], clips: [], recents: []).first?.payload == "36")
     #expect(Launcher.search("left half", apps: apps, snippets: [], clips: [], recents: []).first?.kind == .window)
@@ -2292,7 +2292,7 @@ private struct DelegatingReasoner: Reasoner {
     #expect(CuaDriver.call(for: .click(x: 1, y: 2), pid: 1) == nil)
     var cfg = S1Config(); cfg.executor = "cua"
     #expect(CuaDriver.enabled(cfg, env: [:]))
-    #expect(!CuaDriver.enabled(S1Config(), env: [:]))
+    var off = S1Config(); off.executor = "cgevent"; #expect(!CuaDriver.enabled(off, env: [:]))
     #expect(CuaDriver.binary(env: ["CUA_DRIVER_PATH": "/bin/ls"]) == "/bin/ls")
 }
 
@@ -2336,4 +2336,37 @@ private struct DelegatingReasoner: Reasoner {
     let f = try AVAudioFile(forReading: url)
     #expect(f.length == 9600)
     #expect(f.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int == 16)
+}
+
+@Test func launcherConversions() {
+    #expect(Convert.parse("100 usd to idr") == .init(amount: 100, from: "usd", to: "idr"))
+    #expect(Convert.parse("usd idr") == .init(amount: 1, from: "usd", to: "idr"))
+    #expect(Convert.parse("70f to c") == .init(amount: 70, from: "f", to: "c"))
+    #expect(Convert.parse("open safari") == .init(amount: 1, from: "open", to: "safari"))
+    #expect(Convert.item("open safari", rates: nil) == nil)
+    let km = Convert.units(.init(amount: 5, from: "km", to: "mi"))!
+    #expect(abs(km - 3.10686) < 0.001)
+    #expect(abs(Convert.units(.init(amount: 212, from: "f", to: "c"))! - 100) < 1e-6)
+    #expect(Convert.units(.init(amount: 1, from: "kg", to: "km")) == nil)
+    let r = FX.Rates(base: "EUR", date: "2026-10-05", rates: ["USD": 1.12, "IDR": 20069.89], fetched: nil)
+    let v = Convert.money(.init(amount: 1, from: "usd", to: "rupiah"), rates: r)!
+    #expect(abs(v - 20069.89 / 1.12) < 0.01)
+    #expect(Convert.item("100 usd to idr", rates: r)?.title.hasPrefix("100 USD = ") == true)
+    #expect(Launcher.search("5 km to mi", apps: [], snippets: [], clips: [], recents: []).first?.kind == .calc)
+    #expect(FX.isStale(r))
+    #expect(FileSearch.predicate("a") == nil)
+    #expect(FileSearch.predicate("re'po*")?.contains("'*repo*'cd") == true)
+}
+
+@Test func snippetDefaultsAndPlaceholders() {
+    #expect(Snippets.defaults.count >= 15)
+    #expect(Snippets.expand("> {clipboard}", clipboard: "hi") == "> hi")
+    #expect(!Snippets.expand("{isodate} {weekday} {uuid}").contains("{"))
+}
+
+@Test func cuaOnByDefaultWhenInstalled() {
+    #expect(CuaDriver.enabled(S1Config(), env: [:]))
+    var c = S1Config(); c.executor = "cgevent"
+    #expect(!CuaDriver.enabled(c, env: [:]))
+    #expect(!CuaDriver.enabled(S1Config(), env: ["S1_EXECUTOR": "cgevent"]))
 }

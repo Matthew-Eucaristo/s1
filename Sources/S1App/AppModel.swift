@@ -76,6 +76,19 @@ final class AppModel {
     /// User's extra STT words (comma-separated). Read at transcribe time,
     /// so edits need only a config save — no companion restart.
     var vocabulary = "" { didSet { scheduleSave(); invalidateStt() } }
+    /// Selected Settings tab — the launcher deep-links to "snippets".
+    var settingsTab = "general"
+    /// Set by a live SwiftUI view holding `openSettings`; AppKit callers
+    /// (the launcher panel) go through this.
+    @ObservationIgnored var openSettingsAction: (() -> Void)?
+
+    func openSettings(_ tab: String) {
+        settingsTab = tab
+        NSApp.activate()
+        if let openSettingsAction { openSettingsAction() } else {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+    }
     /// Optional cloud speech (empty model = on-device Apple speech).
     var sttBase = "https://api.groq.com/openai/v1" { didSet { scheduleRearm() } }
     var sttModel = "" { didSet { scheduleRearm() } }

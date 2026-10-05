@@ -16,10 +16,11 @@ public enum CuaDriver {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    /// Whether config/env opted into the Cua executor.
+    /// On by default (used whenever `cua-driver` is installed); `executor:
+    /// "cgevent"` (or `S1_EXECUTOR=cgevent`) opts out.
     public static func enabled(_ cfg: S1Config = .load(),
                                env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
-        (env["S1_EXECUTOR"] ?? cfg.executor) == "cua"
+        (env["S1_EXECUTOR"] ?? cfg.executor) != "cgevent"
     }
 
     /// Tool + JSON args for the actions Cua handles; nil = use CGEvent.

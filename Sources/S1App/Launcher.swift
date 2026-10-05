@@ -55,7 +55,11 @@ final class LauncherController: NSObject, NSWindowDelegate {
         state.apps = Launcher.installedApps()
         state.snippets = Snippets.load()
         state.recents = AppModel.shared.recentGoals
-        state.query = ""; state.selection = 0
+        state.query = ""; state.selection = 0; state.files = []
+        if state.rates == nil { state.rates = FX.cached() }
+        if FX.isStale(state.rates) {
+            Task { if let r = await FX.refresh() { self.state.rates = r } }
+        }
         let p = panel ?? makePanel()
         panel = p
         if let screen = NSScreen.main {
@@ -99,7 +103,15 @@ final class LauncherController: NSObject, NSWindowDelegate {
         case .app:
             NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: item.payload),
                                                configuration: .init())
-        case .snippet: paste(Snippets.expand(item.payload), restore: true, into: target)
+        case .snippet:
+            paste(Snippets.expand(item.payload, clipboard: NSPasteboard.general.string(forType: .string)),
+                  restore: true, into: target)
+        case .file: NSWorkspace.shared.open(URL(fileURLWithPath: item.payload))
+        case .spotlight: NSWorkspace.shared.showSearchResults(forQueryString: item.payload)
+        case .web:
+            var c = URLComponents(string: "https://www.google.com/search")!
+            c.queryItems = [URLQueryItem(name: "q", value: item.payload)]
+            if let u = c.url { NSWorkspace.shared.open(u) }
         case .clip: paste(item.payload, restore: false, into: target)
         case .calc: setClipboard(item.payload)
         case .window:
@@ -110,8 +122,7 @@ final class LauncherController: NSObject, NSWindowDelegate {
             AppModel.shared.goal = item.payload
             Task { await AppModel.shared.run() }
         case .command:
-            Snippets.ensureFile()
-            NSWorkspace.shared.open(Snippets.path)
+            AppModel.shared.openSettings("snippets")
         }
     }
 
@@ -175,9 +186,28 @@ final class LauncherState {
     var clips: [String] = []
     var recents: [String] = []
     var previousApp: NSRunningApplication?
+    var files: [String] = []
+    var rates: FX.Rates?
+    private var fileTask: Task<Void, Never>?
 
     var items: [LauncherItem] {
-        Launcher.search(query, apps: apps, snippets: snippets, clips: clips, recents: recents)
+        Launcher.search(query, apps: apps, snippets: snippets, clips: clips, recents: recents,
+                        files: files, rates: rates)
+    }
+
+    /// Debounced Spotlight-index lookup; stale results never overwrite newer ones.
+    func searchFiles() {
+        fileTask?.cancel()
+        let q = query
+        files = []
+        guard q.count >= 2, Calc.evaluate(q) == nil, Convert.item(q, rates: rates) == nil else { return }
+        fileTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            let found = await FileSearch.search(q)
+            guard !Task.isCancelled, self.query == q else { return }
+            self.files = found
+        }
     }
 }
 
@@ -192,12 +222,12 @@ struct LauncherView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").font(.title2).foregroundStyle(.secondary)
-                TextField("Search apps, snippets, clipboard — or ask s1…", text: $state.query)
+                TextField("Search apps, files, snippets, 100 usd to idr — or ask s1…", text: $state.query)
                     .textFieldStyle(.plain)
                     .font(.title2)
                     .focused($focused)
                     .onSubmit { perform(items.indices.contains(state.selection) ? items[state.selection] : items.last) }
-                    .onChange(of: state.query) { state.selection = 0 }
+                    .onChange(of: state.query) { state.selection = 0; state.searchFiles() }
             }
             .padding(16)
             Divider()
@@ -251,6 +281,9 @@ struct LauncherView: View {
         case .recent: Image(systemName: "clock.arrow.circlepath")
         case .ask: Image(systemName: "sparkles")
         case .command: Image(systemName: "pencil")
+        case .file: Image(nsImage: NSWorkspace.shared.icon(forFile: item.payload)).resizable()
+        case .spotlight: Image(systemName: "magnifyingglass.circle")
+        case .web: Image(systemName: "globe")
         }
     }
 }
