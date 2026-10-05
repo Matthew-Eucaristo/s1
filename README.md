@@ -26,6 +26,7 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 ```bash
 # Homebrew — the recommended way (one package carries GUI + CLI):
 brew tap Matthew-Eucaristo/tap
+brew trust Matthew-Eucaristo/tap   # required once on Homebrew ≥4.4 (third-party cask taps)
 brew install --cask s1      # the S1 menu-bar app; `s1` CLI lands on PATH too
 
 s1 preflight                # shows which macOS permissions are missing
