@@ -21,6 +21,7 @@ public enum Doctor {
         "vlm", "s2", "locale", "speak", "vocabulary", "recent", "vlmScreenshot",
         "brain", "useS2", "notchHUD", "grounder", "decision", "voice", "executor",
         "stt", "tts", "ttsCloudVoice", "memory", "sandbox", "onboarded",
+        "voiceInterrupt", "vad", "vadSensitivity",
         "defaultsVersion",
     ]
 
