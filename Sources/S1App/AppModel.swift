@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import S1Core
+import SwiftUI
 import ServiceManagement
 import UniformTypeIdentifiers
 
@@ -19,7 +20,7 @@ final class AppModel {
     enum Brain: String, CaseIterable, Identifiable {
         case auto, ax
         var id: String { rawValue }
-        var title: String {
+        var title: LocalizedStringKey {
             switch self {
             case .auto: return "Auto (grammar + judge model)"
             case .ax:   return "AX (instant, no model)"
@@ -142,8 +143,8 @@ final class AppModel {
         pullProgress[name] = "starting…"
         Task {
             do {
-                try await ModelPull.pull(model: name) { [weak self] line in
-                    Task { @MainActor in self?.pullProgress[name] = line }
+                try await ModelPull.pull(model: name) { line in
+                    Task { @MainActor in self.pullProgress[name] = line }
                 }
                 pullProgress[name] = nil
                 refreshModels()
@@ -967,13 +968,13 @@ final class AppModel {
             running = false
             let lang = SpokenLanguage.detect(goalText, among: SpokenLanguage.candidates(for: locale))?
                 .identifier ?? "en-US"
-            let id = lang.hasPrefix("id")
+            let code = SpokenLanguage.code(Locale(identifier: lang))
             let reply: String = if let answer = report.answer { answer } else {
                 switch report.status {
-                case .done: id ? "Selesai" : "Done"
-                case .needsHuman: id ? "Butuh kamu" : "Needs you"
-                case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
-                default: id ? "Berhenti" : "Stopped"
+                case .done: SpokenLanguage.reply(.done, languageCode: code)
+                case .needsHuman: SpokenLanguage.reply(.needsHuman, languageCode: code)
+                case .escalatedToS2: SpokenLanguage.reply(.couldNotWorkOut, languageCode: code)
+                default: SpokenLanguage.reply(.stopped, languageCode: code)
                 }
             }
             appendFeed(.reply(status))
@@ -1100,9 +1101,7 @@ final class ModelPullStatus {
             defer { self.pullTask = nil }
             do {
                 try await ModelPull.pull(model: e.model) { line in
-                    Task { @MainActor [weak self] in
-                        self?.state = .downloading(line)
-                    }
+                    Task { @MainActor in self.state = .downloading(line) }
                 }
                 self.state = .checking
                 self.refresh()

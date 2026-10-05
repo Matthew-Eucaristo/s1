@@ -46,6 +46,11 @@ cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null \
 # if absent.
 cp assets/menubar-18.png "$APP/Contents/Resources/s1-menubar.png" 2>/dev/null || true
 cp assets/menubar-36.png "$APP/Contents/Resources/s1-menubar@2x.png" 2>/dev/null || true
+# Localized string catalogs (en is the dev region; id ships today — drop
+# more *.lproj dirs under Sources/S1App and they come along).
+for lproj in Sources/S1App/*.lproj; do
+    [ -d "$lproj" ] && cp -R "$lproj" "$APP/Contents/Resources/"
+done
 
 # Prefer the stable dev cert; fall back to ad-hoc (-) when absent.
 # Sign the embedded CLI first, then the bundle — inner components must be

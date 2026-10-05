@@ -355,13 +355,13 @@ public final class Serve: @unchecked Sendable {
                 // Speak the truth: "done" is only said when it actually is.
                 let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
                 let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
-                let id = lang.hasPrefix("id")
+                let code = SpokenLanguage.code(Locale(identifier: lang))
                 let reply: String = if let answer = report.answer { answer } else {
                     switch report.status {
-                    case .done: id ? "Selesai" : "Done"
-                    case .needsHuman: id ? "Butuh kamu" : "Needs you"
-                    case .escalatedToS2: id ? "Aku belum bisa melakukannya" : "I couldn't work that out"
-                    default: id ? "Berhenti" : "Stopped"
+                    case .done: SpokenLanguage.reply(.done, languageCode: code)
+                    case .needsHuman: SpokenLanguage.reply(.needsHuman, languageCode: code)
+                    case .escalatedToS2: SpokenLanguage.reply(.couldNotWorkOut, languageCode: code)
+                    default: SpokenLanguage.reply(.stopped, languageCode: code)
                     }
                 }
                 await speaker.say(reply, language: lang, voice: config.voice)

@@ -1,0 +1,180 @@
+/* Indonesian (id) — s1's second verified language after English.
+   Keys are the English literals from the SwiftUI views. Missing keys
+   fall back to English, so partial coverage is safe. Other languages:
+   copy this file to <lang>.lproj and PR — the team verifies en + id only. */
+
+// ---- Main window (ContentView) ----
+"Grant %@ to begin" = "Beri izin %@ untuk mulai";
+"Turn on S1 in Privacy & Security → Accessibility. Already on but still here? Click Fix — an updated app needs a fresh grant." = "Aktifkan S1 di Privacy & Security → Accessibility. Sudah aktif tapi masih muncul? Klik Perbaiki — app yang diperbarui butuh izin baru.";
+"Fix" = "Perbaiki";
+"Grant…" = "Beri izin…";
+"Add an API key for %@ to turn on the hosted models." = "Tambahkan kunci API untuk %@ agar model hosted aktif.";
+"Add Key…" = "Tambah Kunci…";
+"Message s1 — e.g. buka TextEdit lalu ketik halo" = "Pesan ke s1 — mis. buka TextEdit lalu ketik halo";
+"Dictate a command (⌘L) — on-device, auto language" = "Dikte perintah (⌘L) — di perangkat, bahasa otomatis";
+"Dictate a command" = "Dikte perintah";
+"Stop dictation" = "Berhenti dikte";
+"Run (⌘↩)" = "Jalankan (⌘↩)";
+"Stop (⌘.)" = "Berhenti (⌘.)";
+"Run" = "Jalankan";
+"Stop" = "Berhenti";
+"Recent" = "Terkini";
+"working…" = "bekerja…";
+"Tell s1 what to do" = "Katakan pada s1 apa yang harus dilakukan";
+"Type or talk — on the Mac, in Indonesian or English." = "Ketik atau bicara — di Mac, dalam bahasa Indonesia atau Inggris.";
+"you asked: %@" = "kamu bertanya: %@";
+"s1: %@" = "s1: %@";
+"Reveal this run's artifacts" = "Tampilkan artefak run ini";
+"Reveal run artifacts" = "Tampilkan artefak run";
+"Transcribe audio file" = "Transkripsi file audio";
+"Transcribe an audio file instead of the mic" = "Transkripsi file audio, bukan dari mikrofon";
+"Listen" = "Dengarkan";
+"Sleep" = "Tidur";
+"Always-on companion (⌘⇧L, or ⇧⇧ / ⌃⌥Space anywhere)" = "Pendamping selalu aktif (⌘⇧L, atau ⇧⇧ / ⌃⌥Space di mana saja)";
+"%lld steps" = "%lld langkah";
+"Settings" = "Pengaturan";
+"Settings (⌘,)" = "Pengaturan (⌘,)";
+
+// ---- Menu bar (S1App) ----
+"Goal…" = "Tujuan…";
+"Recent goals" = "Tujuan terbaru";
+"Listen (⇧⇧ / ⌃⌥Space)" = "Dengarkan (⇧⇧ / ⌃⌥Space)";
+"Stop listening" = "Berhenti mendengarkan";
+"Launch at login" = "Buka saat login";
+"Settings…" = "Pengaturan…";
+"Open s1" = "Buka s1";
+"Quit s1" = "Keluar s1";
+"idle" = "diam";
+"listening" = "mendengarkan";
+"running" = "berjalan";
+"heard: %@" = "terdengar: %@";
+"s1, idle" = "s1, diam";
+"s1, listening" = "s1, mendengarkan";
+"s1, running" = "s1, berjalan";
+
+// ---- Settings: tabs ----
+"General" = "Umum";
+"Voice" = "Suara";
+"Models" = "Model";
+"Snippets" = "Snippet";
+"Permissions" = "Izin";
+"About" = "Tentang";
+
+// ---- Settings: General ----
+"System 1" = "Sistem 1";
+"Brain" = "Otak";
+"Auto (grammar + judge model)" = "Otomatis (tata bahasa + model juri)";
+"AX (instant, no model)" = "AX (instan, tanpa model)";
+"Auto pairs the instant grammar with the judge model (Models → S1) — the judge can only push a risky step to S2, never act unsafer. AX is the grammar alone: zero model calls. Hard steps always escalate to S2 when it's configured." = "Otomatis memadukan tata bahasa instan dengan model juri (Models → S1) — juri hanya bisa mengalihkan langkah berisiko ke S2, tidak pernah bertindak lebih berbahaya. AX hanyalah tata bahasa: nol panggilan model. Langkah sulit selalu dieskalasi ke S2 bila terkonfigurasi.";
+"Companion" = "Pendamping";
+"Notch status pill" = "Pil status Notch";
+"Wake" = "Bangun";
+"Launcher" = "Peluncur";
+"Dictate" = "Dikte";
+"Memory & skills" = "Memori & skill";
+"Remember things I ask you to" = "Ingat hal-hal yang kuminta";
+"Open Memory" = "Buka Memori";
+"Clear Memory" = "Hapus Memori";
+"Open Skills Folder" = "Buka Folder Skill";
+"Say “remember that …” to keep a fact (never passwords or keys), “forget everything” to clear. After something works, say “save that as a skill called morning setup”; saying “morning setup” replays its steps, each through the safety gate. Plain files in ~/.s1 — edit them freely. The current session's history is always shared with S1 and S2." = "Bilang “ingat bahwa …” untuk menyimpan fakta (jangan pernah kata sandi atau kunci), “lupakan semuanya” untuk menghapus. Setelah sesuatu berhasil, bilang “simpan itu sebagai skill bernama morning setup”; menyebut “morning setup” memutar ulang langkahnya, masing-masing lewat gerbang keamanan. File biasa di ~/.s1 — edit bebas. Riwayat sesi saat ini selalu dibagikan ke S1 dan S2.";
+"Executor" = "Eksekutor";
+"Use Cua Driver when installed" = "Pakai Cua Driver bila terinstal";
+"Install Cua Driver (recommended)" = "Instal Cua Driver (direkomendasikan)";
+"Installing…" = "Menginstal…";
+"Shell sandbox" = "Sandbox shell";
+"Sandbox shell commands" = "Sandbox perintah shell";
+"Configuration files" = "File konfigurasi";
+"Run checks (s1 doctor)" = "Jalankan pemeriksaan (s1 doctor)";
+"Every s1 setting lives in a plain file under ~/.s1 — edit them in any editor, then run the checks to validate. `s1 doctor` does the same in a terminal (`--fix` repairs)." = "Semua pengaturan s1 ada di file biasa di ~/.s1 — edit dengan editor apa pun, lalu jalankan pemeriksaan untuk validasi. `s1 doctor` melakukan hal yang sama di terminal (`--fix` memperbaiki).";
+
+// ---- Settings: Voice ----
+"Speech recognition" = "Pengenalan ucapan";
+"Language" = "Bahasa";
+"Automatic" = "Otomatis";
+"On-device. Automatic listens in English and your Mac's language at once and keeps the one it's surest of." = "Di perangkat. Otomatis mendengarkan dalam bahasa Inggris dan bahasa Mac-mu sekaligus, lalu memakai yang paling yakin.";
+"On-device. Any language works — commands the built-in grammar can't parse go to S2, which reads them natively." = "Di perangkat. Bahasa apa pun bisa — perintah yang tak bisa diurai tata bahasa bawaan diteruskan ke S2, yang membacanya secara native.";
+"Listening" = "Mendengarkan";
+"Interrupt with my voice (barge-in)" = "Potong dengan suaraku (barge-in)";
+"End-of-speech detection" = "Deteksi akhir ucapan";
+"Automatic (Apple VAD + energy)" = "Otomatis (Apple VAD + energi)";
+"Energy only (deterministic)" = "Energi saja (deterministik)";
+"End-of-speech sensitivity" = "Sensitivitas akhir ucapan";
+"Low — tolerates pauses" = "Rendah — toleran jeda";
+"Medium" = "Sedang";
+"High — ends the turn fast" = "Tinggi — giliran cepat selesai";
+"Barge-in listens (energy only, echo-cancelled) while a run or reply is in flight — say anything and it stops, then keep talking for the next command. High sensitivity cuts the turn sooner after your last word." = "Barge-in mendengar (energi saja, gema dibatalkan) saat run atau balasan berjalan — bilang apa saja dan ia berhenti, lalu lanjut bicara untuk perintah berikutnya. Sensitivitas tinggi memotong giliran lebih cepat setelah kata terakhirmu.";
+"Custom words" = "Kata kustom";
+"Add a word or name…" = "Tambah kata atau nama…";
+"Add" = "Tambah";
+"Remove %@" = "Hapus %@";
+"Names and jargon the recognizer misspells (Warp, JIRA, Eucaristo). s1 also learns automatically: installed app names, your saved skill names, and names in remembered facts — those don't clutter this list." = "Nama dan jargon yang salah dieja pengenal (Warp, JIRA, Eucaristo). s1 juga belajar otomatis: nama aplikasi terinstal, nama skill tersimpan, dan nama di fakta yang diingat — tidak mengotori daftar ini.";
+"Cloud recognition (optional)" = "Pengenalan cloud (opsional)";
+"Preset" = "Preset";
+"Base URL" = "Base URL";
+"Model (empty = on-device)" = "Model (kosong = di perangkat)";
+"Edit presets (providers.json)…" = "Edit preset (providers.json)…";
+"Apple still listens on-device (end-of-speech detection, live text). With a model set, each finished turn is re-transcribed in the cloud for accuracy, using your custom words as the spelling hint, and falls back to on-device on any error. Audio leaves the Mac only when this is on." = "Apple tetap mendengar di perangkat (deteksi akhir ucapan, teks langsung). Dengan model terpasang, tiap giliran selesai ditranskripsi ulang di cloud demi akurasi, memakai kata kustom sebagai petunjuk ejaan, dan kembali ke perangkat saat ada error. Audio keluar dari Mac hanya bila ini aktif.";
+"Speech output" = "Keluaran suara";
+"Speak results" = "Ucapkan hasil";
+"Automatic (best installed)" = "Otomatis (terbaik terinstal)";
+"Preview" = "Pratinjau";
+"Cloud voice" = "Suara cloud";
+"Model" = "Model";
+"Replies use the language you spoke. For the most natural sound, download a Premium or Enhanced voice in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices." = "Balasan memakai bahasa yang kamu ucapkan. Untuk suara paling natural, unduh suara Premium atau Enhanced di System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.";
+
+// ---- Settings: Permissions ----
+"Accessibility" = "Aksesibilitas";
+"Screen Recording" = "Rekaman Layar";
+"Microphone" = "Mikrofon";
+"Input Monitoring" = "Pemantauan Input";
+"Request / re-check" = "Minta / periksa ulang";
+"Fix stuck Accessibility" = "Perbaiki Aksesibilitas macet";
+"Only Accessibility is required. Toggle on but still missing? Fix removes the old build's entry and asks again. Screen Recording is optional (screenshots, vision) and applies on next launch." = "Hanya Aksesibilitas yang wajib. Sudah aktif tapi masih hilang? Perbaiki menghapus entri build lama dan meminta ulang. Rekaman Layar opsional (screenshot, visi) dan berlaku saat buka berikutnya.";
+
+// ---- Settings: Models (ConnectionsView) ----
+"Providers" = "Penyedia";
+"Connect applies the provider's models to every role it covers (S1 = decision judge, S2 = reasoning, STT/TTS = speech). One API key unlocks the whole card — paste it once. Any OpenAI-compatible endpoint works, including every model on OpenRouter." = "Hubungkan memasang model provider ke semua peran yang dicakupnya (S1 = juri keputusan, S2 = penalar, STT/TTS = suara). Satu kunci API membuka seluruh kartu — tempel sekali. Endpoint apa pun yang kompatibel-OpenAI bisa, termasuk semua model di OpenRouter.";
+"S1 · Decision model" = "S1 · Model keputusan";
+"Server" = "Server";
+"Model (empty = off)" = "Model (kosong = mati)";
+"S2 · Reasoning LLM" = "S2 · LLM penalar";
+"connected" = "terhubung";
+"Connect" = "Hubungkan";
+"pick a model" = "pilih model";
+"key saved in Keychain — paste to replace" = "kunci tersimpan di Keychain — tempel untuk ganti";
+"paste API key" = "tempel kunci API";
+"API key" = "Kunci API";
+"saved in Keychain — type to replace" = "tersimpan di Keychain — ketik untuk ganti";
+"Save" = "Simpan";
+"Remove" = "Hapus";
+"Test connection" = "Uji koneksi";
+"Testing…" = "Menguji…";
+"Usage · last 30 days" = "Pemakaian · 30 hari terakhir";
+"No model calls yet." = "Belum ada panggilan model.";
+"Refresh" = "Segarkan";
+"Tokens and prompt-cache hits as each provider reports them. Full log: s1 usage, or ~/.s1/usage.jsonl." = "Token dan kenaikan prompt-cache seperti yang dilaporkan tiap provider. Log lengkap: s1 usage, atau ~/.s1/usage.jsonl.";
+"Model library" = "Pustaka model";
+"Ollama not installed" = "Ollama belum terinstal";
+"Download" = "Unduh";
+"checking…" = "memeriksa…";
+"Use as decision judge (S1)" = "Pakai sebagai juri keputusan (S1)";
+"Use as reasoner (S2)" = "Pakai sebagai penalar (S2)";
+"Decision judge %@ isn't downloaded" = "Juri keputusan %@ belum terunduh";
+"s1 runs fine without it; with it, risky or off-goal steps go to S2 instead of acting." = "s1 tetap jalan tanpanya; dengannya, langkah berisiko atau melenceng dialihkan ke S2, bukan langsung bertindak.";
+"Assign %@" = "Pasangkan %@";
+"Download %@" = "Unduh %@";
+
+// ---- Onboarding ----
+"Welcome to s1" = "Selamat datang di s1";
+"Permissions" = "Izin";
+"Request missing permissions" = "Minta izin yang kurang";
+"Cua Driver" = "Cua Driver";
+"installing…" = "menginstal…";
+"Model keys" = "Kunci model";
+"You're set" = "Kamu siap";
+"Launch s1 at login" = "Buka s1 saat login";
+"Skip setup" = "Lewati pengaturan";
+"Back" = "Kembali";
+"Done" = "Selesai";
+"Continue" = "Lanjut";
+"Install & continue" = "Instal & lanjut";

@@ -9,7 +9,7 @@
 ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black)
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
 
-Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. Every step is logged with evidence.
+Voice-first macOS agent. A fast local **System 1** (a protocol — swap the implementation) handles most steps; a pluggable **System 2** (LLM, local or cloud) is consulted only when S1 is unsure. The app is a chat-style window — say or type, watch each step land, talk over it to interrupt. Every step is logged with evidence.
 
 > **Public beta (v0.x)** — works, tested, and still sharpening. Read [`SECURITY.md`](SECURITY.md) before letting it drive a real machine.
 
@@ -17,8 +17,15 @@ Voice-first macOS agent. A fast local **System 1** (a protocol — swap the impl
 
 <p align="center"><img src="assets/app.png" width="720" alt="S1.app — a real run: 'buka Notes' opened Notes and logged both steps"></p>
 
-- Swift 6, SwiftPM, macOS 15+ (Speech features target macOS 26+), Apple Silicon.
+- Swift 6, SwiftPM, macOS 26+, Apple Silicon. Liquid Glass + App Intents,
+  no private APIs.
 - No sandbox (Accessibility API requires it) — distribute outside the App Store.
+- **Languages:** English + Indonesian are verified end-to-end (UI, grammar,
+  spoken replies). Speech also supports 日本語, 简体中文, 繁體中文, 한국어,
+  العربية, हिन्दी, Español, Français, Deutsch, Português, ไทย, Tiếng Việt —
+  the deterministic grammar covers en/id today and turns it can't parse go
+  to S2, which reads any language natively. Localization PRs welcome
+  (one `Localizable.strings` per `*.lproj` + a `SpokenLanguage` row).
 - MIT licensed. OSS components used are credited in `ATTRIBUTIONS.md`.
 
 ## Install
@@ -38,8 +45,9 @@ Or grab the signed zip straight from
 (`S1-*-app.zip` — drag `S1.app` into /Applications; the `s1` CLI is inside
 `Contents/Resources/`).
 
-**First launch (beta, ad-hoc signed):** macOS 26 blocks unnotarized apps
-with "Apple could not verify S1 is free of malware" and no Open button.
+**First launch (beta, developer-signed but not notarized):** macOS blocks
+unnotarized apps with "Apple could not verify S1 is free of malware" and
+no Open button.
 Either way works once:
 - **System Settings → Privacy & Security** → scroll down → "S1 was blocked"
   → **Open Anyway**;
@@ -104,16 +112,18 @@ SpeechAnalyzer (macOS 26) is used when its assets exist; otherwise s1 falls
 back to `SFSpeechRecognizer` — still on-device. Dictation must be enabled
 (System Settings → Keyboard → Dictation).
 
-**Custom vocabulary** — s1 always feeds the recognizer contextual strings:
-installed app names are learned automatically (say "open Linear" and it
-lands). Add your own jargon to `~/.s1/config.json`:
+**Custom vocabulary** — Settings → Voice → Custom words is a real list
+(add/remove per word). s1 also learns on its own: installed app names,
+your saved skill names + triggers, and proper nouns in remembered facts
+("my editor is Zed" teaches "Zed") all become contextual strings — say
+"open Linear" and it lands. The raw list lives in `~/.s1/config.json`:
 
 ```json
 { "vocabulary": ["s1", "Warp", "JIRA"] }
 ```
 
 or per command: `--vocabulary "Warp,JIRA"`. Apple's limit is 100 phrases —
-your words rank first, app names fill the rest.
+your words rank first, learned names fill the rest.
 
 **Turn detection + barge-in** — while a run or the spoken reply is in
 flight, an energy-only monitor (voice-processing AEC keeps s1's own TTS
@@ -306,16 +316,20 @@ this HTTP API; serve them behind a `/v1/systemone` shim to plug them in.
 ### API keys
 
 Keys live in the login Keychain (service `com.matthew.s1.api-keys`, one
-item per role: `decision`, `vlm`, `grounder`, `s2`) — set them in the
-Connections sheet or `s1 key set <role>` (hidden prompt, or stdin), list
+item per role: `decision`, `vlm`, `grounder`, `s2`). In the app, the
+provider cards are the fast path — paste one key and it's saved under
+every role that provider covers (Groq → S2 + STT + TTS); a saved key
+marks the card **connected** and unlocks its per-role model pickers.
+From the terminal: `s1 key set <role>` (hidden prompt, or stdin), list
 with `s1 key ls` (values never shown), delete with `s1 key rm <role>`.
 Resolution order: `S1_<ROLE>_KEY` env → Keychain → legacy `key` in
 config.json (saving a key to the Keychain removes the plaintext copy).
+Configured roles self-test on page-open and on every model change.
 
 ### Getting a model
 
-Nothing to download for the `ax` brain — it's fully deterministic. For
-`vlm`/`auto` you need a local model, which is one click or one command:
+Nothing to download for the `ax` brain — it's fully deterministic. For a
+local judge or S2, it's one click or one command:
 
 ```bash
 s1 models                      # installed models + the catalog with sizes
@@ -323,9 +337,9 @@ s1 pull gemma3:4b              # any ollama model — progress streams to stdout
 ```
 
 The app's **Model library** sidebar does the same with a Download button
-per catalog entry (vision models auto-assign to S1, text-only to S2), and
-any already-installed model can be assigned from its ⋯ menu. No Ollama?
-`brew install --cask ollama` — the section tells you so in-app.
+per catalog entry (◆ decision models wire to the S1 judge, everything else
+to S2), and any installed model can be reassigned from its ⋯ menu. No
+Ollama? `brew install --cask ollama` — the section tells you so in-app.
 
 ## Everything lives in `~/.s1`
 
@@ -447,8 +461,11 @@ Sources/s1/  CLI: preflight · run · demo · capture · ax · transcribe · say
              · listen · serve · status · stop · config · tasks · metrics
              · replay
 Sources/S1App/ macOS app (SwiftUI, macOS 26 Liquid Glass): menu-bar companion
-             (MenuBarExtra + hotkey + login item), mic + file STT, live step
-             feed, brain/locale/model pickers, permission status, App Intents
+             (MenuBarExtra + hotkey + login item), chat-style command window
+             (goal bubbles → live step feed → replies), mic + file STT,
+             provider-connection cards, permission status, App Intents.
+             Localizable via *.lproj/Localizable.strings (id ships; en is
+             the dev region) — add a folder per language to contribute.
 ```
 
 ## Safety
@@ -494,8 +511,25 @@ macOS attributes TCC grants to the *responsible* process: run `s1` from Terminal
 
 See `CONTRIBUTING.md` — setup, how to test (unit + real TCC runs), conventions, PR flow.
 
+**Localization PRs especially welcome.** The maintainers verify English
+and Indonesian end-to-end; every other language is community-maintained:
+
+- **UI** — copy `Sources/S1App/id.lproj/Localizable.strings` to
+  `<lang>.lproj/` and translate (it lands in the bundle automatically).
+- **Spoken replies** — add your code's cases in
+  `SpokenLanguage.reply(_:languageCode:)` (`Sources/S1Core/Voice/Voice.swift`).
+- **Grammar** — extend `AXPolicy`'s verb tables so common commands in your
+  language stay deterministic instead of escalating to S2.
+
 ## Roadmap
 
-P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM + S2 escalation ✅ · P3 vision on-demand ✅ · P4 voice ✅ · P5 task library ✅ · P6 replay + metrics ✅.
+P0 harness ✅ · P1 real run ✅ · P2 S1 AX/VLM + S2 escalation ✅ · P3 vision
+on-demand ✅ · P4 voice ✅ · P5 task library ✅ · P6 replay + metrics ✅ ·
+P7 GUI-first app (chat window, provider cards, localized shell) ✅.
 
-See `PLAN.md` for the research and model choices (Fara1.5-4B, GUI-Owl-1.5-2B, Holo 4, FluidAudio, WhisperKit — all verified actively maintained as of Oct 2026).
+Next up: a richer plugin/harness surface (pi- or hermes-style agent
+harnesses, MCP-style tool exposure), deeper provider integration, and —
+when S1 decision models see the screen natively — folding vision into the
+judge itself. See `PLAN.md` for the research and model choices (Fara1.5-4B,
+GUI-Owl-1.5-2B, Holo 4, FluidAudio, WhisperKit — all verified actively
+maintained as of Oct 2026).

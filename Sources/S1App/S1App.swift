@@ -189,12 +189,12 @@ private struct MenuBarView: View {
     }
 
     private var stateBadge: some View {
-        let (text, color): (String, Color) = switch model.serveState {
+        let (key, color): (LocalizedStringKey, Color) = switch model.serveState {
         case .idle: ("idle", .secondary)
         case .listening: ("listening", .green)
         case .running: ("running", .orange)
         }
-        return Text(text)
+        return Text(key)
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.2), in: .capsule)

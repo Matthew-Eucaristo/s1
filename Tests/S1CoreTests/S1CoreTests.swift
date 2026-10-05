@@ -1955,6 +1955,22 @@ private struct StubJudge: DecisionJudge {
     #expect(SpokenLanguage.detect("", among: c)?.identifier == "en-US")
 }
 
+@Test func spokenRepliesLocalizeAndFallBackToEnglish() {
+    #expect(SpokenLanguage.reply(.done, languageCode: "id") == "Selesai")
+    #expect(SpokenLanguage.reply(.done, languageCode: "en") == "Done")
+    #expect(SpokenLanguage.reply(.stopped, languageCode: "ja") == "止まりました")
+    #expect(SpokenLanguage.reply(.needsHuman, languageCode: "zh") == "需要你手动处理")
+    // Unknown code → English.
+    #expect(SpokenLanguage.reply(.couldNotWorkOut, languageCode: "xx") == "I couldn't work that out")
+    // Every picker language answers every reply kind (non-empty).
+    for o in SpokenLanguage.pickerOptions {
+        for k in [SpokenLanguage.Reply.done, .needsHuman, .couldNotWorkOut, .stopped] {
+            let code = SpokenLanguage.code(Locale(identifier: o.id))
+            #expect(!SpokenLanguage.reply(k, languageCode: code).isEmpty)
+        }
+    }
+}
+
 @Test func picksMostConfidentTranscriptInItsLanguage() {
     let en = Locale(identifier: "en-US"), id = Locale(identifier: "id-ID")
     // An English recognizer forced onto Indonesian speech: words, low confidence.

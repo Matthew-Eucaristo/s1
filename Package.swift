@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "s1",
+    defaultLocalization: "en",
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "S1Core", targets: ["S1Core"]),

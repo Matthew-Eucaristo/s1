@@ -13,6 +13,99 @@ import NaturalLanguage
 public enum SpokenLanguage {
     public static let auto = "auto"
 
+    /// Languages offered in Settings → Voice → Language. Auto is the
+    /// default: the recognizer races English + the Mac's own language, so
+    /// an English speaker still gets Indonesian (or Japanese, Arabic…)
+    /// with no setup. Pinned entries are autonyms — they never need
+    /// translating. Any language works even without a grammar pack:
+    /// turns the AX grammar can't parse escalate to S2, which reads them
+    /// natively. Contributors: add a row + reply strings below and PR.
+    public static let pickerOptions: [(id: String, name: String)] = [
+        ("en-US", "English (US)"), ("en-GB", "English (UK)"),
+        ("id-ID", "Indonesia"),
+        ("ja-JP", "日本語"),
+        ("zh-CN", "简体中文"), ("zh-TW", "繁體中文"),
+        ("ko-KR", "한국어"),
+        ("ar-SA", "العربية"),
+        ("hi-IN", "हिन्दी"),
+        ("es-ES", "Español"), ("fr-FR", "Français"), ("de-DE", "Deutsch"),
+        ("pt-BR", "Português"), ("th-TH", "ไทย"), ("vi-VN", "Tiếng Việt"),
+    ]
+
+    /// What the agent says after a turn.
+    public enum Reply { case done, needsHuman, couldNotWorkOut, stopped }
+
+    /// Short spoken confirmations per language code — English fallback.
+    /// Keep them terse: they're spoken out loud mid-flow.
+    public static func reply(_ kind: Reply, languageCode code: String) -> String {
+        switch kind {
+        case .done:
+            switch code {
+            case "id": return "Selesai"
+            case "ja": return "完了しました"
+            case "zh": return "完成了"
+            case "ko": return "완료했어요"
+            case "ar": return "تم"
+            case "hi": return "हो गया"
+            case "es": return "Listo"
+            case "fr": return "Terminé"
+            case "de": return "Fertig"
+            case "pt": return "Pronto"
+            case "th": return "เสร็จแล้ว"
+            case "vi": return "Xong rồi"
+            default: return "Done"
+            }
+        case .needsHuman:
+            switch code {
+            case "id": return "Butuh kamu"
+            case "ja": return "操作が必要です"
+            case "zh": return "需要你手动处理"
+            case "ko": return "직접 해주세요"
+            case "ar": return "يحتاج تدخلك"
+            case "hi": return "आपकी ज़रूरत है"
+            case "es": return "Te necesito"
+            case "fr": return "J'ai besoin de toi"
+            case "de": return "Brauche dich"
+            case "pt": return "Preciso de você"
+            case "th": return "ต้องการให้คุณช่วย"
+            case "vi": return "Cần bạn"
+            default: return "Needs you"
+            }
+        case .couldNotWorkOut:
+            switch code {
+            case "id": return "Aku belum bisa melakukannya"
+            case "ja": return "うまくできませんでした"
+            case "zh": return "我做不到"
+            case "ko": return "할 수 없었어요"
+            case "ar": return "لم أستطع معرفة ذلك"
+            case "hi": return "मैं इसे नहीं कर पाया"
+            case "es": return "No pude hacerlo"
+            case "fr": return "Je n'y arrive pas"
+            case "de": return "Das konnte ich nicht"
+            case "pt": return "Não consegui"
+            case "th": return "ทำไม่ได้"
+            case "vi": return "Tôi chưa làm được"
+            default: return "I couldn't work that out"
+            }
+        case .stopped:
+            switch code {
+            case "id": return "Berhenti"
+            case "ja": return "止まりました"
+            case "zh": return "已停止"
+            case "ko": return "멈췄어요"
+            case "ar": return "توقف"
+            case "hi": return "रुक गया"
+            case "es": return "Detenido"
+            case "fr": return "Arrêté"
+            case "de": return "Gestoppt"
+            case "pt": return "Parado"
+            case "th": return "หยุดแล้ว"
+            case "vi": return "Đã dừng"
+            default: return "Stopped"
+            }
+        }
+    }
+
     /// Candidate locales for a setting: a concrete identifier ("id-ID")
     /// pins one language; "auto"/empty/nil → the system language plus
     /// English or Indonesian, at most two (each candidate costs a parallel

@@ -57,7 +57,7 @@ public enum CuaDriver {
             direction = dx > 0 ? "right" : "left"
             amount = Int((abs(dx) / 120).rounded())
         }
-        var args: [String: Any] = ["session": "s1", "pid": Int(pid),
+        let args: [String: Any] = ["session": "s1", "pid": Int(pid),
                                    "direction": direction, "by": "line",
                                    "amount": max(1, min(amount, 10))]
         guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]) else { return nil }
@@ -76,7 +76,7 @@ public enum CuaDriver {
     /// `cua-driver call list_windows` filtered to one app. Returns [] on any
     /// failure — callers fall back to CGEvent rather than trusting nothing.
     public static func windows(binary: String, pid: pid_t, timeout: TimeInterval = 10) -> [CuaWindow] {
-        var argsObj: [String: Any] = ["session": "s1", "pid": Int(pid), "on_screen_only": true]
+        let argsObj: [String: Any] = ["session": "s1", "pid": Int(pid), "on_screen_only": true]
         guard let data = try? JSONSerialization.data(withJSONObject: argsObj, options: [.sortedKeys]),
               let out = try? run(binary, argv: ["call", "list_windows", String(decoding: data, as: UTF8.self)],
                                timeout: timeout),
@@ -206,7 +206,7 @@ public struct CuaActuator: Actuator {
         }
         guard let pid else { return nil }
         let bin = binary
-        let windows = try await Task.detached { CuaDriver.windows(binary: bin, pid: pid) }.value
+        let windows = await Task.detached { CuaDriver.windows(binary: bin, pid: pid) }.value
         guard !windows.isEmpty else { return nil }
         func local(_ p: CGPoint) -> (x: Double, y: Double, win: CuaDriver.CuaWindow)? {
             CuaDriver.windowLocal(p, in: windows)

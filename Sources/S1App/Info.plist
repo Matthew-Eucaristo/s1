@@ -16,6 +16,13 @@
 	<string>S1</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>id</string>
+	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>0.2.3</string>
 	<key>CFBundleVersion</key>

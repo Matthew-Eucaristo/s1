@@ -196,16 +196,16 @@ private struct VoiceSettings: View {
                 Picker("Language", selection: $model.locale) {
                     Text("Automatic").tag(SpokenLanguage.auto)
                     Divider()
-                    Text("Indonesian").tag("id-ID")
-                    Text("English (US)").tag("en-US")
-                    Text("English (UK)").tag("en-GB")
+                    ForEach(SpokenLanguage.pickerOptions, id: \.id) { o in
+                        Text(o.name).tag(o.id)
+                    }
                 }
             } header: {
                 Text("Speech recognition")
             } footer: {
                 Text(model.locale == SpokenLanguage.auto
-                     ? "On-device. Automatic listens in \(SpokenLanguage.candidates(for: model.locale).map { Locale.current.localizedString(forIdentifier: $0.identifier) ?? $0.identifier }.joined(separator: " and ")) at once and keeps the one it's surest of."
-                     : "On-device.")
+                     ? "On-device. Automatic listens in English and your Mac's language at once and keeps the one it's surest of."
+                     : "On-device. Any language works — commands the built-in grammar can't parse go to S2, which reads them natively.")
             }
             Section {
                 Toggle("Interrupt with my voice (barge-in)", isOn: $model.voiceInterrupt)
