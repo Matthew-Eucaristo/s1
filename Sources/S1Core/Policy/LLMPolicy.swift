@@ -500,11 +500,14 @@ public struct LLMReasoner: Reasoner {
         """
 
     static func userPrompt(observation: Snapshot, goal: String, history: [StepRecord],
-                           reason: String, conversation: [Conversation.Turn] = []) -> String {
+                           reason: String, conversation: [Conversation.Turn] = [],
+                           memory: [String] = []) -> String {
+        let remembered = memory.isEmpty ? "" : "What the user asked you to remember:\n"
+            + memory.map { "- \($0)" }.joined(separator: "\n") + "\n\n"
         let earlier = conversation.isEmpty ? "" : "Earlier in this conversation:\n"
             + conversation.map { "- \($0.goal) → \($0.outcome)" }.joined(separator: "\n") + "\n\n"
         return """
-        \(earlier)Goal: \(goal)
+        \(remembered)\(earlier)Goal: \(goal)
         System 1 was unsure: \(reason)
 
         \(LLMDecisionCodec.historyText(history))
@@ -518,7 +521,8 @@ public struct LLMReasoner: Reasoner {
             ChatMessage(role: "system", content: Self.systemPrompt),
             ChatMessage(role: "user", content: Self.userPrompt(
                 observation: observation, goal: goal, history: history, reason: reason,
-                conversation: Conversation.shared.recent())),
+                conversation: Conversation.shared.recent(),
+                memory: Memory.enabled() ? Memory.recent() : [])),
         ], maxTokens: endpointIsLocal ? 1024 : 2048)
         var d = LLMDecisionCodec.parse(reply)
             ?? Decision(action: nil, confidence: 0, rationale: "unparseable S2 reply")

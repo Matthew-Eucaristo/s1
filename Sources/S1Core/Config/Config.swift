@@ -60,6 +60,8 @@ public struct S1Config: Codable, Sendable {
     public var tts: ModelEndpoint?
     /// Cloud TTS voice name (provider-specific, e.g. "troy", "alloy").
     public var ttsCloudVoice: String?
+    /// Persistent memory (~/.s1/memory.md); nil = on.
+    public var memory: Bool?
     /// Which built-in defaults this file was written under (nil = pre-hosted).
     public var defaultsVersion: Int?
     public static let currentDefaults = 3

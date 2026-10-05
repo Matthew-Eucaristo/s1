@@ -237,12 +237,24 @@ public enum S1Runner {
                              gate: gate, s2: s2)
 
         print("run dir: \(logger.runDir.path)")
-        DebugTrace.event("run", ["goal": goal, "policy": policy.name, "s2": s2?.name ?? "none",
+        // "remember …", "forget everything", "save that as a skill called …".
+        if let meta = MetaCommand.parse(goal) {
+            let reply = meta.perform()
+            DebugTrace.$runDir.withValue(logger.runDir) { DebugTrace.event("meta", ["kind": meta.kind]) }
+            return (RunReport(status: .done, steps: 0, runDir: logger.runDir.path, escalations: 0,
+                              summary: reply), logger)
+        }
+        let skill = Skills.match(goal, in: Skills.load())
+        let loopGoal = skill.map { "\($0.name): " + $0.steps.joined(separator: " → ") } ?? goal
+        if let skill { onPhase?("skill: \(skill.name)") }
+        DebugTrace.event("run", ["goal": goal, "skill": skill?.name ?? "", "policy": policy.name, "s2": s2?.name ?? "none",
                                  "session": Conversation.shared.sessionID(), "dir": logger.runDir.path])
         let report = try await DebugTrace.$runDir.withValue(logger.runDir) {
-            try await loop.run(goal: goal, policy: policy, logger: logger, onPhase: onPhase)
+            try await loop.run(goal: loopGoal, policy: policy, logger: logger,
+                               plan: skill?.steps ?? [], onPhase: onPhase)
         }
-        Conversation.shared.record(goal: goal, outcome: report.answer ?? report.status.rawValue)
+        Conversation.shared.record(goal: goal, outcome: report.answer ?? report.status.rawValue,
+                                   steps: report.subgoals, ok: report.status == .done)
         DebugTrace.$runDir.withValue(logger.runDir) {
             DebugTrace.event("runEnd", ["status": report.status.rawValue, "steps": report.steps,
                                         "answer": report.answer ?? ""])

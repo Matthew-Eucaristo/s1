@@ -21,6 +21,8 @@ public struct RunReport: Sendable {
     public var escalations: Int
     /// The done summary — S2's answer when the goal was a question.
     public var summary: String? = nil
+    /// S1 subgoals that finished (delegated by S2, or a skill's steps).
+    public var subgoals: [String] = []
 
     /// A real answer worth showing/speaking (not the grammar's boilerplate).
     public var answer: String? {
@@ -51,11 +53,14 @@ public struct AgentLoop {
     /// `onPhase` narrates each step's phase ("observing", "thinking",
     /// "reasoning", "acting") — lets a UI show the run is alive while a
     /// slow local model holds the decision call for tens of seconds.
-    public func run(goal: String, policy: any Policy, logger: RunLogger,
+    /// `plan` pre-seeds S1 subgoals (a saved skill); the run is done once
+    /// they all finish, unless S2 had to take over.
+    public func run(goal: String, policy: any Policy, logger: RunLogger, plan: [String] = [],
                     onPhase: (@Sendable (String) -> Void)? = nil) async throws -> RunReport {
         var history: [StepRecord] = []
         // S2 → S1 delegation: subgoals S1 runs with its own scoped history.
-        var queue: [String] = []
+        var queue: [String] = Array(plan.prefix(12))
+        var completed: [String] = []
         var subHistory: [StepRecord] = []
         var delegations = 0
         var forceS2: String?
@@ -124,6 +129,11 @@ public struct AgentLoop {
                 if case .done? = rec.action, rec.escalation == nil {
                     // Subgoal finished — not the run. Next subgoal, or back to S2.
                     queue.removeFirst(); subHistory = []
+                    completed.append(sub)
+                    if queue.isEmpty, !plan.isEmpty, delegations == 0, escalations == 0 {
+                        return RunReport(status: .done, steps: i + 1, runDir: logger.runDir.path,
+                                         escalations: 0, summary: "done", subgoals: completed)
+                    }
                     if queue.isEmpty {
                         forceS2 = "delegated subgoals finished — check the screen; reply done (with the answer, if one was asked) when the goal is met"
                     }
@@ -136,7 +146,7 @@ public struct AgentLoop {
             history.append(rec)
 
             switch rec.action {
-            case .done(let summary)?: status = .done; return RunReport(status: status, steps: i + 1, runDir: logger.runDir.path, escalations: escalations, summary: summary)
+            case .done(let summary)?: status = .done; return RunReport(status: status, steps: i + 1, runDir: logger.runDir.path, escalations: escalations, summary: summary, subgoals: completed)
             default: break
             }
             if case .needsHuman = gateVerdict(rec.gate) { status = .needsHuman; break }
@@ -168,7 +178,8 @@ public struct AgentLoop {
                 }
             }
         }
-        return RunReport(status: status, steps: history.count, runDir: logger.runDir.path, escalations: escalations)
+        return RunReport(status: status, steps: history.count, runDir: logger.runDir.path,
+                         escalations: escalations, subgoals: completed)
     }
 
     private func step(_ i: Int, goal: String, s1Goal: String, policy: any Policy, obs input: Snapshot,

@@ -49,6 +49,28 @@ private struct GeneralSettings: View {
                 LabeledContent("Dictate") { Text("⌃⌥D — hold to talk, or tap; text pastes where you type").foregroundStyle(.secondary) }
             }
             Section {
+                Toggle("Remember things I ask you to", isOn: Binding(
+                    get: { Memory.enabled() },
+                    set: { on in var c = S1Config.load(); c.memory = on ? nil : false; try? c.save() }))
+                HStack {
+                    Button("Open Memory") {
+                        if !FileManager.default.fileExists(atPath: Memory.path.path) { try? Memory.clear() }
+                        NSWorkspace.shared.open(Memory.path)
+                    }
+                    Button("Clear Memory") { try? Memory.clear() }
+                    Spacer()
+                    Button("Open Skills Folder") {
+                        S1Home.ensurePrivate()
+                        try? FileManager.default.createDirectory(at: Skills.dir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(Skills.dir)
+                    }
+                }
+            } header: {
+                Text("Memory & skills")
+            } footer: {
+                Text("Say “remember that …” to keep a fact (never passwords or keys), “forget everything” to clear. After something works, say “save that as a skill called morning setup”; saying “morning setup” replays its steps, each through the safety gate. Plain files in ~/.s1 — edit them freely. The current session's history is always shared with S1 and S2.")
+            }
+            Section {
                 Toggle("Use Cua Driver when installed", isOn: Binding(
                     get: { CuaDriver.enabled() },
                     set: { on in

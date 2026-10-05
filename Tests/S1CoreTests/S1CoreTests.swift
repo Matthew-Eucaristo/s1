@@ -2370,3 +2370,61 @@ private struct DelegatingReasoner: Reasoner {
     #expect(!CuaDriver.enabled(c, env: [:]))
     #expect(!CuaDriver.enabled(S1Config(), env: ["S1_EXECUTOR": "cgevent"]))
 }
+
+@Test func metaCommandsParse() {
+    #expect(MetaCommand.parse("Remember that my editor is Zed.") == .remember("my editor is Zed"))
+    #expect(MetaCommand.parse("ingat bahwa aku suka kopi") == .remember("aku suka kopi"))
+    #expect(MetaCommand.parse("forget everything") == .forget)
+    #expect(MetaCommand.parse("save that as a skill called morning setup") == .saveSkill("morning setup"))
+    #expect(MetaCommand.parse("simpan ini sebagai shortcut pagi") == .saveSkill("pagi"))
+    #expect(MetaCommand.parse("open Safari") == nil)
+    #expect(Memory.looksSecret("my password is hunter2"))
+    #expect(Memory.looksSecret("key sk1234567890abcdefghijklmnop"))
+    #expect(!Memory.looksSecret("my editor is Zed"))
+}
+
+@Test func memoryAndSkillsFiles() throws {
+    let d = FileManager.default.temporaryDirectory.appendingPathComponent("s1-mem-\(UUID())", isDirectory: true)
+    try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: d) }
+    let m = d.appendingPathComponent("memory.md")
+    try Memory.add("editor is Zed", at: m); try Memory.add("Editor is Zed", at: m); try Memory.add("likes dark mode", at: m)
+    #expect(Memory.facts(at: m) == ["Editor is Zed", "likes dark mode"])
+    #expect(Memory.recent(budget: 20, at: m) == ["likes dark mode"])
+    #expect(!Memory.enabled({ var c = S1Config(); c.memory = false; return c }(), env: [:]))
+    #expect(Memory.enabled(S1Config(), env: [:]))
+    try Skills.save(Skill(name: "Morning Setup", steps: ["open Mail", "open Calendar"]), to: d)
+    let all = Skills.load(from: d)
+    #expect(all.count == 1)
+    #expect(Skills.match("run morning setup", in: all)?.steps.count == 2)
+    #expect(Skills.match("morning-setup!", in: all) != nil)
+    #expect(Skills.match("open mail", in: all) == nil)
+}
+
+@Test func conversationKeepsWholeSessionWithinBudget() {
+    let c = Conversation()
+    for i in 0..<50 { c.record(goal: "goal \(i)", outcome: "done", steps: i == 49 ? ["a", "b"] : []) }
+    #expect(c.recent().count == 50)
+    #expect(c.recent(budget: 100).last?.goal == "goal 49")
+    #expect(c.recent(budget: 100).count < 50)
+    c.record(goal: "broken", outcome: "aborted", ok: false)
+    #expect(c.lastSuccessful()?.steps == ["a", "b"])
+}
+
+@Test func skillPlanRunsStepsThenFinishes() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1-skill-\(UUID())")
+    let logger = try RunLogger(goal: "t", root: dir, config: [:])
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(), actuator: DryRunActuator(),
+                         gate: SafetyGate(allowReversible: true, allowIrreversible: false))
+    let r = try await loop.run(goal: "x", policy: DoneEachSubgoal(), logger: logger, plan: ["one", "two"])
+    #expect(r.status == .done)
+    #expect(r.subgoals == ["one", "two"])
+}
+
+struct DoneEachSubgoal: Policy {
+    var name: String { "done-each" }
+    func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
+        Decision(action: .done(summary: goal), confidence: 1, rationale: "ok")
+    }
+}

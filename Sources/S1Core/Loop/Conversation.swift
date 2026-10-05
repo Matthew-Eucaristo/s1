@@ -8,6 +8,9 @@ public final class Conversation: @unchecked Sendable {
     public struct Turn: Sendable, Equatable {
         public var goal: String
         public var outcome: String
+        /// S1 subgoals that ran (delegated or skill steps) — "save that as a skill".
+        public var steps: [String] = []
+        public var ok: Bool = true
     }
 
     public static let shared = Conversation()
@@ -34,16 +37,31 @@ public final class Conversation: @unchecked Sendable {
         return id
     }
 
-    public func record(goal: String, outcome: String, now: Date = Date()) {
+    public func record(goal: String, outcome: String, steps: [String] = [], ok: Bool = true,
+                       now: Date = Date()) {
         lock.lock(); defer { lock.unlock() }
         rotateIfIdle(now)
-        turns.append(Turn(goal: String(goal.prefix(300)), outcome: String(outcome.prefix(400))))
-        if turns.count > 12 { turns.removeFirst(turns.count - 12) }
+        turns.append(Turn(goal: String(goal.prefix(300)), outcome: String(outcome.prefix(400)),
+                          steps: steps.prefix(12).map { String($0.prefix(200)) }, ok: ok))
+        if turns.count > 200 { turns.removeFirst(turns.count - 200) }
     }
 
-    public func recent(_ n: Int = 6) -> [Turn] {
+    /// The whole session, newest kept first when it outgrows `budget`
+    /// characters (oldest dropped) — returned oldest → newest.
+    public func recent(_ n: Int = 200, budget: Int = 6000) -> [Turn] {
         lock.lock(); defer { lock.unlock() }
-        return Array(turns.suffix(n))
+        var out: [Turn] = [], used = 0
+        for t in turns.suffix(n).reversed() {
+            used += t.goal.count + t.outcome.count + 8
+            if used > budget, !out.isEmpty { break }
+            out.insert(t, at: 0)
+        }
+        return out
+    }
+
+    public func lastSuccessful() -> Turn? {
+        lock.lock(); defer { lock.unlock() }
+        return turns.last { $0.ok }
     }
 
     public func reset() {
