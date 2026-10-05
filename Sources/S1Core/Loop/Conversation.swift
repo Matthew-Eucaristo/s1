@@ -19,6 +19,14 @@ public final class Conversation: @unchecked Sendable {
     private var id = UUID().uuidString.lowercased()
     private var last = Date()
     private var turns: [Turn] = []
+    /// Rolling digest of turns that fell off the 200-turn store — the
+    /// compaction side of the sliding window. Bounded at 120 lines (about
+    /// 12k chars worst case) so a marathon session can't leak memory; the
+    /// total counter still records everything that ever left the window.
+    private var evicted: [String] = []
+    private var evictedTotal = 0
+    /// Same digesting, minus the arrays: how many stored turns the last
+    /// `recentContext` call left outside the char budget.
     let idleReset: TimeInterval
 
     public init(idleReset: TimeInterval = 30 * 60) { self.idleReset = idleReset }
@@ -27,8 +35,19 @@ public final class Conversation: @unchecked Sendable {
         if now.timeIntervalSince(last) > idleReset {
             id = UUID().uuidString.lowercased()
             turns = []
+            evicted = []
+            evictedTotal = 0
         }
         last = now
+    }
+
+    /// One digest line for the compaction list — goal plus outcome,
+    /// terse. Locked callers only.
+    private static func digest(_ t: Turn) -> String {
+        let g = t.goal.prefix(90)
+        let o = t.outcome.prefix(90)
+        return o.isEmpty ? String(g)
+            : "\(g) → \(t.ok ? "" : "FAILED: ")\(o)"
     }
 
     public func sessionID(now: Date = Date()) -> String {
@@ -43,13 +62,61 @@ public final class Conversation: @unchecked Sendable {
         rotateIfIdle(now)
         turns.append(Turn(goal: String(goal.prefix(300)), outcome: String(outcome.prefix(400)),
                           steps: steps.prefix(12).map { String($0.prefix(200)) }, ok: ok))
-        if turns.count > 200 { turns.removeFirst(turns.count - 200) }
+        // Sliding window: the store keeps the newest 200 turns. Turns that
+        // fall off are compacted into terse digest lines — the model still
+        // knows what happened earlier in the session instead of the oldest
+        // work silently vanishing.
+        if turns.count > 200 {
+            let extra = turns.count - 200
+            for t in turns.prefix(extra) { evicted.append(Self.digest(t)) }
+            evictedTotal += extra
+            turns.removeFirst(extra)
+            if evicted.count > 120 { evicted.removeFirst(evicted.count - 120) }
+        }
     }
 
     /// The whole session, newest kept first when it outgrows `budget`
     /// characters (oldest dropped) — returned oldest → newest.
     public func recent(_ n: Int = 200, budget: Int = 6000) -> [Turn] {
         lock.lock(); defer { lock.unlock() }
+        return window(n, budget: budget)
+    }
+
+    /// The sliding-window + compaction pair: `turns` is the newest history
+    /// that fits `budget`; `summary` is a bounded digest of everything
+    /// older — turns still in the store but over budget AND turns that
+    /// aged out of the store entirely. Modern agent-loop context handling:
+    /// evicted work is summarized, never silently dropped.
+    public func recentContext(_ n: Int = 200, budget: Int = 6000,
+                              summaryBudget: Int = 1200) -> (summary: String?, turns: [Turn]) {
+        lock.lock(); defer { lock.unlock() }
+        let win = window(n, budget: budget)
+        // Stored-but-over-budget turns get digested on the fly; turns that
+        // already aged out of the store carry their digests in `evicted`.
+        let storedOut = turns.count - win.count
+        let lines = evicted + turns.prefix(storedOut).map(Self.digest)
+        let total = evictedTotal + storedOut
+        guard total > 0 else { return (nil, win) }
+        // Bound the digest: drop the OLDEST lines first — the freshest
+        // context is always the most recent work.
+        var used = 0
+        var kept: [String] = []
+        for line in lines.reversed() {
+            used += line.count + 2
+            if used > summaryBudget { break }
+            kept.insert(line, at: 0)
+        }
+        let hidden = total - kept.count
+        var s = "\(total) earlier turn\(total == 1 ? "" : "s") this session"
+        if !kept.isEmpty {
+            s += ": " + kept.joined(separator: "; ")
+        }
+        if hidden > 0 { s += " (\(hidden) oldest not shown)" }
+        return (s, win)
+    }
+
+    /// Locked helper — the budgeted window of stored turns.
+    private func window(_ n: Int, budget: Int) -> [Turn] {
         var out: [Turn] = [], used = 0
         for t in turns.suffix(n).reversed() {
             used += t.goal.count + t.outcome.count + 8
@@ -68,6 +135,8 @@ public final class Conversation: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         id = UUID().uuidString.lowercased()
         turns = []
+        evicted = []
+        evictedTotal = 0
         last = Date()
     }
 }

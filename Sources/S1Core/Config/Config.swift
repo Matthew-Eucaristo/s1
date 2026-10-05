@@ -60,8 +60,15 @@ public struct S1Config: Codable, Sendable {
     public var tts: ModelEndpoint?
     /// Cloud TTS voice name (provider-specific, e.g. "troy", "alloy").
     public var ttsCloudVoice: String?
-    /// Persistent memory (~/.s1/memory.md); nil = on.
+    /// Persistent memory (~/.s1/memory.md + ~/.s1/memory/ topics); nil = on.
     public var memory: Bool?
+    /// Shell sandbox: nil/"off" = gated shell actions run under plain zsh
+    /// (default); "srt" = wrap them in Anthropic sandbox-runtime — Seatbelt
+    /// fs rules + network proxy from ~/.s1/srt-settings.json.
+    public var sandbox: String?
+    /// First-run onboarding completed (or deliberately skipped). nil/false
+    /// → the app opens the setup wizard; the CLI nags once at `s1 status`.
+    public var onboarded: Bool?
     /// Which built-in defaults this file was written under (nil = pre-hosted).
     public var defaultsVersion: Int?
     public static let currentDefaults = 3
@@ -235,7 +242,7 @@ public enum Endpoints {
         return x == y
     }
 
-    static func isLocal(_ base: String) -> Bool {
+    public static func isLocal(_ base: String) -> Bool {
         guard let host = URL(string: base)?.host?.lowercased() else { return false }
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }

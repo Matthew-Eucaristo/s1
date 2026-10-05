@@ -16,7 +16,8 @@ struct S1: AsyncParsableCommand {
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
                       ModelsCmd.self, PullCmd.self, GroundCmd.self, DecideCmd.self,
-                      KeyCmd.self, UsageCmd.self])
+                      KeyCmd.self, UsageCmd.self, SetupCmd.self, DoctorCmd.self,
+                      UseCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -1209,7 +1210,7 @@ struct KeyCmd: AsyncParsableCommand {
             if isatty(STDIN_FILENO) != 0 {
                 var buf = [CChar](repeating: 0, count: 4096)
                 raw = readpassphrase("\(r.rawValue) API key: ", &buf, buf.count, 0).map { String(cString: $0) }
-                buf.withUnsafeMutableBytes { memset_s($0.baseAddress, $0.count, 0, $0.count) }
+                buf.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
             } else {
                 raw = readLine(strippingNewline: true)
             }
@@ -1276,5 +1277,203 @@ struct UsageCmd: AsyncParsableCommand {
                          s.calls, s.failures, s.input, s.output, s.cached, hit, s.avgMs))
         }
         print("log: \(UsageLog.path)")
+    }
+}
+
+/// `s1 use <preset>` — apply a providers.json entry to its role in
+/// config.json. This is the CLI half of the Settings preset menus: the
+/// file is the catalog, `use` is the one-liner that points a role at it.
+struct UseCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "use",
+        abstract: "Apply a provider preset (~/.s1/providers.json) — `s1 use typesafe-jev`. No args lists presets.")
+    @Argument(help: "Preset id, e.g. typesafe-jev / opencode-flash / groq-whisper-turbo / vlm-off")
+    var preset: String?
+
+    func run() async throws {
+        let all = Providers.all()
+        guard let want = preset else {
+            var lastRole = ""
+            for p in all {
+                if p.role != lastRole {
+                    lastRole = p.role
+                    print("\n[\(lastRole)]")
+                }
+                let star = p.recommended == true ? " ★" : ""
+                print("  \(p.id)\(star)\(p.note.map { " — \($0)" } ?? "")")
+            }
+            print("\napply: s1 use <id> · edit the catalog: ~/.s1/providers.json")
+            return
+        }
+        guard let p = all.first(where: { $0.id == want }) else {
+            throw ValidationError("no preset '\(want)' — `s1 use` lists them, or add your own in providers.json")
+        }
+        let role = ModelRole(rawValue: p.role)!
+        var cfg = S1Config.load()
+        // model is written verbatim: "" is the explicit "off" (nil would
+        // fall back to the hosted default on next resolve).
+        let ep = S1Config.ModelEndpoint(base: p.base.isEmpty ? nil : p.base,
+                                      model: p.model,
+                                      key: nil, numCtx: nil)
+        switch role {
+        case .decision: cfg.decision = ep
+        case .s2: cfg.s2 = ep
+        case .vlm: cfg.vlm = ep
+        case .grounder: cfg.grounder = ep
+        case .stt: cfg.stt = ep
+        case .tts:
+            cfg.tts = ep
+            if let v = p.voice { cfg.ttsCloudVoice = v }
+        }
+        try cfg.save()
+        print("✓ \(role.rawValue) → \(p.model.isEmpty ? "(off)" : p.model) @ \(p.base.isEmpty ? "on-device" : p.base)")
+        if !p.base.isEmpty, !p.model.isEmpty, !Endpoints.isLocal(p.base),
+           !SecretStore.has(account: role.rawValue) {
+            print("  ⚠ remote endpoint — set its key with `s1 key set \(role.rawValue)`")
+        }
+    }
+}
+
+/// `s1 doctor` — every standardized file under ~/.s1 checked at once, plus
+/// the moving parts outside it (keychain keys, cua-driver, srt). Exit 1
+/// when anything fails so scripts can gate on it.
+struct DoctorCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "doctor",
+        abstract: "Check every ~/.s1 config file (config, providers, snippets, convert, skills, memory, tasks) + keys, cua-driver, sandbox.")
+    @Flag(help: "Also fix what's fixable: write missing default files, rebuild the memory index.")
+    var fix = false
+
+    func run() async throws {
+        if fix {
+            Providers.ensureFile()
+            if !FileManager.default.fileExists(atPath: Convert.extensionsPath.path) {
+                try? "{\n  \"units\": { },\n  \"currencies\": { }\n}\n"
+                    .write(to: Convert.extensionsPath, atomically: true, encoding: .utf8)
+            }
+            try? Memory.rebuildIndex()
+            print("wrote missing defaults + rebuilt the memory index\n")
+        }
+        var fails = 0, warns = 0
+        for item in Doctor.run() {
+            let mark = switch item.level {
+            case .ok: " \u{2713}"
+            case .warn: " \u{26A0}"; case .fail: " \u{2717}"
+            }
+            if item.level == .fail { fails += 1 } else if item.level == .warn { warns += 1 }
+            print("\(mark) \(item.what)\(item.detail.isEmpty ? "" : " — \(item.detail)")")
+        }
+        print("\n\(fails == 0 ? "all good" : "\(fails) failing")"
+            + (warns == 0 ? "" : ", \(warns) warning\(warns == 1 ? "" : "s")")
+            + " — files live in ~/.s1, edit them like any config")
+        if fails > 0 { throw ExitCode(1) }
+    }
+}
+
+/// `s1 setup` — the first-run flow in one command: permissions, a config
+/// file with the recommended hosted defaults, cua-driver via CUA's own
+/// installer, API keys into the Keychain, then a doctor pass. Mirrors the
+/// app's onboarding wizard so a brew/CLI user gets the same start.
+struct SetupCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "setup",
+        abstract: "First-run setup: permissions, defaults, Cua Driver, API keys — the same flow the app's onboarding runs.")
+    @Flag(help: "Install Cua Driver (default on; CUA's official installer).")
+    var installCua = false
+    @Flag(help: "Skip the Cua Driver step entirely.")
+    var noCua = false
+    @Flag(help: "Answer no prompts — write defaults and stop (for scripts).")
+    var nonInteractive = false
+
+    func run() async throws {
+        let interactive = !nonInteractive && isatty(STDIN_FILENO) != 0
+        print("s1 setup — everything lands in ~/.s1 as plain files you can edit\n")
+
+        // 1 · Permissions — the one thing a CLI can't grant for you.
+        let r = Preflight.check(request: interactive)
+        print(Preflight.describe(r))
+        if !r.accessibility {
+            print("→ grant Accessibility, then re-run `s1 setup` — everything below still ran.")
+        }
+
+        // 2 · Config defaults — write config.json only when absent so a
+        // re-run never stomps the user's edits. `ensureFile` helpers do
+        // the same for the standardized data files.
+        var cfg = S1Config.load()
+        if !FileManager.default.fileExists(atPath: S1Config.path) {
+            cfg.defaultsVersion = S1Config.currentDefaults
+            cfg.onboarded = true
+            try cfg.save()
+            print("✓ wrote \(S1Config.path) — hosted defaults (Jev judge + OpenCode Go S2)")
+        } else {
+            cfg.onboarded = true
+            try cfg.save()
+            print("✓ config.json already yours — marked onboarded, nothing overwritten")
+        }
+        Providers.ensureFile()
+        print("✓ ~/.s1/providers.json — preset catalog you can edit (`s1 doctor` checks it)")
+
+        // 3 · Cua Driver — recommended, via CUA's own installer.
+        if CuaInstaller.installed {
+            print("✓ cua-driver already installed")
+        } else if noCua {
+            print("- cua-driver skipped (--no-cua); CGEvent executor stays active")
+        } else if installCua || (interactive && askYes("Install Cua Driver? (recommended — CUA's official installer) [Y/n] ")) {
+            do {
+                print("  running: \(CuaInstaller.officialCommand)")
+                try await CuaInstaller.install { print("  " + $0) }
+                print("✓ cua-driver installed — s1's executor will use it")
+            } catch {
+                FileHandle.standardError.write(
+                    "✗ \(error.localizedDescription)\n  s1 still works — CGEvent is the fallback.\n".data(using: .utf8)!)
+            }
+        } else {
+            print("- cua-driver not installed (run `s1 setup --install-cua` anytime);")
+            print("  recommended for the most faithful typing/keys — CGEvent is the fallback")
+        }
+
+        // 4 · API keys — optional; the agent works AX-only without them,
+        // they just unlock the judge + S2. Offer the prompts interactively.
+        if interactive {
+            for (role, hint) in [("decision", "TypeSafe Jev — typesafe.ai"),
+                                 ("s2", "OpenCode Go — opencode.ai")] {
+                if SecretStore.has(account: role) {
+                    print("✓ \(role) key already in Keychain")
+                    continue
+                }
+                if askYes("Paste a \(role) API key now? (\(hint)) [y/N] ") {
+                    var buf = [CChar](repeating: 0, count: 4096)
+                    let raw = readpassphrase("\(role) API key: ", &buf, buf.count, 0)
+                    _ = buf.withUnsafeMutableBytes { memset_s($0.baseAddress, $0.count, 0, $0.count) }
+                    if let key = raw.map({ String(cString: $0) })
+                        .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }),
+                       !key.isEmpty {
+                        try SecretStore.set(key, account: role)
+                        print("✓ saved \(role) key to Keychain")
+                    } else {
+                        print("- empty — skipped (`s1 key set \(role)` later)")
+                    }
+                }
+            }
+        } else {
+            print("- key prompts skipped (non-interactive) — `s1 key set decision` / `s1 key set s2`")
+        }
+
+        // 5 · Doctor — prove the whole layout is sane before saying done.
+        print("\n── doctor ───────────────────────────")
+        var fails = 0
+        for item in Doctor.run() {
+            if item.level == .fail { fails += 1 }
+            let mark = item.level == .ok ? " ✓" : item.level == .warn ? " ⚠" : " ✗"
+            print("\(mark) \(item.what)\(item.detail.isEmpty ? "" : " — \(item.detail)")")
+        }
+        print("\ns1 is ready. Try: s1 run --goal \"open Notes\" — or say things like")
+        print("  \"remember that apps: my editor is Zed\" · \"list my tasks\" · s1 serve")
+        if fails > 0 { throw ExitCode(1) }
+    }
+
+    /// y/N prompt — Enter means yes (the recommended path is one keypress).
+    private func askYes(_ prompt: String) -> Bool {
+        FileHandle.standardOutput.write(prompt.data(using: .utf8)!)
+        guard let line = readLine() else { return false }
+        let a = line.trimmingCharacters(in: .whitespaces).lowercased()
+        return a.isEmpty || a.hasPrefix("y")
     }
 }

@@ -78,17 +78,99 @@ private struct GeneralSettings: View {
                         try? c.save()
                     }))
                 .disabled(CuaDriver.binary() == nil)
+                if CuaDriver.binary() == nil {
+                    Button(model.cuaInstalling ? "Installing…" : "Install Cua Driver (recommended)") {
+                        Task { await model.installCuaDriver() }
+                    }
+                    .disabled(model.cuaInstalling)
+                    if !model.cuaInstallLog.isEmpty {
+                        Text(model.cuaInstallLog.components(separatedBy: "\n").dropLast().last ?? "")
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 Text("Executor")
             } footer: {
                 if CuaDriver.binary() == nil {
-                    Text("Optional. Install Cua Driver to type, press keys and launch apps without stealing focus. [cua.ai/docs/cua-driver](https://cua.ai/docs/cua-driver)")
+                    Text("Recommended. Installed with CUA's own installer so typing, keys and app launches run in the background without stealing focus. [cua.ai/docs/libraries/cua-driver](https://cua.ai/docs/libraries/cua-driver)")
                 } else {
                     Text(CuaDriver.enabled() ? "Cua Driver found. Typing, shortcuts and app launches go through it in the background (no focus stealing); everything else, and any failed Cua call, uses s1's own fast path. The safety gate runs first either way." : "Cua Driver is installed but turned off; s1 uses its own input path.")
                 }
             }
+            Section {
+                Toggle("Sandbox shell commands", isOn: $model.sandboxSrt)
+                    .disabled(Sandbox.srtBinary() == nil)
+            } header: {
+                Text("Shell sandbox")
+            } footer: {
+                if Sandbox.srtBinary() == nil {
+                    Text("Optional, off by default. Runs shell steps inside Anthropic's sandbox-runtime (Seatbelt + network policy) — install with `npm install -g @anthropic-ai/sandbox-runtime`. Without it this stays off.")
+                } else {
+                    Text("sandbox-runtime found. When on, shell steps run under the policy in ~/.s1/srt-settings.json (edit it to widen or tighten). On any srt error the step fails instead of running unsandboxed.")
+                }
+            }
+            Section {
+                ForEach(configFiles, id: \.0) { name, url, ensure in
+                    Button(name) { ensure(); NSWorkspace.shared.open(url) }
+                }
+                Button("Run checks (s1 doctor)") {
+                    Task {
+                        let items = await Task.detached { Doctor.run() }.value
+                        doctorResult = items.isEmpty
+                            ? "All good — nothing needs attention."
+                            : items.map { "\($0.level == .fail ? "✗" : $0.level == .warn ? "⚠" : "✓") \($0.what)" }
+                                   .joined(separator: "\n")
+                    }
+                }
+                if let r = doctorResult {
+                    Text(r).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Text("Configuration files")
+            } footer: {
+                Text("Every s1 setting lives in a plain file under ~/.s1 — edit them in any editor, then run the checks to validate. `s1 doctor` does the same in a terminal (`--fix` repairs).")
+            }
         }
         .formStyle(.grouped)
+    }
+
+    @State private var doctorResult: String?
+
+    /// Every user-facing file under ~/.s1, in doc order — each with the
+    /// ensure-step that materializes a sane default before opening.
+    private var configFiles: [(String, URL, () -> Void)] {
+        let home = NSHomeDirectory() + "/.s1"
+        let touchJSON: (String) -> Void = { path in
+            if !FileManager.default.fileExists(atPath: path) {
+                try? "{}\n".write(toFile: path, atomically: true, encoding: .utf8)
+            }
+        }
+        let touchText: (String) -> Void = { path in
+            if !FileManager.default.fileExists(atPath: path) {
+                try? "".write(toFile: path, atomically: true, encoding: .utf8)
+            }
+        }
+        return [
+            ("config.json — models, keys, sandbox",
+             URL(fileURLWithPath: home + "/config.json"),
+             { let c = S1Config.load(); try? c.save() }),
+            ("providers.json — endpoint presets",
+             URL(fileURLWithPath: home + "/providers.json"),
+             { Providers.ensureFile() }),
+            ("convert.json — unit & currency aliases",
+             URL(fileURLWithPath: home + "/convert.json"),
+             { touchJSON(home + "/convert.json") }),
+            ("snippets.json — launcher commands",
+             URL(fileURLWithPath: home + "/snippets.json"),
+             { Snippets.ensureFile() }),
+            ("memory.md — remembered facts",
+             URL(fileURLWithPath: home + "/memory.md"),
+             { touchText(home + "/memory.md") }),
+            ("srt-settings.json — sandbox policy",
+             URL(fileURLWithPath: home + "/srt-settings.json"),
+             { Sandbox.ensureSettingsFile() }),
+        ]
     }
 }
 
@@ -126,18 +208,15 @@ private struct VoiceSettings: View {
             }
             Section {
                 Menu("Preset") {
-                    Button("Off · on-device Apple (default)") { model.sttModel = "" }
-                    Button("Groq · Whisper Large v3 Turbo (fast)") {
-                        model.sttBase = "https://api.groq.com/openai/v1"; model.sttModel = "whisper-large-v3-turbo"
+                    ForEach(Providers.presets(role: .stt), id: \.id) { p in
+                        Button(p.note.map { "\(p.label) — \($0)" } ?? p.label) {
+                            model.sttBase = p.base; model.sttModel = p.model
+                        }
                     }
-                    Button("Groq · Whisper Large v3 (most accurate)") {
-                        model.sttBase = "https://api.groq.com/openai/v1"; model.sttModel = "whisper-large-v3"
-                    }
-                    Button("OpenAI · gpt-4o-mini-transcribe") {
-                        model.sttBase = "https://api.openai.com/v1"; model.sttModel = "gpt-4o-mini-transcribe"
-                    }
-                    Button("Local · OpenAI-compatible server (Speaches, NVIDIA NIM…)") {
-                        model.sttBase = "http://localhost:8000/v1"; model.sttModel = "Systran/faster-whisper-large-v3"
+                    Divider()
+                    Button("Edit presets (providers.json)…") {
+                        Providers.ensureFile()
+                        NSWorkspace.shared.open(Providers.path)
                     }
                 }
                 .fixedSize()
@@ -165,17 +244,16 @@ private struct VoiceSettings: View {
                 Button("Preview") { model.previewVoice() }
                     .disabled(!model.speakReply)
                 Menu("Cloud voice") {
-                    Button("Off · Apple voices (default)") { model.ttsModel = "" }
-                    Button("Groq · Orpheus English") {
-                        model.ttsBase = "https://api.groq.com/openai/v1"; model.ttsModel = "canopylabs/orpheus-v1-english"
-                        model.ttsCloudVoice = "troy"
+                    ForEach(Providers.presets(role: .tts), id: \.id) { p in
+                        Button(p.note.map { "\(p.label) — \($0)" } ?? p.label) {
+                            model.ttsBase = p.base; model.ttsModel = p.model
+                            if let v = p.voice { model.ttsCloudVoice = v }
+                        }
                     }
-                    Button("OpenAI · gpt-4o-mini-tts") {
-                        model.ttsBase = "https://api.openai.com/v1"; model.ttsModel = "gpt-4o-mini-tts"
-                        model.ttsCloudVoice = "alloy"
-                    }
-                    Button("Local · OpenAI-compatible server") {
-                        model.ttsBase = "http://localhost:8000/v1"; model.ttsModel = "tts-1"
+                    Divider()
+                    Button("Edit presets (providers.json)…") {
+                        Providers.ensureFile()
+                        NSWorkspace.shared.open(Providers.path)
                     }
                 }
                 .fixedSize()
@@ -490,6 +568,10 @@ private struct AboutSettings: View {
               use: "Design inspiration: hold-to-talk, live notch transcript, paste-and-restore"),
         .init(name: "Pi agent harness", license: "MIT", url: "https://github.com/badlogic/pi-mono",
               use: "Design inspiration: JSON event stream, session history, text-file skills"),
+        .init(name: "sandbox-runtime (Anthropic)", license: "Apache-2.0", url: "https://github.com/anthropics/sandbox-runtime",
+              use: "Optional sandbox for shell steps — Seatbelt rules + network policy"),
+        .init(name: "Agent Memory Repo (Cognition)", license: "MIT", url: "https://github.com/AgentMemoryRepo/agentmemoryrepo",
+              use: "The open spec behind Devin's memory — main file + per-topic files + [[links]] index"),
         .init(name: "Frankfurter", license: "MIT", url: "https://frankfurter.dev",
               use: "Currency rates (European Central Bank reference data)"),
     ]

@@ -1,11 +1,30 @@
 import Foundation
 
-/// Persistent memory: short facts the user asked s1 to keep ("remember
-/// that my editor is Zed"), one bullet per line in ~/.s1/memory.md — plain
-/// text, editable, on by default (`memory: false` / `S1_MEMORY=0` turns it
-/// off). S2 sees the newest facts within a small budget.
+/// Persistent memory, following Cognition's open Agent Memory Repo spec
+/// (github.com/AgentMemoryRepo/agentmemoryrepo — the design behind
+/// Devin's memory system): a main `~/.s1/memory.md` (the entry file —
+/// one fact per line, user-editable) plus topic files at
+/// `~/.s1/memory/<topic>.md`, and an auto-maintained index of `[[links]]`
+/// so a human scanning the folder sees the same structure the agent does.
+///
+/// Routing: "remember that my editor is Zed" lands on the main list;
+/// "remember that apps: my editor is Zed" files it under memory/apps.md.
+/// Facts carry the spec's ` [added: YYYY-MM-DD] ` metadata; dedupe
+/// ignores metadata and case. On by default — `memory: false` /
+/// `S1_MEMORY=0` disables.
 public enum Memory {
+    /// The main file — also hosts the topic index between s1:index markers.
     public static var path: URL { URL(fileURLWithPath: S1Home.path + "/memory.md") }
+    /// Topic files — one markdown file per routed subject.
+    public static var topicsDir: URL { URL(fileURLWithPath: S1Home.path + "/memory", isDirectory: true) }
+
+    static let indexStart = "<!-- s1:index -->"
+    static let indexEnd = "<!-- /s1:index -->"
+    /// Fact metadata — spec-style `[added: …]` plus the pre-spec
+    /// `*(added …)*` stamp, so older files still dedupe correctly.
+    /// (nonisolated: Regex isn't Sendable; a `let` never mutates.)
+    nonisolated(unsafe) static let stampRe =
+        /\s*(\[added: ?\d{4}-\d{2}-\d{2}\]|\*\(added \d{4}-\d{2}-\d{2}\)\*)\s*$/
 
     public static func enabled(_ cfg: S1Config = .load(),
                                env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
@@ -13,24 +32,97 @@ public enum Memory {
         return cfg.memory != false
     }
 
+    /// Fact lines of one file — bullets only, index block skipped.
     public static func facts(at url: URL = path) -> [String] {
         guard let s = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return s.split(separator: "\n").compactMap { line in
+        var out: [String] = [], inIndex = false
+        for line in s.split(separator: "\n", omittingEmptySubsequences: false) {
             let t = line.trimmingCharacters(in: .whitespaces)
-            guard t.hasPrefix("- ") else { return nil }
-            return String(t.dropFirst(2))
+            if t == indexStart { inIndex = true; continue }
+            if t == indexEnd { inIndex = false; continue }
+            guard !inIndex, t.hasPrefix("- ") else { continue }
+            out.append(String(t.dropFirst(2)))
         }
+        return out
     }
 
-    /// Newest facts that fit `budget` characters, oldest first.
+    /// Dedupe key: stamp-free, case-folded — "Zed *(added …)*" == "zed".
+    public static func normalizeFact(_ f: String) -> String {
+        f.replacing(stampRe, with: "").lowercased()
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "apps: my editor is Zed" → (apps, "my editor is Zed"). The topic
+    /// word must be ≥2 chars so "i: prefer dark mode" stays a plain fact.
+    public static func route(_ fact: String) -> (topic: String?, fact: String) {
+        guard let m = try? /^([A-Za-z][A-Za-z0-9_-]{1,23})\s*:\s*(.{2,})$/
+            .wholeMatch(in: fact) else { return (nil, fact) }
+        let slug = String(m.1).lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        return (slug, String(m.2).trimmingCharacters(in: .whitespaces))
+    }
+
+    public static func topicFile(_ name: String) -> URL {
+        let slug = name.lowercased()
+            .map { $0.isLetter || $0.isNumber ? $0 : "-" }
+            .reduce(into: "") { $0.append($1) }
+        return topicsDir.appendingPathComponent((slug.isEmpty ? "notes" : slug) + ".md")
+    }
+
+    /// Every fact the session knows: main file plus each topic file,
+    /// topic entries prefixed "<topic>: " so S2 sees their grouping.
+    public static func allFacts() -> [String] {
+        var out = facts(at: path)
+        for t in topics() {
+            for f in facts(at: t.url) { out.append("\(t.name): \(f)") }
+        }
+        return out
+    }
+
+    /// Newest facts that fit `budget` characters, oldest first, followed by
+    /// a topic-file index line so S2 knows where memory lives on disk.
     public static func recent(budget: Int = 2000, at url: URL = path) -> [String] {
         var out: [String] = [], used = 0
-        for f in facts(at: url).reversed() {
+        for f in allFacts(at: url).reversed() {
             used += f.count + 3
             if used > budget { break }
             out.insert(f, at: 0)
         }
+        let dir = url.deletingLastPathComponent()
+            .appendingPathComponent("memory", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        let ts = files.filter { $0.pathExtension == "md" }.sorted { $0.path < $1.path }
+            .map { (name: $0.deletingPathExtension().lastPathComponent, count: facts(at: $0).count) }
+        if !ts.isEmpty {
+            out.append("· memory files: "
+                + ts.map { "memory/\($0.name).md (\($0.count))" }.joined(separator: ", "))
+        }
         return out
+    }
+
+    static func allFacts(at main: URL) -> [String] {
+        // url != path only in tests — keep the same "main + its sibling dir"
+        // layout so tests exercise the real code path.
+        var out = facts(at: main)
+        let dir = main.deletingLastPathComponent().appendingPathComponent("memory", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        for u in files.sorted(by: { $0.path < $1.path }) where u.pathExtension == "md" {
+            for f in facts(at: u) {
+                out.append("\(u.deletingPathExtension().lastPathComponent): \(f)")
+            }
+        }
+        return out
+    }
+
+    /// Topic files on disk: name + fact count, sorted by name.
+    public static func topics() -> [(name: String, count: Int, url: URL)] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: topicsDir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "md" }.sorted { $0.path < $1.path }
+            .map { (name: $0.deletingPathExtension().lastPathComponent,
+                    count: facts(at: $0).count, url: $0) }
     }
 
     /// Never keep credentials — memory is plain text that S2 reads.
@@ -44,19 +136,96 @@ public enum Memory {
         }
     }
 
-    public static func add(_ fact: String, at url: URL = path) throws {
+    /// Append a fact — routed to a topic file when it opens with
+    /// "topic: …", else the main list. Returns the topic it landed on
+    /// (nil = main list) so the spoken reply can say where it went.
+    @discardableResult
+    public static func add(_ fact: String, at url: URL = path) throws -> String? {
         let f = fact.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
-        guard !f.isEmpty else { return }
-        var all = facts(at: url).filter { $0.lowercased() != f.lowercased() }
-        all.append(String(f.prefix(300)))
+        guard !f.isEmpty else { return nil }
+        let (topic, body) = route(f)
+        let stamped = String(body.prefix(300)) + " [added: \(Self.today())]"
+        if let topic {
+            // Topic dir sits beside whichever main file we're writing to —
+            // tests pass their own path and get an isolated layout.
+            let dir = url == path ? topicsDir
+                : url.deletingLastPathComponent().appendingPathComponent("memory", isDirectory: true)
+            let file = dir.appendingPathComponent(topic + ".md")
+            var all = facts(at: file).filter { normalizeFact($0) != normalizeFact(body) }
+            all.append(stamped)
+            try write(all, to: file,
+                      header: "# \(topic) — s1 memory topic; one fact per line, edit freely")
+            try? rebuildIndex(at: url)
+            return topic
+        }
+        var all = facts(at: url).filter { normalizeFact($0) != normalizeFact(body) }
+        all.append(stamped)
         try write(Array(all.suffix(200)), to: url)
+        return nil
     }
 
-    public static func clear(at url: URL = path) throws { try write([], to: url) }
+    static func today() -> String {
+        let d = DateFormatter(); d.dateFormat = "yyyy-MM-dd"
+        return d.string(from: Date())
+    }
 
-    static func write(_ facts: [String], to url: URL) throws {
+    /// Wipe everything — main file and every topic file.
+    public static func clear(at url: URL = path) throws {
+        try write([], to: url)
+        let dir = url == path ? topicsDir
+            : url.deletingLastPathComponent().appendingPathComponent("memory", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        for u in files where u.pathExtension == "md" {
+            try? FileManager.default.removeItem(at: u)
+        }
+        try? rebuildIndex(at: url)
+    }
+
+    /// Rewrite the `s1:index` block inside the main file to mirror the
+    /// topic files on disk — markers make it cheap to find and safe to
+    /// regenerate without touching the user's own lines. Topics come from
+    /// the `memory/` dir beside `url` (== topicsDir for the default path).
+    public static func rebuildIndex(at url: URL = path) throws {
+        let dir = url.deletingLastPathComponent()
+            .appendingPathComponent("memory", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        let ts = files.filter { $0.pathExtension == "md" }.sorted { $0.path < $1.path }
+            .map { (name: $0.deletingPathExtension().lastPathComponent, count: facts(at: $0).count) }
+        let block = indexStart + "\n"
+            + (ts.isEmpty
+               ? "_no topic files yet — use `remember that <topic>: <fact>`_\n"
+               : ts.map { "- [[memory/\($0.name).md]] — \($0.count) fact\($0.count == 1 ? "" : "s")\n" }
+                  .joined())
+            + indexEnd
+        var s = (try? String(contentsOf: url, encoding: .utf8))
+            ?? "# s1 memory — one fact per line; `topic: fact` files it under memory/<topic>.md\n\n"
+        if let a = s.range(of: indexStart), let b = s.range(of: indexEnd) {
+            s.replaceSubrange(a.lowerBound..<b.upperBound, with: block)
+        } else {
+            s += "\n" + block + "\n"
+        }
         if url == path { S1Home.ensurePrivate() }
-        let body = "# s1 memory — one fact per line; edit freely\n\n" + facts.map { "- \($0)\n" }.joined()
+        try s.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func write(_ facts: [String], to url: URL,
+                      header: String = "# s1 memory — one fact per line; `topic: fact` files it under memory/<topic>.md; edit freely") throws {
+        if url == path || url.deletingLastPathComponent() == topicsDir { S1Home.ensurePrivate() }
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var body = header + "\n\n" + facts.map { "- \($0)\n" }.joined()
+        if url == path {
+            // Carry the index block through a rewrite — dropping it would
+            // leave stale [[links]] until the next topic write.
+            if let a = (try? String(contentsOf: url, encoding: .utf8)).flatMap({ s in
+                s.range(of: indexStart).flatMap { lo in
+                    s.range(of: indexEnd).map { hi in s[lo.lowerBound..<hi.upperBound] } }
+            }) {
+                body += "\n" + a + "\n"
+            }
+        }
         try body.write(to: url, atomically: true, encoding: .utf8)
     }
 }
@@ -144,8 +313,11 @@ public enum MetaCommand: Equatable, Sendable {
         case .remember(let fact):
             guard Memory.enabled() else { return "Memory is off. Turn it on in Settings → General." }
             guard !Memory.looksSecret(fact) else { return "I won't store passwords, keys or tokens in memory." }
-            do { try Memory.add(fact); return "Got it, I'll remember: \(fact)" }
-            catch { return "Couldn't save memory: \(error.localizedDescription)" }
+            do {
+                let topic = try Memory.add(fact)
+                if let topic { return "Got it — filed under " + topic + ": \(Memory.route(fact).fact)" }
+                return "Got it, I'll remember: \(fact)"
+            } catch { return "Couldn't save memory: \(error.localizedDescription)" }
         case .forget:
             do { try Memory.clear(); return "Memory cleared." }
             catch { return "Couldn't clear memory: \(error.localizedDescription)" }

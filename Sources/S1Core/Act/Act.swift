@@ -249,8 +249,21 @@ public struct CGEventActuator: Actuator {
             // Wait (bounded) so the outcome line tells the truth — a fire-
             // and-forget launch would log success before anything ran.
             let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-c", cmd]
+            if Sandbox.enabled() {
+                // `sandbox: "srt"` set → run inside sandbox-runtime's
+                // Seatbelt + proxy. Missing binary fails CLOSED: silently
+                // running unsandboxed would pretend a promise was kept.
+                guard let w = Sandbox.wrap(cmd) else {
+                    throw S1Error.aborted(
+                        "sandbox-runtime (srt) not installed — \(Sandbox.installHint),"
+                        + " or set sandbox:\"off\" in ~/.s1/config.json")
+                }
+                p.executableURL = URL(fileURLWithPath: w.executable)
+                p.arguments = w.args
+            } else {
+                p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                p.arguments = ["-c", cmd]
+            }
             try p.run()
             let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: killer)

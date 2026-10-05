@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @FocusState private var goalFocused: Bool
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 14) {
@@ -34,6 +35,12 @@ struct ContentView: View {
         }
         .onChange(of: model.focusGoalToken) { goalFocused = true }
         .onAppear { goalFocused = true }
+        // First run and "Set Up s1 Again…" both flip needsOnboarding; the
+        // wizard is a separate window so it survives this view's lifecycle.
+        .onAppear { if model.needsOnboarding { openWindow(id: "onboarding") } }
+        .onChange(of: model.needsOnboarding) {
+            if model.needsOnboarding { openWindow(id: "onboarding") }
+        }
     }
 
     // MARK: - pieces

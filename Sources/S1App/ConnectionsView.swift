@@ -13,18 +13,7 @@ struct ConnectionsView: View {
         Form {
                 decisionStatus
                 Section {
-                    presetMenu([
-                        ("TypeSafe · Jev (recommended)", Endpoints.defaultDecisionBase, Endpoints.defaultDecisionModel),
-                        ("Liquid AI · d1 free tier (vision)", "https://api.liquid.ai/decisions", "d1:free"),
-                        ("Liquid AI · d1 (vision)", "https://api.liquid.ai/decisions", "d1"),
-                        ("Cloudflare · Clef Flash (Workers AI, vision)",
-                         "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef-flash", "clef-flash"),
-                        ("Cloudflare · Clef (Workers AI, vision)",
-                         "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run/@cf/cloudflare/clef", "clef"),
-                        ("Local · Ollama nimble 9B (advanced)", "http://localhost:11434", "nimble"),
-                        ("Local · Ollama tev1 4B (advanced)", "http://localhost:11434", "tev1"),
-                        ("Local · Ollama clef-flash 9B (advanced)", "http://localhost:11434", "clef-flash"),
-                    ]) { model.decisionBase = $0; model.decisionModel = $1 }
+                    presetMenu(role: .decision) { model.decisionBase = $0; model.decisionModel = $1 }
                     TextField("Server", text: $model.decisionBase)
                     TextField("Model (empty = off)", text: $model.decisionModel, prompt: Text(Endpoints.defaultDecisionModel))
                     KeyRow(model: model, role: .decision)
@@ -36,12 +25,7 @@ struct ConnectionsView: View {
                 }
                 Section {
                     DisclosureGroup(isExpanded: $showVision) {
-                        presetMenu([
-                            ("Off (recommended)", model.vlmBase, ""),
-                            ("OpenCode Go · DeepSeek V4 Flash Vision", Endpoints.defaultS2Base, "deepseek-v4-flash-vision-exp"),
-                            ("OpenRouter", "https://openrouter.ai/api/v1", model.vlmModel),
-                            ("Local · Ollama gemma3:4b", "http://localhost:11434/v1", "gemma3:4b"),
-                        ]) { model.vlmBase = $0; model.vlmModel = $1 }
+                        presetMenu(role: .vlm) { model.vlmBase = $0; model.vlmModel = $1 }
                         TextField("Base URL", text: $model.vlmBase)
                         TextField("Vision model (empty = off)", text: $model.vlmModel)
                         Toggle("Attach screenshots", isOn: $model.vlmScreenshot)
@@ -57,15 +41,7 @@ struct ConnectionsView: View {
                     Text("Not needed for most commands: the AX grammar handles open/type/press/scroll and labeled buttons, S2 plans from the AX text, Jev judges. Turn on only for targets with no accessibility label (images, canvases, games). Reuses the S2 key on the same provider.")
                 }
                 Section {
-                    presetMenu([
-                        ("OpenCode Go · DeepSeek V4.1 Flash (recommended)", Endpoints.defaultS2Base, Endpoints.defaultS2Model),
-                        ("OpenCode Go · DeepSeek V4 Pro", Endpoints.defaultS2Base, "deepseek-v4-pro"),
-                        ("DeepSeek API · V4.1 Flash", "https://api.deepseek.com", "deepseek-flash"),
-                        ("OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-oss-120b"),
-                        ("OpenAI", "https://api.openai.com/v1", model.s2Model),
-                        ("Groq", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
-                        ("Local · Ollama (advanced)", "http://localhost:11434/v1", "gemma3:4b"),
-                    ]) { model.s2Base = $0; model.s2Model = $1 }
+                    presetMenu(role: .s2) { model.s2Base = $0; model.s2Model = $1 }
                     TextField("Base URL", text: $model.s2Base)
                     TextField("Model", text: $model.s2Model)
                     Toggle("Escalate to S2", isOn: $model.useS2)
@@ -117,11 +93,20 @@ struct ConnectionsView: View {
         }
     }
 
-    func presetMenu(_ items: [(String, String, String)],
+    /// Presets come from `~/.s1/providers.json` ∪ builtins — the user can
+    /// add their own endpoint to the file and it shows up in this menu.
+    func presetMenu(role: ModelRole,
                             apply: @escaping (String, String) -> Void) -> some View {
         Menu("Preset") {
-            ForEach(items, id: \.0) { item in
-                Button(item.0) { apply(item.1, item.2) }
+            ForEach(Providers.presets(role: role), id: \.id) { p in
+                Button(p.note.map { "\(p.label) — \($0)" } ?? p.label) {
+                    apply(p.base, p.model)
+                }
+            }
+            Divider()
+            Button("Edit presets (providers.json)…") {
+                Providers.ensureFile()
+                NSWorkspace.shared.open(Providers.path)
             }
         }
         .fixedSize()

@@ -300,6 +300,53 @@ per catalog entry (vision models auto-assign to S1, text-only to S2), and
 any already-installed model can be assigned from its ⋯ menu. No Ollama?
 `brew install --cask ollama` — the section tells you so in-app.
 
+## Everything lives in `~/.s1`
+
+Every tunable is a plain file — edit in any editor, then `s1 doctor`
+(or `s1 doctor --fix`, or Settings → General → "Run checks") validates
+the whole directory in one pass. The defaults are tuned so the only edit
+you'll ever *need* is a model name.
+
+| File | What it holds |
+|---|---|
+| `config.json` | endpoints, models, locale, `sandbox`, `onboarded` — the master file |
+| `providers.json` | the preset catalog behind every Settings menu and `--preset` flag — add or replace entries, `doctor` validates ids/roles/URLs |
+| `convert.json` | your own unit + currency aliases for the launcher (`{"units": {"click": "km"}, "currencies": {"dolar": "usd"}}`) |
+| `snippets.json` | launcher text snippets with `{clipboard}`/`{uuid}` placeholders |
+| `memory.md` + `memory/<topic>.md` | remembered facts — [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo) layout: main list, per-topic files, auto `[[links]]` index. `remember that apps: my editor is Zed` files under `memory/apps.md` |
+| `skills/<name>.json` | saved skills — a name + steps replayed through S1 and the safety gate |
+| `tasks/<name>.txt` | persistent task library (`s1 run --task name`) |
+| `srt-settings.json` | sandbox policy (see below) |
+| `fx.json`, `usage.jsonl`, `artifacts/` | cached rates · metered calls · per-run logs |
+
+### First-run setup
+
+The app opens a setup wizard once (welcome → permissions → Cua Driver →
+model keys → done); the terminal twin does the same:
+
+```bash
+s1 setup                     # guided: permissions → cua-driver → API keys → checks
+s1 setup --non-interactive   # defaults only, no prompts
+s1 setup --install-cua       # include the official Cua Driver install
+s1 doctor                    # validate every file + tool above afterwards
+```
+
+Cua Driver is installed with CUA's own installer
+(`cua.ai/driver/install.sh`) — recommended, and s1's executor prefers it
+when present. Skip with `--no-cua`; re-run the wizard any time from the
+app menu ("Set Up s1 Again…").
+
+### Shell sandbox (optional, off by default)
+
+`"sandbox": "srt"` in `config.json` (or `S1_SANDBOX=srt`, or Settings →
+General) runs every shell step inside Anthropic's
+[sandbox-runtime](https://github.com/anthropics/sandbox-runtime):
+Seatbelt filesystem rules + a network allowlist from
+`~/.s1/srt-settings.json` (written with a deny-most default on first
+use — edit to taste). Requires `npm install -g @anthropic-ai/sandbox-runtime`;
+if it's missing while enabled, shell steps fail closed instead of running
+unsandboxed.
+
 ## Task library & run tooling
 
 ```bash

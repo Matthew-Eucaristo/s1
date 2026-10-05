@@ -22,6 +22,9 @@ struct S1App: App {
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
+            CommandGroup(after: .appInfo) {
+                Button("Set Up s1 Again…") { model.needsOnboarding = true }
+            }
             CommandMenu("Agent") {
                 Button("Run") { Task { await model.run() } }
                     .keyboardShortcut("r", modifiers: .command)
@@ -54,9 +57,17 @@ struct S1App: App {
             }
         }
 
+        // First-run wizard — ContentView opens it when needsOnboarding is
+        // set (launch and the "Set Up s1 Again…" menu both go through it).
+        WindowGroup("Set up s1", id: "onboarding") {
+            OnboardingView(model: model)
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView(model: model)
         }
+        .defaultLaunchBehavior(.suppressed)
 
         // The always-on companion lives here: menu bar presence, global
         // hotkey armed, listening/running state at a glance. Label uses the

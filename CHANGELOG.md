@@ -5,6 +5,38 @@ this project is pre-1.0 — breaking changes land in minor versions.
 
 ## [Unreleased]
 
+### Added
+- **First-run onboarding** — the app opens a setup wizard once (welcome →
+  permissions → Cua Driver → API keys → done); `s1 setup` is the CLI twin
+  (`--install-cua`, `--no-cua`, `--non-interactive`). Cua Driver installs
+  via CUA's own installer and is the recommended executor; re-run any time
+  via the app menu ("Set Up s1 Again…").
+- **`s1 doctor`** — validates every file under ~/.s1 (config, providers,
+  snippets, convert, skills, memory, tasks) plus keys, cua-driver and the
+  sandbox toolchain; `--fix` writes missing defaults and rebuilds the
+  memory index. Settings → General shows the same checks inline.
+- **Standardized config files** — `~/.s1/providers.json` is now the
+  preset catalog behind every Settings menu; `s1 use <id>` applies a
+  preset from the CLI. `~/.s1/convert.json` adds user unit/currency
+  aliases to the launcher (one hop, validated by doctor).
+- **Memory v2** — `~/.s1/memory.md` now follows Cognition's open
+  [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo)
+  spec: `remember that <topic>: <fact>` files under `memory/<topic>.md`,
+  an auto `[[links]]` index in the main file, `[added:]` date metadata,
+  stamp-free dedupe. `forget everything` clears topics too.
+- **Context compaction** — turns that slide out of the 200-turn window or
+  over the prompt budget are digested into a bounded summary ("N earlier
+  turns: goal → outcome …") instead of vanishing; S1/S2 always see the
+  freshest work plus a compact recap. All buffers bounded (200 turns,
+  120 digest lines, 6k-char window, 1.2k-char digest).
+- **Optional shell sandbox** — `"sandbox": "srt"` (or `S1_SANDBOX=srt`,
+  Settings → General) wraps shell steps in Anthropic's
+  [sandbox-runtime](https://github.com/anthropics/sandbox-runtime) with a
+  deny-most policy at `~/.s1/srt-settings.json`. Off by default; fails
+  closed when srt isn't installed.
+- **Full OSS credits** — Settings → About and ATTRIBUTIONS.md now list
+  every runtime tool, spec and design reference with licenses.
+
 ### Fixed
 - **Listen crash (EXC_BREAKPOINT on `RealtimeMessenger.mServiceQueue`,
   macOS 27)** — the mic resampler answered `.endOfStream` after each tap

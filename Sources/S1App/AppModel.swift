@@ -95,6 +95,18 @@ final class AppModel {
     var ttsBase = "https://api.groq.com/openai/v1" { didSet { scheduleRearm() } }
     var ttsModel = "" { didSet { scheduleRearm() } }
     var ttsCloudVoice = "" { didSet { scheduleRearm() } }
+
+    /// Shell sandbox (Anthropic sandbox-runtime) — off by default; Settings
+    /// → General flips it. Persists as `sandbox: "srt"` in config.json.
+    var sandboxSrt = false { didSet { scheduleSave() } }
+
+    /// First-run state: the onboarding window opens whenever this flips
+    /// true (launch + "Set Up s1 Again…"). Persisted as `onboarded`.
+    var needsOnboarding = false
+
+    /// Cua Driver install (onboarding + Settings → Executor).
+    private(set) var cuaInstalling = false
+    private(set) var cuaInstallLog = ""
     /// Floating status pill under the camera notch while s1 is doing
     /// something. Off = the window never exists (see NotchHUD.swift).
     var notchHUD = true { didSet { if !notchHUD { hud.hide() }; scheduleSave() } }
@@ -268,6 +280,8 @@ final class AppModel {
         if let b = cfg.decision?.base { decisionBase = b }
         if let m = cfg.decision?.model { decisionModel = m }
         if let v = cfg.voice { ttsVoice = v }
+        sandboxSrt = cfg.sandbox == "srt"
+        needsOnboarding = cfg.onboarded != true
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
@@ -479,7 +493,44 @@ final class AppModel {
         cfg.stt = .init(base: sttBase, model: sttModel, key: cfg.stt?.key)
         cfg.tts = .init(base: ttsBase, model: ttsModel, key: cfg.tts?.key)
         cfg.ttsCloudVoice = ttsCloudVoice.isEmpty ? nil : ttsCloudVoice
+        cfg.sandbox = sandboxSrt ? "srt" : nil
         try? cfg.save()
+    }
+
+    /// Onboarding finished (or was skipped) — never ask again. Writes go
+    /// through saveConfig so the flag lands with everything else.
+    /// Onboarding finished (or was skipped) — never auto-ask again.
+    func markOnboarded() {
+        needsOnboarding = false
+        var cfg = S1Config.load()
+        cfg.onboarded = true
+        try? cfg.save()
+    }
+
+    /// Re-open the wizard — "Set Up s1 Again…" menu item.
+    func reopenOnboarding() { needsOnboarding = true }
+
+    /// Install Cua Driver via CUA's own installer, streaming its output
+    /// into `cuaInstallLog` for the wizard/settings to show live.
+    func installCuaDriver() async {
+        guard !cuaInstalling, !CuaInstaller.installed else { return }
+        cuaInstalling = true
+        cuaInstallLog = ""
+        defer { cuaInstalling = false }
+        do {
+            try await CuaInstaller.install { [weak self] line in
+                Task { @MainActor in
+                    // Bound the streaming log — the installer can be chatty.
+                    if (self?.cuaInstallLog.count ?? 0) > 8000 {
+                        self?.cuaInstallLog = String((self?.cuaInstallLog ?? "").suffix(4000))
+                    }
+                    self?.cuaInstallLog += line + "\n"
+                }
+            }
+            cuaInstallLog += "✓ installed — s1's executor will use it\n"
+        } catch {
+            cuaInstallLog += "✗ \(error.localizedDescription)\n"
+        }
     }
 
     /// The live decision endpoint (typed-but-unsaved edits count); env wins.

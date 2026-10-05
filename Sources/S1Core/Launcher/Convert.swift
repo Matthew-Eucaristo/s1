@@ -62,8 +62,76 @@ public enum Convert {
         return u
     }()
 
-    public static func units(_ q: Query) -> Double? {
-        guard let a = units[q.from], let b = units[q.to], a.kind == b.kind else { return nil }
+    // MARK: user extensions (~/.s1/convert.json)
+
+    /// Aliases the user adds on top of the shipped tables — the file is a
+    /// plain object so "editable conversions" needs no code change:
+    ///   { "units": { "kms": "km", "click": "km" },
+    ///     "currencies": { "dolar": "usd", "bucks": "usd" } }
+    /// A unit alias must point at an existing unit name; a currency alias
+    /// at a known ISO code. `s1 doctor` flags entries that resolve nowhere.
+    public struct Extensions: Codable, Sendable {
+        public var units: [String: String]?
+        public var currencies: [String: String]?
+        public init(units: [String: String]? = nil, currencies: [String: String]? = nil) {
+            self.units = units; self.currencies = currencies
+        }
+    }
+
+    public static var extensionsPath: URL {
+        URL(fileURLWithPath: S1Home.path + "/convert.json")
+    }
+
+    /// mtime-checked cache — the launcher calls this per keystroke, so the
+    /// file is only re-read when it actually changed on disk. Guarded by
+    /// extLock (Swift 6 can't see that — hence nonisolated(unsafe)).
+    nonisolated(unsafe) private static var extCache: (mtime: Date?, ext: Extensions)?
+    private static let extLock = NSLock()
+
+    public static func extensions() -> Extensions {
+        extLock.lock(); defer { extLock.unlock() }
+        let p = extensionsPath.path
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: p))?[.modificationDate] as? Date
+        if let c = extCache, c.mtime == mtime { return c.ext }
+        let ext = (try? Data(contentsOf: extensionsPath))
+            .flatMap { try? JSONDecoder().decode(Extensions.self, from: $0) }
+            ?? Extensions()
+        extCache = (mtime, ext)
+        return ext
+    }
+
+    /// Drop the cached parse — call after writing convert.json so the next
+    /// lookup sees the new aliases without an app restart.
+    public static func reloadExtensions() {
+        extLock.lock(); extCache = nil; extLock.unlock()
+    }
+
+    /// Unit lookup: builtin table first, then a user alias resolving to a
+    /// builtin name (aliases of aliases are not followed — one hop only).
+    /// `ext` overrides the file load — tests inject their own aliases.
+    static func unitEntry(_ token: String, ext: Extensions? = nil)
+        -> (kind: String, unit: Dimension)? {
+        if let u = units[token] { return u }
+        guard let target = (ext ?? extensions()).units?[token] else { return nil }
+        return units[target]
+    }
+
+    /// Entries that resolve nowhere — doctor findings.
+    public static func validateExtensions(_ ext: Extensions) -> [String] {
+        var issues: [String] = []
+        for (alias, target) in ext.units ?? [:] where units[target] == nil {
+            issues.append("unit alias '\(alias)' -> '\(target)': no such unit "
+                + "(pick an existing name, e.g. km, mi, kg, lb, c, f, l, gal, mb, h)")
+        }
+        for (alias, target) in ext.currencies ?? [:] where !FX.known.contains(target.uppercased()) {
+            issues.append("currency alias '\(alias)' -> '\(target)': unknown ISO code")
+        }
+        return issues
+    }
+
+    public static func units(_ q: Query, ext: Extensions? = nil) -> Double? {
+        guard let a = unitEntry(q.from, ext: ext),
+              let b = unitEntry(q.to, ext: ext), a.kind == b.kind else { return nil }
         return Measurement(value: q.amount, unit: a.unit).converted(to: b.unit).value
     }
 
@@ -76,8 +144,11 @@ public enum Convert {
         "rupees": "INR", "peso": "PHP", "pesos": "PHP", "franc": "CHF",
     ]
 
-    public static func currency(_ token: String) -> String? {
+    public static func currency(_ token: String, ext: Extensions? = nil) -> String? {
         if let a = aliases[token] { return a }
+        if let a = (ext ?? extensions()).currencies?[token], FX.known.contains(a.uppercased()) {
+            return a.uppercased()
+        }
         let up = token.uppercased()
         return FX.known.contains(up) ? up : nil
     }
@@ -101,7 +172,7 @@ public enum Convert {
     public static func item(_ s: String, rates: FX.Rates?) -> LauncherItem? {
         guard let q = parse(s) else { return nil }
         let amt = format(q.amount)
-        if let v = units(q), let a = units[q.from], let b = units[q.to] {
+        if let v = units(q), let a = unitEntry(q.from), let b = unitEntry(q.to) {
             let fu = MeasurementFormatter(), raw = format(v)
             fu.unitOptions = .providedUnit
             return LauncherItem(kind: .calc, title: "\(amt) \(fu.string(from: a.unit)) = \(raw) \(fu.string(from: b.unit))",

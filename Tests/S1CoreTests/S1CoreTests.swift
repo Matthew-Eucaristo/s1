@@ -2389,10 +2389,24 @@ private struct DelegatingReasoner: Reasoner {
     defer { try? FileManager.default.removeItem(at: d) }
     let m = d.appendingPathComponent("memory.md")
     try Memory.add("editor is Zed", at: m); try Memory.add("Editor is Zed", at: m); try Memory.add("likes dark mode", at: m)
-    #expect(Memory.facts(at: m) == ["Editor is Zed", "likes dark mode"])
-    #expect(Memory.recent(budget: 20, at: m) == ["likes dark mode"])
+    // Facts carry the spec's [added:] stamp; dedupe is stamp- and case-free.
+    #expect(Memory.facts(at: m).map(Memory.normalizeFact) == ["editor is zed", "likes dark mode"])
+    #expect(Memory.facts(at: m).allSatisfy { $0.hasSuffix("]") && $0.contains("[added:") })
+    #expect(Memory.recent(budget: 45, at: m).first?.hasPrefix("likes dark mode") == true)
     #expect(!Memory.enabled({ var c = S1Config(); c.memory = false; return c }(), env: [:]))
     #expect(Memory.enabled(S1Config(), env: [:]))
+    // Agent Memory Repo spec: "topic: fact" routes to memory/<topic>.md and
+    // the main file gains a [[link]] index.
+    #expect(try Memory.add("apps: prefers Zed over Xcode", at: m) == "apps")
+    let topic = d.appendingPathComponent("memory/apps.md")
+    #expect(Memory.facts(at: topic).map(Memory.normalizeFact) == ["prefers zed over xcode"])
+    #expect(Memory.allFacts(at: m).contains("apps: prefers Zed over Xcode [added: \(Memory.today())]"))
+    let main = try String(contentsOf: m, encoding: .utf8)
+    #expect(main.contains("[[memory/apps.md]]"))
+    // clear() wipes the topic dir and the index.
+    try Memory.clear(at: m)
+    #expect(Memory.facts(at: m).isEmpty)
+    #expect(Memory.allFacts(at: m).isEmpty)
     try Skills.save(Skill(name: "Morning Setup", steps: ["open Mail", "open Calendar"]), to: d)
     let all = Skills.load(from: d)
     #expect(all.count == 1)
@@ -2427,4 +2441,132 @@ struct DoneEachSubgoal: Policy {
     func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         Decision(action: .done(summary: goal), confidence: 1, rationale: "ok")
     }
+}
+
+// MARK: - Standardized config files (providers / convert / doctor / sandbox)
+
+@Test func providerMergeOverridesInPlaceAndAppendsByRole() {
+    // Replacing a builtin id keeps the menu order; a new id lands at the
+    // end of its own role group, not the file's tail.
+    let user = [
+        ProviderPreset(id: "typesafe-jev", label: "Custom Jev", role: "decision",
+                       base: "https://x.example/v1", model: "jev-9", note: nil,
+                       recommended: nil, voice: nil),
+        ProviderPreset(id: "my-s2", label: "Mine", role: "s2",
+                       base: "http://localhost:1234/v1", model: "m", note: nil,
+                       recommended: nil, voice: nil),
+    ]
+    let merged = Providers.merge(user)
+    let jevIdx = merged.firstIndex { $0.id == "typesafe-jev" }!
+    #expect(merged[jevIdx].base == "https://x.example/v1")
+    #expect(merged[jevIdx].model == "jev-9")
+    // typesafe-jev was the first decision builtin — replacement stays there.
+    #expect(jevIdx == Providers.builtin.firstIndex { $0.role == "decision" })
+    let s2s = merged.filter { $0.role == "s2" }
+    #expect(s2s.last?.id == "my-s2")
+    #expect(merged.count == Providers.builtin.count + 1)
+}
+
+@Test func providerValidationCatchesBadEntries() {
+    let bad = [
+        ProviderPreset(id: "", label: "x", role: "s2", base: "https://a", model: "m",
+                       note: nil, recommended: nil, voice: nil),
+        ProviderPreset(id: "dup", label: "a", role: "nope", base: "notaurl", model: "m",
+                       note: nil, recommended: nil, voice: nil),
+        ProviderPreset(id: "dup", label: "b", role: "s2", base: "", model: "m",
+                       note: nil, recommended: nil, voice: nil),
+    ]
+    let issues = Providers.validate(bad)
+    #expect(issues.contains { $0.contains("empty id") })
+    #expect(issues.contains { $0.contains("duplicate id 'dup'") })
+    #expect(issues.contains { $0.contains("unknown role 'nope'") })
+    #expect(issues.contains { $0.contains("not a URL") })
+    #expect(Providers.validate(Providers.builtin).isEmpty)
+}
+
+@Test func convertExtensionsAliasUnitsAndCurrencies() {
+    let ext = Convert.Extensions(units: ["click": "km", "furlong": "mi"],
+                                 currencies: ["dolar": "usd"])
+    // One hop: user alias -> builtin name -> real unit.
+    #expect(Convert.units(.init(amount: 2, from: "click", to: "mi"), ext: ext)! > 1.24)
+    #expect(Convert.units(.init(amount: 2, from: "click", to: "mi"), ext: ext)! < 1.25)
+    #expect(Convert.currency("dolar", ext: ext) == "USD")
+    // Chained aliases don't resolve (one hop only) and validate flags it:
+    // 'farthing' targets another alias, not a builtin name.
+    let chained = Convert.Extensions(units: ["farthing": "furlong"], currencies: nil)
+    #expect(Convert.units(.init(amount: 1, from: "farthing", to: "km"), ext: chained) == nil)
+    #expect(!Convert.validateExtensions(chained).isEmpty)
+    #expect(!Convert.validateExtensions(.init(units: nil, currencies: ["x": "zzz"])).isEmpty)
+    #expect(Convert.validateExtensions(ext).isEmpty)
+}
+
+@Test func sandboxGateIsOffByDefault() {
+    #expect(!Sandbox.enabled(cfg: S1Config(), env: [:]))
+    var c = S1Config(); c.sandbox = "srt"
+    #expect(Sandbox.enabled(cfg: c, env: [:]))
+    // env beats file either way.
+    #expect(Sandbox.enabled(cfg: S1Config(), env: ["S1_SANDBOX": "srt"]))
+    #expect(!Sandbox.enabled(cfg: c, env: ["S1_SANDBOX": "off"]))
+}
+
+@Test func srtDefaultSettingsIsValidJSONAndDenyAll() {
+    let obj = (try? JSONSerialization.jsonObject(with: Data(Sandbox.defaultSettings.utf8)))
+        as? [String: Any]
+    #expect(obj != nil)
+    let net = obj?["network"] as? [String: Any]
+    #expect((net?["allowedDomains"] as? [String])?.isEmpty == true)
+    let fs = obj?["filesystem"] as? [String: Any]
+    #expect((fs?["denyRead"] as? [String])?.contains("~/.ssh") == true)
+}
+
+@Test func conversationCompactsEvictedTurnsIntoSummary() {
+    let c = Conversation()
+    for i in 0..<230 {
+        c.record(goal: "g\(i)", outcome: "did thing \(i)")
+    }
+    // 230 recorded, 200 stored — the 30 oldest became digest lines.
+    let ctx = c.recentContext()
+    #expect(ctx.turns.count == 200)
+    #expect(ctx.summary != nil)
+    #expect(ctx.summary!.contains("30 earlier turns"))
+    #expect(ctx.summary!.contains("g0") || ctx.summary!.contains("oldest not shown"))
+    // Idle rotation clears both the window and the digest.
+    let c2 = Conversation(idleReset: -1)
+    c2.record(goal: "a", outcome: "b")   // rotates on entry, then records
+    #expect(c2.recentContext().summary == nil)
+    _ = c2.sessionID()                   // rotates again — wipes everything
+    #expect(c2.recent().isEmpty)
+}
+
+@Test func recentContextSummaryCapsAndKeepsNewest() {
+    let c = Conversation()
+    // Tiny budget forces most turns out of the window into the digest.
+    for i in 0..<40 {
+        c.record(goal: "goal-\(i)", outcome: String(repeating: "x", count: 60))
+    }
+    let ctx = c.recentContext(budget: 400, summaryBudget: 300)
+    #expect(ctx.summary != nil)
+    #expect(ctx.summary!.count < 2000)
+    // Newest work survives: the last turn is in the window, not the digest.
+    #expect(ctx.turns.last?.goal == "goal-39")
+    #expect(!ctx.turns.contains { $0.goal == "goal-0" })
+}
+
+@Test func doctorFlagsBrokenHome() {
+    let home = FileManager.default.temporaryDirectory
+        .appendingPathComponent("s1-doctor-\(UUID())").path
+    try? FileManager.default.createDirectory(atPath: home + "/skills",
+                                             withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    // Corrupt config + corrupt providers + a broken skill.
+    try? "{ not json".write(toFile: home + "/config.json", atomically: true, encoding: .utf8)
+    try? "[{\"id\": 1}]".write(toFile: home + "/providers.json", atomically: true, encoding: .utf8)
+    try? "{\"name\":\"x\",\"steps\":[]}".write(toFile: home + "/skills/x.json",
+                                             atomically: true, encoding: .utf8)
+    let items = Doctor.run(home: home)
+    #expect(items.contains { $0.level == .fail && $0.what == "config.json" })
+    #expect(items.contains { $0.level == .fail && $0.what == "providers.json" })
+    #expect(items.contains { $0.level == .warn && $0.what == "skills" })
+    // Sandbox off is a healthy default.
+    #expect(items.contains { $0.what == "sandbox-runtime" && $0.level == .ok })
 }

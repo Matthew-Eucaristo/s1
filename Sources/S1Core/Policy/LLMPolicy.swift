@@ -501,13 +501,19 @@ public struct LLMReasoner: Reasoner {
 
     static func userPrompt(observation: Snapshot, goal: String, history: [StepRecord],
                            reason: String, conversation: [Conversation.Turn] = [],
+                           compacted: String? = nil,
                            memory: [String] = []) -> String {
         let remembered = memory.isEmpty ? "" : "What the user asked you to remember:\n"
             + memory.map { "- \($0)" }.joined(separator: "\n") + "\n\n"
         let earlier = conversation.isEmpty ? "" : "Earlier in this conversation:\n"
             + conversation.map { "- \($0.goal) → \($0.outcome)" }.joined(separator: "\n") + "\n\n"
+        // Sliding-window compaction: when turns get evicted from the char
+        // budget, their digest is shown here instead of vanishing.
+        let older = compacted.map {
+            "Older turns, compacted: \($0)\n\n"
+        } ?? ""
         return """
-        \(remembered)\(earlier)Goal: \(goal)
+        \(remembered)\(earlier)\(older)Goal: \(goal)
         System 1 was unsure: \(reason)
 
         \(LLMDecisionCodec.historyText(history))
@@ -517,11 +523,12 @@ public struct LLMReasoner: Reasoner {
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord],
                        reason: String) async throws -> Decision {
+        let ctx = Conversation.shared.recentContext()
         let reply = try await client.chat([
             ChatMessage(role: "system", content: Self.systemPrompt),
             ChatMessage(role: "user", content: Self.userPrompt(
                 observation: observation, goal: goal, history: history, reason: reason,
-                conversation: Conversation.shared.recent(),
+                conversation: ctx.turns, compacted: ctx.summary,
                 memory: Memory.enabled() ? Memory.recent() : [])),
         ], maxTokens: endpointIsLocal ? 1024 : 2048)
         var d = LLMDecisionCodec.parse(reply)
