@@ -152,6 +152,7 @@ public struct ChatClient: Sendable {
             UsageLog.append(UsageRecord(role: role, host: host, model: endpoint.model, served: served,
                 input: counts.input, output: counts.output, cached: counts.cached,
                 cacheMiss: counts.cacheMiss, reasoning: counts.reasoning,
+                cacheWrite: counts.cacheWrite, cost: counts.cost,
                 ms: Int(Date().timeIntervalSince(started) * 1000), ok: ok,
                 error: error.map(UsageLog.scrub)))
         }
@@ -267,8 +268,15 @@ public enum WebSearch {
             "model": endpoint.model, "instructions": instructions, "input": query,
             "tools": [["type": "web_search"]], "max_output_tokens": 900,
         ] as [String: Any])
+        let started = Date()
         let (data, resp) = try await ChatClient.session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let usage = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["usage"] as? [String: Any]
+        let c = UsageLog.counts(fromUsage: usage)
+        UsageLog.append(UsageRecord(role: "search", host: url.host ?? "", model: endpoint.model,
+            input: c.input, output: c.output, cached: c.cached, reasoning: c.reasoning,
+            ms: Int(Date().timeIntervalSince(started) * 1000), ok: code == 200,
+            error: code == 200 ? nil : "HTTP \(code)"))
         guard code == 200 else {
             throw S1Error.aborted("web search HTTP \(code): \(String(decoding: data.prefix(200), as: UTF8.self))")
         }

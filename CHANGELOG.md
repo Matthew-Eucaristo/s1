@@ -3,6 +3,20 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.20] - 2026-10-07
+
+### Added: Settings → Usage
+- Its own tab: 24 hours / 7 days / 30 days; tiles for spend, calls, tokens and
+  cache (read %, reads, writes); a chart by hour or day, stacked by role, for
+  cost, tokens or calls; and a per-model table with input, cached, cache
+  writes, output, latency, failures and cost.
+- **Honest prices.** Billed (the provider reported it; OpenRouter `usage.cost`),
+  Est. (tokens × the public list price from OpenRouter's catalog, refreshed at
+  most daily), In plan (OpenCode Go), Free (local and `:free` models), or "—".
+- s1 now records cache-write tokens and provider-reported cost, and logs
+  OpenAI web-search calls. `s1 usage` shows cache writes and cost too; older
+  role names in the log are merged into Judge and Reasoner.
+
 ## [0.3.19] - 2026-10-07
 
 ### Added: web search, the provider's own way

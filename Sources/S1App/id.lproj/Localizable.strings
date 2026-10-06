@@ -219,9 +219,6 @@
 "As %@" = "Sebagai %@";
 "Starting…" = "Memulai…";
 "Failed: %@" = "Gagal: %@";
-"No model calls yet." = "Belum ada panggilan model.";
-"Usage · Last 30 Days" = "Pemakaian · 30 Hari Terakhir";
-"Token counts as each provider reports them. Full log: `s1 usage`." = "Jumlah token sesuai laporan tiap penyedia. Log lengkap: `s1 usage`.";
 
 "Judge (System 1)" = "Juri (System 1)";
 "Reasoner (System 2)" = "Reasoner (System 2)";
@@ -374,3 +371,23 @@
 "Uses OpenRouter's web search (billed per search)." = "Memakai pencarian web OpenRouter (ditagih per pencarian).";
 "Your Reasoner's provider has no web search, so answers about recent events may be out of date." = "Provider Reasoner-mu tidak punya pencarian web, jadi jawaban soal kejadian terbaru mungkin sudah usang.";
 "For news, prices, weather and anything recent. Each search shows as a step. Models that search by themselves are used as they are; OpenAI and OpenRouter add their own search tool." = "Untuk berita, harga, cuaca, dan hal terbaru. Setiap pencarian tampil sebagai langkah. Model yang bisa mencari sendiri dipakai apa adanya; OpenAI dan OpenRouter memakai alat pencarian mereka.";
+"Usage" = "Pemakaian";
+"24 Hours" = "24 Jam";
+"7 Days" = "7 Hari";
+"30 Days" = "30 Hari";
+"Cost" = "Biaya";
+"Tokens" = "Token";
+"Calls" = "Panggilan";
+"Spent" = "Terpakai";
+"Cache" = "Cache";
+"By hour" = "Per jam";
+"By day" = "Per hari";
+"By model" = "Per model";
+"No model calls in this period." = "Tidak ada panggilan model di periode ini.";
+"Loading…" = "Memuat…";
+"Web search" = "Pencarian web";
+"In plan" = "Termasuk paket";
+"Free" = "Gratis";
+"Billed" = "Ditagih";
+"Est." = "Perk.";
+"Billed: the provider reported the charge. Est.: tokens × the public list price (OpenRouter's catalog, refreshed daily). Plan: a subscription, nothing per call. Local and :free models cost nothing. Full log: `s1 usage`." = "Ditagih: provider melaporkan biayanya. Perk.: token × harga publik (katalog OpenRouter, diperbarui harian). Paket: langganan, tidak ada biaya per panggilan. Model lokal dan :free gratis. Log lengkap: `s1 usage`.";

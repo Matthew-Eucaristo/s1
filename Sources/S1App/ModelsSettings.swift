@@ -71,7 +71,6 @@ struct ModelsSettings: View {
                 FootNote("Keys live in your login Keychain and are never shown again. The same setup drives the `s1` command line.")
             }
 
-            UsageSection()
         }
         .formStyle(.grouped)
         .sheet(isPresented: $adding) { AddProviderSheet(model: model) }
@@ -630,43 +629,3 @@ private struct ModelLine: View {
     }
 }
 
-/// Metered calls per role/model — numbers only, from ~/.s1/usage.jsonl.
-@available(macOS 26, *)
-private struct UsageSection: View {
-    @State private var rows: [UsageLog.Summary] = []
-
-    var body: some View {
-        Section {
-            if rows.isEmpty {
-                Text("No model calls yet.").foregroundStyle(.secondary)
-            }
-            ForEach(rows, id: \.self) { r in
-                LabeledContent {
-                    Text(Self.line(r)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                } label: {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(r.model).lineLimit(1)
-                        Text(ModelRole(rawValue: r.role).map { $0.short } ?? r.role)
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        } header: {
-            Text("Usage · Last 30 Days")
-        } footer: {
-            FootNote("Token counts as each provider reports them. Full log: `s1 usage`.")
-        }
-        .task {
-            rows = await Task.detached {
-                UsageLog.summarize(UsageLog.load(since: Date().addingTimeInterval(-30 * 86_400)))
-            }.value
-        }
-    }
-
-    static func line(_ r: UsageLog.Summary) -> String {
-        var s = "\(r.calls) calls · \(r.input.formatted(.number.notation(.compactName))) in · \(r.output.formatted(.number.notation(.compactName))) out"
-        if let h = r.cacheHitRate, r.cached > 0 { s += " · \(Int(h * 100))% cached" }
-        if r.failures > 0 { s += " · \(r.failures) failed" }
-        return s + " · \(r.avgMs) ms"
-    }
-}

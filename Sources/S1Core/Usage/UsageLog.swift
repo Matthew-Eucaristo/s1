@@ -14,21 +14,28 @@ public struct UsageRecord: Codable, Sendable, Equatable {
     public var cached: Int?          // prompt tokens served from cache
     public var cacheMiss: Int?
     public var reasoning: Int?
+    /// Prompt tokens written to the provider's cache (billed at a write rate).
+    public var cacheWrite: Int?
+    /// USD the provider itself reported for this call (OpenRouter).
+    public var cost: Double?
     public var ms: Int
     public var ok: Bool
     public var error: String?
 
     public init(ts: Date = Date(), role: String, host: String, model: String, served: String? = nil,
                 input: Int? = nil, output: Int? = nil, cached: Int? = nil, cacheMiss: Int? = nil,
-                reasoning: Int? = nil, ms: Int, ok: Bool, error: String? = nil) {
+                reasoning: Int? = nil, cacheWrite: Int? = nil, cost: Double? = nil,
+                ms: Int, ok: Bool, error: String? = nil) {
         self.ts = ts; self.role = role; self.host = host; self.model = model; self.served = served
         self.input = input; self.output = output; self.cached = cached; self.cacheMiss = cacheMiss
-        self.reasoning = reasoning; self.ms = ms; self.ok = ok; self.error = error
+        self.reasoning = reasoning; self.cacheWrite = cacheWrite; self.cost = cost
+        self.ms = ms; self.ok = ok; self.error = error
     }
 }
 
 public struct TokenCounts: Sendable, Equatable {
     public var input: Int?, output: Int?, cached: Int?, cacheMiss: Int?, reasoning: Int?
+    public var cacheWrite: Int? = nil, cost: Double? = nil
 }
 
 public enum UsageLog {
@@ -84,7 +91,9 @@ public enum UsageLog {
             cached: int(u["prompt_cache_hit_tokens"]) ?? int(pd?["cached_tokens"])
                 ?? int(id?["cached_tokens"]) ?? int(u["cache_read_input_tokens"]),
             cacheMiss: int(u["prompt_cache_miss_tokens"]),
-            reasoning: int(cd?["reasoning_tokens"]) ?? int(od?["reasoning_tokens"]))
+            reasoning: int(cd?["reasoning_tokens"]) ?? int(od?["reasoning_tokens"]),
+            cacheWrite: int(pd?["cache_write_tokens"]) ?? int(u["cache_creation_input_tokens"]),
+            cost: (u["cost"] as? NSNumber)?.doubleValue)
     }
 
     public struct Summary: Sendable, Hashable {

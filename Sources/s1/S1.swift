@@ -990,7 +990,7 @@ struct DecideCmd: AsyncParsableCommand {
 
 struct UsageCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "usage",
-        abstract: "Model usage per role/model: calls, tokens, prompt-cache hits (from ~/.s1/usage.jsonl).")
+        abstract: "Model usage per role/model: calls, tokens, cache reads/writes and cost (from ~/.s1/usage.jsonl).")
     @Option(help: "Only the last N days.") var days: Int = 30
     @Flag(help: "Print raw JSONL records instead of the summary.") var raw = false
 
@@ -1002,14 +1002,26 @@ struct UsageCmd: AsyncParsableCommand {
             return
         }
         guard !recs.isEmpty else { print("no model calls logged in the last \(days) days"); return }
-        print("role          model                         calls  fail  input     output   cached  hit%  avg ms")
-        for s in UsageLog.summarize(recs) {
-            let hit = s.cacheHitRate.map { String(format: "%4.0f", $0 * 100) } ?? "   -"
-            print(String(format: "%@ %@ %5d %5d %9d %9d %8d  %@ %7d",
-                         s.role.padding(toLength: 13, withPad: " ", startingAt: 0),
-                         s.model.padding(toLength: 29, withPad: " ", startingAt: 0),
-                         s.calls, s.failures, s.input, s.output, s.cached, hit, s.avgMs))
+        await Pricing.refreshIfStale()
+        let rep = UsageReport.build(recs, prices: Pricing.table(), bucket: .day)
+        func usd(_ r: UsageReport.Row) -> String {
+            switch r.billing {
+            case .plan: "plan"
+            case .free: "free"
+            case .unknown: "-"
+            case .billed: String(format: "$%.4f", r.usd)
+            case .estimated: String(format: "~$%.4f", r.usd)
+            }
         }
+        print("role        model                         calls fail     input  cached  c.write   output      cost  avg ms")
+        for r in rep.rows {
+            print(String(format: "%@ %@ %5d %4d %9d %7d %8d %8d %9@ %7d",
+                         r.role.padding(toLength: 11, withPad: " ", startingAt: 0),
+                         r.model.padding(toLength: 29, withPad: " ", startingAt: 0),
+                         r.calls, r.failures, r.input, r.cached, r.cacheWrite, r.output, usd(r), r.avgMs))
+        }
+        print(String(format: "spent $%.4f (billed $%.4f, estimated $%.4f) · %d calls in plan · %d free · %d unpriced",
+                     rep.spentUSD, rep.billedUSD, rep.estimatedUSD, rep.planCalls, rep.freeCalls, rep.unknownCalls))
         print("log: \(UsageLog.path)")
     }
 }

@@ -2814,3 +2814,33 @@ private struct ChoosingJudge: DecisionJudge {
         #expect(lines.contains(web ? "web results: Sunny" : "web search isn't available"))
     }
 }
+
+@Test func usageIsPricedHonestly() throws {
+    let list = #"{"data":[{"id":"openai/gpt-5-mini","pricing":{"prompt":"0.00000025","completion":"0.000002","input_cache_read":"0.000000025"}}]}"#
+    let prices = try #require(Pricing.parse(Data(list.utf8)))
+    let t = Date()
+    let recs = [
+        UsageRecord(ts: t, role: "reasoner", host: "api.openai.com", model: "gpt-5-mini",
+                    input: 1_000_000, output: 100_000, cached: 400_000, ms: 900, ok: true),
+        UsageRecord(ts: t, role: "reasoner", host: "openrouter.ai", model: "google/gemini-2.5-flash",
+                    input: 10, output: 5, cost: 0.0123, ms: 500, ok: true),
+        UsageRecord(ts: t, role: "s2", host: "opencode.ai", model: "deepseek-v4.1-flash", input: 5, output: 5, ms: 1, ok: true),
+        UsageRecord(ts: t, role: "judge", host: "localhost", model: "clef-flash", input: 5, output: 0, ms: 1, ok: true),
+        UsageRecord(ts: t, role: "judge", host: "api.typesafe.ai", model: "jev-latest", input: 5, output: 0, ms: 1, ok: false),
+    ]
+    // 600k fresh × $0.25/M + 400k cached × $0.025/M + 100k out × $2/M = 0.15 + 0.01 + 0.2
+    let est = Pricing.cost(recs[0], table: prices)
+    #expect(est.billing == .estimated && abs(est.usd - 0.36) < 1e-9)
+    #expect(Pricing.cost(recs[1], table: prices) == (0.0123, .billed))
+    #expect(Pricing.cost(recs[2], table: prices).billing == .plan)
+    #expect(Pricing.cost(recs[3], table: prices).billing == .free)
+    #expect(Pricing.cost(recs[4], table: prices).billing == .unknown)
+    let rep = UsageReport.build(recs, prices: prices, bucket: .day)
+    #expect(abs(rep.spentUSD - 0.3723) < 1e-9 && rep.planCalls == 1 && rep.freeCalls == 1 && rep.unknownCalls == 1)
+    #expect(rep.failures == 1 && rep.cached == 400_000)
+    #expect(rep.rows.first?.model == "gpt-5-mini")              // most expensive first
+    #expect(rep.rows.contains { $0.role == "reasoner" && $0.model == "deepseek-v4.1-flash" })   // "s2" merged
+    // OpenRouter-reported cost and cache writes are read from the usage block.
+    let c = UsageLog.counts(fromUsage: ["prompt_tokens": 10, "cost": 0.002, "prompt_tokens_details": ["cache_write_tokens": 7]])
+    #expect(c.cost == 0.002 && c.cacheWrite == 7)
+}

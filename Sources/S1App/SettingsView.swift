@@ -11,6 +11,7 @@ struct SettingsView: View {
         TabView(selection: $model.settingsTab) {
             Tab("General", systemImage: "gearshape", value: "general") { GeneralSettings(model: model) }
             Tab("Models", systemImage: "cpu", value: "models") { ModelsSettings(model: model) }
+            Tab("Usage", systemImage: "chart.bar.xaxis", value: "usage") { UsageSettings() }
             Tab("Voice", systemImage: "waveform", value: "voice") { VoiceSettings(model: model) }
             Tab("Snippets", systemImage: "text.badge.plus", value: "snippets") { SnippetSettings() }
             Tab("Permissions", systemImage: "hand.raised", value: "permissions") { PermissionSettings(model: model) }
