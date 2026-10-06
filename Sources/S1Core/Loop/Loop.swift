@@ -217,8 +217,9 @@ public struct AgentLoop {
         var esc: StepRecord.Escalation?
 
         let lowConf = decision.confidence < config.confidenceThreshold || decision.action == nil
-        if lowConf, case .done = decision.action { /* done is always final */ }
-        else if lowConf {
+        // A "done" the Judge doubts is just another unsure step: the Reasoner
+        // checks what actually happened and finishes, retries, or explains.
+        if lowConf {
             if let s2 {
                 var why = forceS2 ?? (decision.action == nil
                     ? "s1 abstained (conf \(decision.confidence)): \(decision.rationale)"

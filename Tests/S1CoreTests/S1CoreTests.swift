@@ -525,7 +525,9 @@ private struct StubReasoner: Reasoner {
     // "teks edit" is what Dictation returns for TextEdit
     #expect(AppResolver.similarity("teks edit", "TextEdit") >= 0.5)
     #expect(AppResolver.similarity("teks edit", "Photo Booth") < 0.5)
-    #expect(AppResolver.similarity("sistem seting", "System Settings") >= 0.5)
+    #expect(AppResolver.similarity("sistem seting", "System Settings") >= AppResolver.cutoff)
+    #expect(AppResolver.similarity("teks edit", "TextEdit") >= AppResolver.cutoff)
+    #expect(AppResolver.similarity("Minecraft Launcher", "JavaLauncher") < AppResolver.cutoff)
 }
 
 @Test func llmCodecSalvagesTruncatedReply() {
@@ -2629,4 +2631,28 @@ private struct ChoosingJudge: DecisionJudge {
     if case .done(let summary)? = d?.action {
         #expect(summary == #"I typed "hello from s1" into it. Then I stopped."#)
     } else { Issue.record("expected done, got \(String(describing: d?.action))") }
+}
+
+@Test func doubtedDoneGoesToTheReasoner() async throws {
+    // The Judge says "not done": the Reasoner gets the step instead of a false Done.
+    struct NotDone: DecisionJudge {
+        var model: String { "nd" }
+        func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult {
+            DecisionResult(answers: ["advances": DecisionAnswer(type: "noul", noul: 0.01)])
+        }
+    }
+    struct Finisher: Reasoner {
+        var name: String { "fin" }
+        func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+            Decision(action: .done(summary: "That app isn't installed."), confidence: 0.9, rationale: reason)
+        }
+    }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate(), s2: Finisher())
+    let policy = JudgedPolicy(inner: AXPolicy(), judge: NotDone(), capture: { nil })
+    let report = try await loop.run(goal: "type hello", policy: policy, logger: logger)
+    #expect(report.escalations >= 1)
+    #expect(report.summary == "That app isn't installed.")
 }

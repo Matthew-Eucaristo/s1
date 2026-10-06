@@ -3,6 +3,16 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.11] - 2026-10-06
+
+### Fixed
+- **The Judge's "not done" now counts.** "Done" used to be final even when
+  the Judge doubted it; a doubted "done" now goes to the Reasoner, which
+  finishes, retries or explains.
+- **Fuzzy app matching is stricter** (0.49 → 0.55): "Minecraft Launcher" no
+  longer opens JavaLauncher on the shared "launcher" letters. Dictation
+  slips like "teks edit" → TextEdit still resolve.
+
 ## [0.3.10] - 2026-10-06
 
 ### Fixed

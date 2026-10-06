@@ -465,6 +465,10 @@ public struct CGEventActuator: Actuator {
 /// fuzzy (bigram similarity) so dictation mangles like "teks edit" still
 /// find TextEdit.
 enum AppResolver {
+    /// Fuzzy matches must clear this. 0.49 let "Minecraft Launcher" open
+    /// JavaLauncher on the shared "launcher" letters alone.
+    static let cutoff = 0.55
+
     static func resolve(_ name: String) -> URL? {
         let ws = NSWorkspace.shared
         if let url = ws.urlForApplication(withBundleIdentifier: name) ??
@@ -480,7 +484,7 @@ enum AppResolver {
             for n in names where n.hasSuffix(".app") {
                 let stem = String(n.dropLast(4))
                 let score = similarity(name, stem)
-                if score > (best?.1 ?? 0.49) {
+                if score > (best?.1 ?? Self.cutoff) {
                     best = (URL(fileURLWithPath: "\(dir)/\(n)"), score)
                 }
             }
@@ -489,7 +493,7 @@ enum AppResolver {
         // (e.g. ~/bin, per-user installs) — same fuzzy gate applies.
         for url in spotlightApps() {
             let score = similarity(name, url.deletingPathExtension().lastPathComponent)
-            if score > (best?.1 ?? 0.49) { best = (url, score) }
+            if score > (best?.1 ?? Self.cutoff) { best = (url, score) }
         }
         return best?.0
     }
