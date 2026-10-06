@@ -3,6 +3,13 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.4] - 2026-10-06
+
+### Fixed
+- "Take a screenshot" without Screen Recording ended as "Stopped." with no
+  step logged (the capture error was mistaken for a Stop). It now hands back
+  to you with the reason and how to turn Screen Recording on.
+
 ## [0.3.3] - 2026-10-06
 
 ### Fixed

@@ -289,11 +289,16 @@ public struct AgentLoop {
         // The re-observe lands the image via the sink before the actuator's
         // no-op outcome is recorded, so the record reads "captured", not
         // "we did something unspecified".
+        // A refused capture (no Screen Recording grant) hands back to the user
+        // with the reason. Thrown, it would read as a Stop.
+        var captureError: String?
         if case .captureScreenshot = action {
-            obs = try await perceiver.observe(wantScreenshot: true)
+            do { obs = try await perceiver.observe(wantScreenshot: true) }
+            catch { captureError = error.localizedDescription }
         }
 
         var verdict = gate.evaluate(action)
+        if let captureError { verdict = .needsHuman(reason: captureError) }
         // Secure-field guard: a password box must never be filled by an
         // agent — not by raw keystrokes (focus check) nor a targeted AX
         // write (ref's role check). Escalates to a human, same as the

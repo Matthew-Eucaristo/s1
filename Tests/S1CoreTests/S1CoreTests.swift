@@ -2502,3 +2502,16 @@ private struct NoScreenPerceiver: Perceiver {
     #expect(obs.screenshotPath == nil)
     await #expect(throws: S1Error.self) { try await NoScreenPerceiver().observe(wantScreenshot: true) }
 }
+
+@Test func refusedScreenshotHandsBackWithReason() async throws {
+    // An explicit screenshot without Screen Recording must say why, not read as a Stop.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NoScreenPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate())
+    let plan = ScriptedPolicy(steps: [.init(action: .captureScreenshot(reason: "asked"), confidence: 1.0)])
+    let report = try await loop.run(goal: "take a screenshot", policy: plan, logger: logger)
+    #expect(report.status == .needsHuman)
+    let lines = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+    #expect(lines.contains("declined"))
+}
