@@ -61,6 +61,12 @@
 "About" = "Tentang";
 
 // ---- Settings: General ----
+"Language" = "Bahasa";
+"App language" = "Bahasa app";
+"System default" = "Bawaan sistem";
+"Takes effect on restart" = "Berlaku setelah mulai ulang";
+"Restart s1" = "Mulai ulang s1";
+"Menus and labels in the app — follows macOS by default. What s1 listens for is under Voice → Language." = "Menu dan label di app — mengikuti macOS secara bawaan. Bahasa yang didengar s1 ada di Suara → Bahasa.";
 "System 1" = "Sistem 1";
 "Brain" = "Otak";
 "Auto (grammar + judge model)" = "Otomatis (tata bahasa + model juri)";

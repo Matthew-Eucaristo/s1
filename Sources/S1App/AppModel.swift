@@ -38,6 +38,57 @@ final class AppModel {
     /// Hard steps always escalate to S2 — the safety design, not a toggle.
     /// Left as a var so model-assignment helpers can set it harmlessly.
 
+    /// UI language: "system" follows macOS (the default); anything else
+    /// writes an AppleLanguages override in the app's own defaults, which
+    /// resolves at launch. Changing it asks for a restart.
+    var appLanguage = AppModel.launchLanguagePref() {
+        didSet {
+            if appLanguage == "system" {
+                UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+            } else {
+                UserDefaults.standard.set([appLanguage, "en"], forKey: "AppleLanguages")
+            }
+            languageNeedsRelaunch = appLanguage != launchLanguage
+        }
+    }
+    var languageNeedsRelaunch = false
+    /// What the override was at launch — the "restart needed" flag compares
+    /// against this so flipping back clears it.
+    private let launchLanguage = AppModel.launchLanguagePref()
+    /// The app-language choice at launch: our pref, else a manual
+    /// `defaults write … AppleLanguages` override normalized to a language
+    /// code the bundle ships, else "system". (persistentDomain, not
+    /// stringArray — the standard domain merges NSGlobalDomain's own
+    /// AppleLanguages and would look like an override every launch.)
+    private static func launchLanguagePref() -> String {
+        if let l = UserDefaults.standard.string(forKey: "appLanguage") { return l }
+        let bid = Bundle.main.bundleIdentifier ?? ""
+        let domain = UserDefaults.standard.persistentDomain(forName: bid) ?? [:]
+        guard let first = (domain["AppleLanguages"] as? [String])?.first,
+              let code = first.split(separator: "-").first,
+              Bundle.main.localizations.contains(String(code))
+        else { return "system" }
+        return String(code)
+    }
+    /// Languages the bundle actually ships — en (development region) plus
+    /// every *.lproj a contributor adds, so new translations appear here
+    /// with no code change. Names render in the current language.
+    var appLanguageOptions: [(id: String, name: String)] {
+        Bundle.main.localizations
+            .filter { $0 != "Base" }
+            .sorted()
+            .map { ($0, Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
+    }
+    /// A detached shell waits for this process to exit, then reopens the
+    /// bundle — the serve.pid owner is gone before the new instance binds.
+    func relaunchApp() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 0.6; open \"\(Bundle.main.bundlePath)\""]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+
     var speakReply = true { didSet { rearmServe() } }
     /// Voice interrupt (barge-in): talk over a run or the reply to stop it.
     var voiceInterrupt = true { didSet { rearmServe() } }
@@ -247,6 +298,15 @@ final class AppModel {
 
     init() {
         s2Status = ModelPullStatus { Endpoints.s2() }
+        // The UI-language override resolves through AppleLanguages —
+        // normalize here (before the first view reads a string) so the
+        // picker and actual Bundle lookups never disagree.
+        if appLanguage == "system" {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.set([appLanguage, "en"], forKey: "AppleLanguages")
+            UserDefaults.standard.set(appLanguage, forKey: "appLanguage")
+        }
         // ~/.s1/config.json seeds the app too — model choices made in the app
         // persist, and the CLI picks them up (and vice versa).
         let cfg = S1Config.load()

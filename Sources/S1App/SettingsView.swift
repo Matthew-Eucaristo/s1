@@ -29,6 +29,26 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
+                Picker("App language", selection: $model.appLanguage) {
+                    Text("System default").tag("system")
+                    Divider()
+                    ForEach(model.appLanguageOptions, id: \.id) { o in
+                        Text(o.name).tag(o.id)
+                    }
+                }
+                if model.languageNeedsRelaunch {
+                    HStack {
+                        Text("Takes effect on restart")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Restart s1") { model.relaunchApp() }
+                    }
+                }
+            } header: {
+                Text("Language")
+            } footer: {
+                Text("Menus and labels in the app — follows macOS by default. What s1 listens for is under Voice → Language.")
+            }
+            Section {
                 Picker("Brain", selection: $model.brain) {
                     ForEach(AppModel.Brain.allCases) { b in Text(b.title).tag(b) }
                 }
