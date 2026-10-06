@@ -478,6 +478,14 @@ private struct EmptyConversation: View {
             : ["open Notes", "open TextEdit then type hello", "take a screenshot", "remember that my editor is Zed"]
     }
 
+    /// Recent commands first, then examples; one chip per command.
+    private var suggestions: [String] {
+        var seen = Set<String>()
+        return (model.recentGoals.prefix(3) + examples)
+            .filter { seen.insert($0.lowercased().trimmingCharacters(in: .punctuationCharacters)).inserted }
+            .prefix(6).map { $0 }
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             Image(nsImage: NSApp.applicationIconImage)
@@ -491,7 +499,7 @@ private struct EmptyConversation: View {
                     .foregroundStyle(.secondary)
             }
             FlowLayout(spacing: 8) {
-                ForEach(Array((model.recentGoals.prefix(3) + examples).prefix(6)), id: \.self) { ex in
+                ForEach(suggestions, id: \.self) { ex in
                     Button(ex) {
                         model.goal = ex
                         focusComposer()
