@@ -33,19 +33,22 @@ recorded — nothing runs on your screen that a brain wasn't sure about.
 
 ## Swapping without code
 
-`~/.s1/config.json` (or env vars `S1_VLM_*` / `S1_S2_*`, or CLI flags):
+Models are picked per **role** from connected **providers**: Settings →
+Models in the app, or the CLI:
 
-```json
-{
-  "vlm": { "base": "http://localhost:11434/v1", "model": "gemma3:4b" },
-  "s2":  { "base": "https://api.openai.com/v1", "model": "gpt-5", "key": "sk-…" }
-}
+```bash
+s1 connect ollama                          # or groq, openrouter, a custom server…
+s1 use judge ollama/clef-flash             # System 1's decision model
+s1 use reasoner openrouter/anthropic/claude-sonnet-4.5
 ```
 
-Any OpenAI-compatible `/chat/completions` endpoint works — Ollama, LM
-Studio, vLLM, MLX server, Groq, OpenAI, or your own shim. Point S1 at a
-GUI-tuned model (Fara1.5, GUI-Owl, UI-TARS, Holo) and S2 at a reasoner;
-they don't have to be the same vendor, model, or machine.
+Both write `~/.s1/config.json` (`providers` + `models`); `S1_<ROLE>=provider/model`
+overrides a role for one command. Any OpenAI-compatible `/chat/completions`
+server works as a custom provider: Ollama, LM Studio, vLLM, MLX, or your own
+shim. Seeing the screen follows the models: a judge that reads images gets
+screenshots, otherwise a reasoner that reads images gets one per escalation.
+`Brain` (Sources/S1Core/Policy/Brain.swift) is the one place roles become a
+policy; the app, `s1 run` and `s1 serve` all build their agent there.
 
 ## Writing a new brain
 
@@ -69,7 +72,6 @@ say why in the PR — minimal deps is a hard rule.
 | Type      | Implementation | Notes                                    |
 | --------- | -------------- | ---------------------------------------- |
 | `Policy`  | `AXPolicy`     | Zero-model intents — the fast path       |
-| `Policy`  | `VLMPolicy`    | OpenAI-compatible VLM + intent cursor    |
 | `Policy`  | `ScriptedPolicy` | Replay/test plans from JSON            |
 | `Policy`  | `DummyPolicy`  | Trivial — the smallest possible example  |
-| `Reasoner`| `LLMReasoner`  | OpenAI-compatible chat, escalation style |
+| `Reasoner`| `LLMReasoner`  | OpenAI-compatible chat, escalation style; attaches a screenshot when `vision` |

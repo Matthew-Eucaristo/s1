@@ -241,8 +241,10 @@ public enum S1Runner {
         if let meta = MetaCommand.parse(goal) {
             let reply = meta.perform()
             DebugTrace.$runDir.withValue(logger.runDir) { DebugTrace.event("meta", ["kind": meta.kind]) }
-            return (RunReport(status: .done, steps: 0, runDir: logger.runDir.path, escalations: 0,
-                              summary: reply), logger)
+            let report = RunReport(status: .done, steps: 0, runDir: logger.runDir.path, escalations: 0,
+                                   summary: reply)
+            await logger.finish(report)
+            return (report, logger)
         }
         let skill = Skills.match(goal, in: Skills.load())
         let loopGoal = skill.map { "\($0.name): " + $0.steps.joined(separator: " → ") } ?? goal
@@ -253,6 +255,7 @@ public enum S1Runner {
             try await loop.run(goal: loopGoal, policy: policy, logger: logger,
                                plan: skill?.steps ?? [], onPhase: onPhase)
         }
+        await logger.finish(report)
         Conversation.shared.record(goal: goal, outcome: report.answer ?? report.status.rawValue,
                                    steps: report.subgoals, ok: report.status == .done)
         DebugTrace.$runDir.withValue(logger.runDir) {

@@ -117,16 +117,19 @@ public struct SystemOneClient: DecisionJudge {
     public var model: String { endpoint.model }
     /// Clef / Clef Flash take base64 `images` (Ollama + Workers AI); Jev,
     /// nimble and tev1 are text-only.
-    public var acceptsImages: Bool { Self.acceptsImages(model: endpoint.model) }
+    /// Screenshots go along with each question — set from the catalog and
+    /// the "share the screen" switch, else guessed from the model name.
+    public var acceptsImages: Bool
     /// Clef / Clef Flash (Cloudflare) and Liquid d1 accept `images`.
     public static func acceptsImages(model: String) -> Bool {
         let m = model.lowercased()
         return m.contains("clef") || m == "d1" || m.hasPrefix("d1:") || m.hasPrefix("d1-")
     }
 
-    public init(endpoint: Endpoint, timeout: TimeInterval = 30) {
+    public init(endpoint: Endpoint, timeout: TimeInterval = 30, images: Bool? = nil) {
         self.endpoint = endpoint
         self.timeout = timeout
+        self.acceptsImages = images ?? Self.acceptsImages(model: endpoint.model)
     }
 
     /// Where requests go. Accepts a server root (`http://localhost:11434`,
@@ -189,7 +192,7 @@ public struct SystemOneClient: DecisionJudge {
         let started = Date()
         let host = url.host ?? endpoint.baseURL
         func record(_ ok: Bool, _ r: DecisionResult? = nil, error: String? = nil) {
-            UsageLog.append(UsageRecord(role: "s1-decision", host: host, model: endpoint.model,
+            UsageLog.append(UsageRecord(role: "judge", host: host, model: endpoint.model,
                 served: r?.model, input: r?.usage?.input_tokens, output: r?.usage?.output_tokens,
                 ms: Int(Date().timeIntervalSince(started) * 1000), ok: ok,
                 error: error.map(UsageLog.scrub)))
@@ -197,12 +200,12 @@ public struct SystemOneClient: DecisionJudge {
         let data: Data, resp: URLResponse
         do { (data, resp) = try await URLSession.shared.data(for: req) }
         catch {
-            DebugTrace.http(role: "s1-decision", url: url, status: 0, ms: Int(Date().timeIntervalSince(started) * 1000),
+            DebugTrace.http(role: "judge", url: url, status: 0, ms: Int(Date().timeIntervalSince(started) * 1000),
                             request: req.httpBody, response: nil, error: error.localizedDescription)
             record(false, error: error.localizedDescription); throw error
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        DebugTrace.http(role: "s1-decision", url: url, status: code, ms: Int(Date().timeIntervalSince(started) * 1000),
+        DebugTrace.http(role: "judge", url: url, status: code, ms: Int(Date().timeIntervalSince(started) * 1000),
                         request: req.httpBody, response: data)
         guard code == 200 else {
             // Error bodies never carry our key — but keep them short.
@@ -313,7 +316,7 @@ public struct JudgedPolicy: Policy {
         do {
             // Vision judges see the same downscaled frame the VLM would.
             let images = judge.acceptsImages
-                ? observation.screenshotPath.flatMap { VLMPolicy.downscaledJPEG(path: $0) }.map { [$0] } ?? []
+                ? observation.screenshotPath.flatMap { ScreenImage.downscaledJPEG(path: $0) }.map { [$0] } ?? []
                 : []
             let r = try await judge.evaluate(state: state,
                                              questions: isDone ? Self.doneQuestions : Self.questions,
@@ -339,8 +342,9 @@ public extension JudgedPolicy {
     /// Wrap `policy` with the configured decision judge; unchanged when no
     /// decision model is configured.
     static func wrapIfConfigured(_ policy: any Policy,
-                                 endpoint: Endpoint? = Endpoints.decision()) -> any Policy {
+                                 endpoint: Endpoint? = Models.endpoint(.judge),
+                                 images: Bool? = nil) -> any Policy {
         guard let ep = endpoint else { return policy }
-        return JudgedPolicy(inner: policy, judge: SystemOneClient(endpoint: ep))
+        return JudgedPolicy(inner: policy, judge: SystemOneClient(endpoint: ep, images: images))
     }
 }

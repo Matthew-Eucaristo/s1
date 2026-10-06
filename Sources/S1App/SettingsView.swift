@@ -1,9 +1,8 @@
-import SwiftUI
 import AVFoundation
+import SwiftUI
 import S1Core
 
-/// Standard macOS Settings window (⌘,). The main window stays a command
-/// bar + step feed; every knob lives here, grouped by what it changes.
+/// The standard Settings window (⌘,), grouped by what each pane changes.
 @available(macOS 26, *)
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -11,197 +10,104 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $model.settingsTab) {
             Tab("General", systemImage: "gearshape", value: "general") { GeneralSettings(model: model) }
+            Tab("Models", systemImage: "cpu", value: "models") { ModelsSettings(model: model) }
             Tab("Voice", systemImage: "waveform", value: "voice") { VoiceSettings(model: model) }
-            Tab("Models", systemImage: "cpu", value: "models") { ConnectionsView(model: model) }
             Tab("Snippets", systemImage: "text.badge.plus", value: "snippets") { SnippetSettings() }
             Tab("Permissions", systemImage: "hand.raised", value: "permissions") { PermissionSettings(model: model) }
-            Tab("About", systemImage: "info.circle", value: "about") { AboutSettings() }
+            Tab("Advanced", systemImage: "gearshape.2", value: "advanced") { AdvancedSettings(model: model) }
         }
-        .scenePadding()
-        .frame(width: 620, height: 640)
-        .onAppear { model.refreshModels(); model.refreshPermissions() }
+        .frame(width: 640, height: 600)
+        .onAppear { model.refreshPermissions() }
     }
 }
+
+// MARK: - General
 
 @available(macOS 26, *)
 private struct GeneralSettings: View {
     @Bindable var model: AppModel
+    @State private var confirmClear = false
+
     var body: some View {
         Form {
             Section {
-                Picker("App language", selection: $model.appLanguage) {
-                    Text("System default").tag("system")
-                    Divider()
-                    ForEach(model.appLanguageOptions, id: \.id) { o in
-                        Text(o.name).tag(o.id)
+                Toggle("Open s1 at login", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { _ in model.toggleLoginItem() }))
+                Toggle("Show status under the notch", isOn: $model.notchHUD)
+            } footer: {
+                FootNote("The status pill appears only while s1 listens or works, with a stop button.")
+            }
+
+            Section("Shortcuts") {
+                LabeledContent("Talk to s1") {
+                    HStack(spacing: 8) {
+                        KeyCaps(keys: ["⇧", "⇧"])
+                        Text("or").foregroundStyle(.secondary)
+                        KeyCaps(keys: ["⌃", "⌥", "Space"])
                     }
                 }
+                LabeledContent("Launcher") { KeyCaps(keys: ["⌥", "Space"]) }
+                LabeledContent("Dictate anywhere") { KeyCaps(keys: ["⌃", "⌥", "D"]) }
+            }
+
+            Section {
+                Picker("Language", selection: $model.appLanguage) {
+                    Text("System Default").tag("system")
+                    Divider()
+                    ForEach(model.appLanguageOptions, id: \.id) { o in Text(o.name).tag(o.id) }
+                }
                 if model.languageNeedsRelaunch {
-                    HStack {
-                        Text("Takes effect on restart")
-                            .font(.caption).foregroundStyle(.secondary)
+                    LabeledContent("Takes effect after a restart") {
                         Button("Restart s1") { model.relaunchApp() }
                     }
                 }
             } header: {
-                Text("Language")
+                Text("App Language")
             } footer: {
-                Text("Menus and labels in the app — follows macOS by default. What s1 listens for is under Voice → Language.")
+                FootNote("Menus and labels. The language s1 listens for is under Voice.")
             }
+
             Section {
-                Picker("Brain", selection: $model.brain) {
-                    ForEach(AppModel.Brain.allCases) { b in Text(b.title).tag(b) }
-                }
-                .pickerStyle(.inline)
-            } header: {
-                Text("System 1")
-            } footer: {
-                Text("Auto pairs the instant grammar with the judge model (Models → S1) — the judge can only push a risky step to S2, never act unsafer. AX is the grammar alone: zero model calls. Hard steps always escalate to S2 when it's configured.")
-            }
-            Section("Companion") {
-                Toggle("Launch at login", isOn: Binding(
-                    get: { model.launchAtLogin },
-                    set: { _ in model.toggleLoginItem() }))
-                Toggle("Notch status pill", isOn: $model.notchHUD)
-                LabeledContent("Wake") { Text("⇧⇧  or  ⌃⌥Space  ·  ⌘⇧L in the app").foregroundStyle(.secondary) }
-                LabeledContent("Launcher") { Text("⌥Space").foregroundStyle(.secondary) }
-                LabeledContent("Dictate") { Text("⌃⌥D — hold to talk, or tap; text pastes where you type").foregroundStyle(.secondary) }
-            }
-            Section {
-                Toggle("Remember things I ask you to", isOn: Binding(
+                Toggle("Remember what I ask it to", isOn: Binding(
                     get: { Memory.enabled() },
-                    set: { on in var c = S1Config.load(); c.memory = on ? nil : false; try? c.save() }))
-                HStack {
-                    Button("Open Memory") {
-                        if !FileManager.default.fileExists(atPath: Memory.path.path) { try? Memory.clear() }
-                        NSWorkspace.shared.open(Memory.path)
-                    }
-                    Button("Clear Memory") { try? Memory.clear() }
-                    Spacer()
-                    Button("Open Skills Folder") {
-                        S1Home.ensurePrivate()
-                        try? FileManager.default.createDirectory(at: Skills.dir, withIntermediateDirectories: true)
-                        NSWorkspace.shared.open(Skills.dir)
-                    }
-                }
-            } header: {
-                Text("Memory & skills")
-            } footer: {
-                Text("Say “remember that …” to keep a fact (never passwords or keys), “forget everything” to clear. After something works, say “save that as a skill called morning setup”; saying “morning setup” replays its steps, each through the safety gate. Plain files in ~/.s1 — edit them freely. The current session's history is always shared with S1 and S2.")
-            }
-            Section {
-                Toggle("Use Cua Driver when installed", isOn: Binding(
-                    get: { CuaDriver.enabled() },
-                    set: { on in
-                        var c = S1Config.load(); c.executor = on ? nil : "cgevent"
-                        try? c.save()
-                    }))
-                .disabled(CuaDriver.binary() == nil)
-                if CuaDriver.binary() == nil {
-                    Button(model.cuaInstalling ? "Installing…" : "Install Cua Driver (recommended)") {
-                        Task { await model.installCuaDriver() }
-                    }
-                    .disabled(model.cuaInstalling)
-                    if !model.cuaInstallLog.isEmpty {
-                        Text(model.cuaInstallLog.components(separatedBy: "\n").dropLast().last ?? "")
-                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    set: { on in try? S1Config.update { $0.memory = on ? nil : false } }))
+                LabeledContent("Memory and skills") {
+                    HStack {
+                        Button("Show Memory") {
+                            if !FileManager.default.fileExists(atPath: Memory.path.path) { try? Memory.clear() }
+                            NSWorkspace.shared.open(Memory.path)
+                        }
+                        Button("Show Skills") {
+                            S1Home.ensurePrivate()
+                            try? FileManager.default.createDirectory(at: Skills.dir, withIntermediateDirectories: true)
+                            NSWorkspace.shared.open(Skills.dir)
+                        }
+                        Button("Clear Memory…", role: .destructive) { confirmClear = true }
                     }
                 }
             } header: {
-                Text("Executor")
+                Text("Memory")
             } footer: {
-                if CuaDriver.binary() == nil {
-                    Text("Recommended. Installed with CUA's own installer so typing, keys and app launches run in the background without stealing focus. [cua.ai/docs/libraries/cua-driver](https://cua.ai/docs/libraries/cua-driver)")
-                } else {
-                    Text(CuaDriver.enabled() ? "Cua Driver found. Typing, shortcuts and app launches go through it in the background (no focus stealing); everything else, and any failed Cua call, uses s1's own fast path. The safety gate runs first either way." : "Cua Driver is installed but turned off; s1 uses its own input path.")
-                }
-            }
-            Section {
-                Toggle("Sandbox shell commands", isOn: $model.sandboxSrt)
-                    .disabled(Sandbox.srtBinary() == nil)
-            } header: {
-                Text("Shell sandbox")
-            } footer: {
-                if Sandbox.srtBinary() == nil {
-                    Text("Optional, off by default. Runs shell steps inside Anthropic's sandbox-runtime (Seatbelt + network policy) — install with `npm install -g @anthropic-ai/sandbox-runtime`. Without it this stays off.")
-                } else {
-                    Text("sandbox-runtime found. When on, shell steps run under the policy in ~/.s1/srt-settings.json (edit it to widen or tighten). On any srt error the step fails instead of running unsandboxed.")
-                }
-            }
-            Section {
-                ForEach(configFiles, id: \.0) { name, url, ensure in
-                    Button(name) { ensure(); NSWorkspace.shared.open(url) }
-                }
-                Button("Run checks (s1 doctor)") {
-                    Task {
-                        let items = await Task.detached { Doctor.run() }.value
-                        doctorResult = items.isEmpty
-                            ? "All good — nothing needs attention."
-                            : items.map { "\($0.level == .fail ? "✗" : $0.level == .warn ? "⚠" : "✓") \($0.what)" }
-                                   .joined(separator: "\n")
-                    }
-                }
-                if let r = doctorResult {
-                    Text(r).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-            } header: {
-                Text("Configuration files")
-            } footer: {
-                Text("Every s1 setting lives in a plain file under ~/.s1 — edit them in any editor, then run the checks to validate. `s1 doctor` does the same in a terminal (`--fix` repairs).")
+                FootNote("Say “remember that …” to keep a fact (never passwords or keys). After something works, say “save that as a skill called morning setup” — then just say “morning setup”. Plain files in ~/.s1.")
             }
         }
         .formStyle(.grouped)
-    }
-
-    @State private var doctorResult: String?
-
-    /// Every user-facing file under ~/.s1, in doc order — each with the
-    /// ensure-step that materializes a sane default before opening.
-    private var configFiles: [(String, URL, () -> Void)] {
-        let home = NSHomeDirectory() + "/.s1"
-        let touchJSON: (String) -> Void = { path in
-            if !FileManager.default.fileExists(atPath: path) {
-                try? "{}\n".write(toFile: path, atomically: true, encoding: .utf8)
-            }
+        .confirmationDialog("Clear everything s1 remembers?", isPresented: $confirmClear) {
+            Button("Clear Memory", role: .destructive) { try? Memory.clear() }
+        } message: {
+            Text("Saved skills are kept.")
         }
-        let touchText: (String) -> Void = { path in
-            if !FileManager.default.fileExists(atPath: path) {
-                try? "".write(toFile: path, atomically: true, encoding: .utf8)
-            }
-        }
-        return [
-            ("config.json — models, keys, sandbox",
-             URL(fileURLWithPath: home + "/config.json"),
-             { let c = S1Config.load(); try? c.save() }),
-            ("providers.json — endpoint presets",
-             URL(fileURLWithPath: home + "/providers.json"),
-             { Providers.ensureFile() }),
-            ("convert.json — unit & currency aliases",
-             URL(fileURLWithPath: home + "/convert.json"),
-             { touchJSON(home + "/convert.json") }),
-            ("snippets.json — launcher commands",
-             URL(fileURLWithPath: home + "/snippets.json"),
-             { Snippets.ensureFile() }),
-            ("memory.md — remembered facts",
-             URL(fileURLWithPath: home + "/memory.md"),
-             { touchText(home + "/memory.md") }),
-            ("srt-settings.json — sandbox policy",
-             URL(fileURLWithPath: home + "/srt-settings.json"),
-             { Sandbox.ensureSettingsFile() }),
-        ]
     }
 }
+
+// MARK: - Voice
 
 @available(macOS 26, *)
 private struct VoiceSettings: View {
     @Bindable var model: AppModel
     @State private var newWord = ""
-
-    private func addWord() {
-        model.addVocabularyWord(newWord)
-        newWord = ""
-    }
+    @State private var addingProvider = false
 
     private var voices: [AVSpeechSynthesisVoice] {
         let codes = Set(SpokenLanguage.candidates(for: model.locale).map(SpokenLanguage.code))
@@ -216,125 +122,98 @@ private struct VoiceSettings: View {
                 Picker("Language", selection: $model.locale) {
                     Text("Automatic").tag(SpokenLanguage.auto)
                     Divider()
-                    ForEach(SpokenLanguage.pickerOptions, id: \.id) { o in
-                        Text(o.name).tag(o.id)
+                    ForEach(SpokenLanguage.pickerOptions, id: \.id) { o in Text(o.name).tag(o.id) }
+                }
+                LabeledContent {
+                    RoleMenu(store: model.models, role: .transcribe) { addingProvider = true }
+                } label: {
+                    Text("Recognition")
+                    if let p = model.models.problem(.transcribe) {
+                        Text(p.description).foregroundStyle(.orange)
                     }
                 }
-            } header: {
-                Text("Speech recognition")
-            } footer: {
-                Text(model.locale == SpokenLanguage.auto
-                     ? "On-device. Automatic listens in English and your Mac's language at once and keeps the one it's surest of."
-                     : "On-device. Any language works — commands the built-in grammar can't parse go to S2, which reads them natively.")
-            }
-            Section {
-                Toggle("Interrupt with my voice (barge-in)", isOn: $model.voiceInterrupt)
-                Picker("End-of-speech detection", selection: $model.vadMode) {
-                    Text("Automatic (Apple VAD + energy)").tag("auto")
-                    Text("Energy only (deterministic)").tag("energy")
+                Toggle("Stop when I talk over s1", isOn: $model.voiceInterrupt)
+                Picker("End of speech", selection: $model.vadSensitivity) {
+                    Text("Patient — allows pauses").tag("low")
+                    Text("Balanced").tag("medium")
+                    Text("Quick — ends right away").tag("high")
                 }
-                Picker("End-of-speech sensitivity", selection: $model.vadSensitivity) {
-                    Text("Low — tolerates pauses").tag("low")
-                    Text("Medium").tag("medium")
-                    Text("High — ends the turn fast").tag("high")
+                Picker("Detection", selection: $model.vadMode) {
+                    Text("Automatic").tag("auto")
+                    Text("Volume only").tag("energy")
                 }
             } header: {
                 Text("Listening")
             } footer: {
-                Text("Barge-in listens (energy only, echo-cancelled) while a run or reply is in flight — say anything and it stops, then keep talking for the next command. High sensitivity cuts the turn sooner after your last word.")
+                FootNote(model.models.assignment(.transcribe) == nil
+                     ? "Speech is recognized on this Mac. Automatic listens in English and your Mac's language at once."
+                     : "Live text still runs on this Mac; each finished turn is re-transcribed in the cloud, falling back to on-device on any error.")
             }
+
             Section {
                 ForEach(model.vocabularyList, id: \.self) { w in
                     HStack {
                         Text(w)
                         Spacer()
                         Button { model.removeVocabularyWord(w) } label: {
-                            Image(systemName: "minus.circle")
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("Remove \(w)")
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(w)")
                     }
                 }
                 HStack {
-                    TextField("Add a word or name…", text: $newWord)
+                    TextField("Add a word or name", text: $newWord)
                         .onSubmit(addWord)
                     Button("Add", action: addWord)
                         .disabled(newWord.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: {
-                Text("Custom words")
+                Text("Custom Words")
             } footer: {
-                Text("Names and jargon the recognizer misspells (Warp, JIRA, Eucaristo). s1 also learns automatically: installed app names, your saved skill names, and names in remembered facts — those don't clutter this list.")
+                FootNote("Names the recognizer misspells. s1 already learns your installed apps, skill names and remembered names.")
             }
+
             Section {
-                Menu("Preset") {
-                    ForEach(Providers.presets(role: .stt), id: \.id) { p in
-                        Button(p.note.map { "\(p.label) — \($0)" } ?? p.label) {
-                            model.sttBase = p.base; model.sttModel = p.model
-                        }
-                    }
-                    Divider()
-                    Button("Edit presets (providers.json)…") {
-                        Providers.ensureFile()
-                        NSWorkspace.shared.open(Providers.path)
-                    }
-                }
-                .fixedSize()
-                TextField("Base URL", text: $model.sttBase)
-                TextField("Model (empty = on-device)", text: $model.sttModel)
-                if !model.sttModel.isEmpty {
-                    KeyRow(model: model, role: .stt)
-                    TestRow(model: model, role: .stt,
-                            watch: model.sttBase + "|" + model.sttModel)
-                }
-            } header: {
-                Text("Cloud recognition (optional)")
-            } footer: {
-                Text("Apple still listens on-device (end-of-speech detection, live text). With a model set, each finished turn is re-transcribed in the cloud for accuracy, using your custom words as the spelling hint, and falls back to on-device on any error. Audio leaves the Mac only when this is on.")
-            }
-            Section {
-                Toggle("Speak results", isOn: $model.speakReply)
-                Picker("Voice", selection: $model.ttsVoice) {
-                    Text("Automatic (best installed)").tag("")
-                    Divider()
-                    ForEach(voices, id: \.identifier) { v in
-                        Text("\(v.name) — \(v.language)\(Self.qualityTag(v.quality))").tag(v.identifier)
+                Toggle("Speak replies", isOn: $model.speakReply)
+                LabeledContent {
+                    RoleMenu(store: model.models, role: .speak) { addingProvider = true }
+                } label: {
+                    Text("Voice")
+                    if let p = model.models.problem(.speak) {
+                        Text(p.description).foregroundStyle(.orange)
                     }
                 }
                 .disabled(!model.speakReply)
-                Button("Preview") { model.previewVoice() }
+                if model.models.assignment(.speak) == nil {
+                    Picker("Apple voice", selection: $model.ttsVoice) {
+                        Text("Best installed").tag("")
+                        Divider()
+                        ForEach(voices, id: \.identifier) { v in
+                            Text("\(v.name) — \(v.language)\(Self.qualityTag(v.quality))").tag(v.identifier)
+                        }
+                    }
                     .disabled(!model.speakReply)
-                Menu("Cloud voice") {
-                    ForEach(Providers.presets(role: .tts), id: \.id) { p in
-                        Button(p.note.map { "\(p.label) — \($0)" } ?? p.label) {
-                            model.ttsBase = p.base; model.ttsModel = p.model
-                            if let v = p.voice { model.ttsCloudVoice = v }
-                        }
-                    }
-                    Divider()
-                    Button("Edit presets (providers.json)…") {
-                        Providers.ensureFile()
-                        NSWorkspace.shared.open(Providers.path)
-                    }
+                } else {
+                    TextField("Voice name", text: $model.cloudVoice, prompt: Text("troy"))
+                        .disabled(!model.speakReply)
                 }
-                .fixedSize()
-                .disabled(!model.speakReply)
-                if !model.ttsModel.isEmpty {
-                    TextField("Base URL", text: $model.ttsBase)
-                    TextField("Model", text: $model.ttsModel)
-                    TextField("Voice", text: $model.ttsCloudVoice)
-                    KeyRow(model: model, role: .tts)
-                    TestRow(model: model, role: .tts,
-                            watch: model.ttsBase + "|" + model.ttsModel)
+                LabeledContent("") {
+                    Button("Preview") { model.previewVoice() }.disabled(!model.speakReply)
                 }
             } header: {
-                Text("Speech output")
+                Text("Speaking")
             } footer: {
-                Text("Replies use the language you spoke. For the most natural sound, download a Premium or Enhanced voice in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
+                FootNote("Replies use the language you spoke. For the most natural Apple voice, download a Premium voice in System Settings → Accessibility → Spoken Content.")
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $addingProvider) { AddProviderSheet(model: model) }
+    }
+
+    private func addWord() {
+        model.addVocabularyWord(newWord)
+        newWord = ""
     }
 
     static func qualityTag(_ q: AVSpeechSynthesisVoiceQuality) -> String {
@@ -346,22 +225,32 @@ private struct VoiceSettings: View {
     }
 }
 
+// MARK: - Permissions
+
 @available(macOS 26, *)
 private struct PermissionSettings: View {
     @Bindable var model: AppModel
+
     var body: some View {
         Form {
             Section {
-                PermRow(label: "Accessibility", ok: model.permissions.accessibility, pane: "Privacy_Accessibility")
-                PermRow(label: "Screen Recording", ok: model.permissions.screenRecording, pane: "Privacy_ScreenCapture")
-                PermRow(label: "Microphone", ok: model.permissions.microphone, pane: "Privacy_Microphone")
-                PermRow(label: "Input Monitoring", ok: model.permissions.inputMonitoring, pane: "Privacy_ListenEvent")
-                HStack {
-                    Button("Request / re-check") { model.requestPermissions() }
-                    Button("Fix stuck Accessibility") { model.resetAccessibility() }
+                PermissionRow(title: "Accessibility", detail: "Required — how s1 sees and uses your Mac.",
+                              granted: model.permissions.accessibility, pane: .accessibility)
+                PermissionRow(title: "Input Monitoring", detail: "The ⇧⇧ and ⌃⌥Space shortcuts.",
+                              granted: model.permissions.inputMonitoring, pane: .inputMonitoring)
+                PermissionRow(title: "Microphone", detail: "Voice commands and dictation.",
+                              granted: model.permissions.microphone, pane: .microphone)
+                PermissionRow(title: "Screen Recording", detail: "Screenshots for checking work and vision models.",
+                              granted: model.permissions.screenRecording, pane: .screenRecording)
+            } footer: {
+                FootNote("Only Accessibility is required. Screen Recording applies after s1 restarts.")
+            }
+            Section {
+                LabeledContent("Accessibility is on but s1 still asks") {
+                    Button("Repair") { model.resetAccessibility() }
                 }
             } footer: {
-                Text("Only Accessibility is required. Toggle on but still missing? Fix removes the old build's entry and asks again. Screen Recording is optional (screenshots, vision) and applies on next launch.")
+                FootNote("Each update has a new signature. Repair removes the old entry and asks again.")
             }
         }
         .formStyle(.grouped)
@@ -369,285 +258,254 @@ private struct PermissionSettings: View {
 }
 
 @available(macOS 26, *)
-struct ModelLibrarySection: View {
-    @Bindable var model: AppModel
+struct PermissionRow: View {
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+    let granted: Bool
+    let pane: PermissionPane
+
     var body: some View {
-                Section("Model library") {
-                    if !model.ollamaPresent {
-                        Label("Ollama not installed", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                        Text(ModelPull.installHint)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                    } else {
-                        if !model.installedModels.isEmpty {
-                            ForEach(model.installedModels, id: \.self) { name in
-                                HStack(spacing: 6) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
-                                        .accessibilityHidden(true)
-                                    Text(name).lineLimit(1).truncationMode(.tail)
-                                    Spacer()
-                                    if name == model.s2Model {
-                                        Text("S2").font(.caption.weight(.semibold))
-                                            .foregroundStyle(.purple)
-                                    }
-                                    if name.hasPrefix(model.decisionModel) && !model.decisionModel.isEmpty
-                                        && model.decisionIsLocal {
-                                        Text("judge").font(.caption.weight(.semibold))
-                                            .foregroundStyle(.teal)
-                                    }
-                                    Menu {
-                                        Button("Use as decision judge (S1)") { model.useAsDecision(name) }
-                                        Button("Use as reasoner (S2)") { model.useAsS2(name) }
-                                    } label: {
-                                        Image(systemName: "ellipsis.circle")
-                                            .accessibilityLabel("Assign \(name)")
-                                    }
-                                    .menuStyle(.borderlessButton)
-                                    .menuIndicator(.hidden)
-                                    .frame(width: 20)
-                                }
-                            }
+        HStack(spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "circle.dashed")
+                .font(.title3)
+                .foregroundStyle(granted ? .green : .orange)
+                .contentTransition(.symbolEffect(.replace))
+                .accessibilityLabel(granted ? "granted" : "not granted")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !granted {
+                Button("Open Settings") { pane.open() }
+                    .controlSize(.small)
+            }
+        }
+        .animation(.smooth, value: granted)
+    }
+}
+
+// MARK: - Advanced
+
+@available(macOS 26, *)
+private struct AdvancedSettings: View {
+    @Bindable var model: AppModel
+    @State private var doctor: [Doctor.Item]?
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Act in the background with Cua Driver", isOn: Binding(
+                    get: { CuaDriver.enabled() },
+                    set: { on in try? S1Config.update { $0.executor = on ? nil : "cgevent" } }))
+                    .disabled(CuaDriver.binary() == nil)
+                if CuaDriver.binary() == nil {
+                    LabeledContent("Cua Driver isn't installed") {
+                        Button(model.cuaInstalling ? "Installing…" : "Install") {
+                            Task { await model.installCuaDriver() }
                         }
-                        ForEach(model.catalog.filter { !model.installedModels.contains($0.name) },
-                                id: \.name) { entry in
-                            HStack(spacing: 6) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    HStack(spacing: 4) {
-                                        Text(entry.name).font(.callout)
-                                        if entry.decision {
-                                            Image(systemName: "checkmark.diamond")
-                                                .font(.caption2)
-                                                .foregroundStyle(.teal)
-                                                .accessibilityLabel("decision model")
-                                        } else if entry.grounding {
-                                            Image(systemName: "scope")
-                                                .font(.caption2)
-                                                .foregroundStyle(.orange)
-                                                .accessibilityLabel("click grounding model")
-                                        } else if entry.vision {
-                                            Image(systemName: "eye")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                                .accessibilityLabel("vision model")
-                                        }
-                                    }
-                                    Text("\(entry.size) · \(entry.blurb)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                                Spacer()
-                                if let prog = model.pullProgress[entry.name] {
-                                    Text(prog).font(.caption)
-                                        .lineLimit(1).truncationMode(.head)
-                                        .frame(maxWidth: 110)
-                                } else {
-                                    Button {
-                                        model.pullModel(entry.name, decision: entry.decision)
-                                    } label: {
-                                        Image(systemName: "arrow.down.circle")
-                                    }
-                                    .buttonStyle(.glass)
-                                    .controlSize(.small)
-                                    .accessibilityLabel("Download \(entry.name)")
+                        .disabled(model.cuaInstalling)
+                    }
+                    if let last = model.cuaInstallLog.split(separator: "\n").last {
+                        Text(last).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Executor")
+            } footer: {
+                FootNote("Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. The safety gate runs first either way.")
+            }
+
+            Section {
+                Toggle("Sandbox shell commands", isOn: $model.sandboxSrt)
+                    .disabled(Sandbox.srtBinary() == nil)
+            } header: {
+                Text("Shell Sandbox")
+            } footer: {
+                FootNote(Sandbox.srtBinary() == nil
+                     ? "Runs shell steps inside Anthropic's sandbox-runtime. Install it with `npm install -g @anthropic-ai/sandbox-runtime`."
+                     : "Shell steps run under ~/.s1/srt-settings.json. If the sandbox fails, the step fails — it never runs unsandboxed.")
+            }
+
+            Section {
+                ForEach(configFiles, id: \.0) { name, url, ensure in
+                    LabeledContent(name) {
+                        Button("Open") { ensure(); NSWorkspace.shared.open(url) }
+                    }
+                }
+                LabeledContent("Check every file") {
+                    Button("Run Checks") {
+                        Task { doctor = await Task.detached { Doctor.run() }.value }
+                    }
+                }
+                if let doctor {
+                    ForEach(Array(doctor.enumerated()), id: \.offset) { _, item in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.what)
+                                if !item.detail.isEmpty {
+                                    Text(item.detail).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
+                        } icon: {
+                            Image(systemName: item.level == .ok ? "checkmark.circle.fill"
+                                  : item.level == .warn ? "exclamationmark.triangle.fill" : "xmark.octagon.fill")
+                                .foregroundStyle(item.level == .ok ? .green : item.level == .warn ? .orange : .red)
                         }
                     }
-                    Text("One tap downloads the model and wires it in — ◆ decision models judge each step, everything else becomes the S2 reasoner.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-                .font(.callout)
-    }
-}
+            } header: {
+                Text("Configuration Files")
+            } footer: {
+                FootNote("Everything lives in plain files under ~/.s1. `s1 doctor` runs the same checks in Terminal.")
+            }
 
-    /// One line under an endpoint section: is the configured model there,
-    /// and if not, the single button that fixes it.
-@available(macOS 26, *)
-struct ModelStatusRow: View {
-    let status: ModelPullStatus
-    var body: some View {
-        HStack(spacing: 8) {
-            switch status.state {
-            case .checking:
-                ProgressView().controlSize(.mini)
-                Text("checking…").foregroundStyle(.secondary)
-            case .installed:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    .accessibilityLabel("installed")
-                Text("\(status.modelName) ready").foregroundStyle(.secondary)
-            case .missing:
-                Image(systemName: "arrow.down.circle").foregroundStyle(.orange)
-                    .accessibilityLabel("not downloaded")
-                Text("\(status.modelName) not pulled").foregroundStyle(.secondary)
-                Spacer()
-                Button("Download") { status.pull() }.controlSize(.mini)
-            case .downloading(let line):
-                ProgressView().controlSize(.mini)
-                Text(line).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
-            case .failed(let err):
-                Image(systemName: "xmark.circle").foregroundStyle(.red)
-                    .accessibilityLabel("failed")
-                Text(err).foregroundStyle(.secondary).lineLimit(2)
-                Spacer()
-                Button("Retry") { status.retry() }.controlSize(.mini)
-            case .unreachable:
-                Image(systemName: "bolt.slash").foregroundStyle(.orange)
-                    .accessibilityLabel("server down")
-                Text("server down").foregroundStyle(.secondary)
-                Spacer()
-                Button("Start") { status.startServer() }.controlSize(.mini)
-            case .noOllama:
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    .accessibilityLabel("ollama missing")
-                Text(ModelPull.installHint).font(.caption.monospaced())
-                    .textSelection(.enabled)
-            case .remote:
-                EmptyView()
+            Section {
+                LabeledContent("Run history") {
+                    Button("Show in Finder") {
+                        try? FileManager.default.createDirectory(at: RunHistory.root, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(RunHistory.root)
+                    }
+                }
+            } footer: {
+                FootNote("Every run keeps its steps and screenshots. The newest 50 are kept.")
             }
         }
-        .font(.caption)
-        .onAppear { status.refresh() }
+        .formStyle(.grouped)
     }
-}
 
-@available(macOS 26, *)
-struct PermRow: View {
-    /// macOS 13+ System Settings deep link (the old com.apple.preference.security
-    /// URL still resolves but lands on the pane root on newer releases).
-    static func open(_ pane: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(pane)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-    let label: String
-    let ok: Bool
-    let pane: String
-    var body: some View {
-        HStack {
-            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(ok ? .green : .orange)
-                .symbolEffect(.bounce, value: ok)
-                .accessibilityLabel(ok ? "granted" : "missing")
-            Text(label).font(.callout)
-            if !ok {
-                Spacer()
-                Button("Open Settings") { Self.open(pane) }
-                .controlSize(.mini)
+    private var configFiles: [(String, URL, () -> Void)] {
+        let home = S1Home.path
+        let touch: (String, String) -> Void = { path, seed in
+            if !FileManager.default.fileExists(atPath: path) {
+                try? seed.write(toFile: path, atomically: true, encoding: .utf8)
             }
         }
+        return [
+            ("config.json", URL(fileURLWithPath: home + "/config.json"), { try? S1Config.load().save() }),
+            ("snippets.json", URL(fileURLWithPath: home + "/snippets.json"), { Snippets.ensureFile() }),
+            ("convert.json", URL(fileURLWithPath: home + "/convert.json"), { touch(home + "/convert.json", "{}\n") }),
+            ("srt-settings.json", URL(fileURLWithPath: home + "/srt-settings.json"), { Sandbox.ensureSettingsFile() }),
+        ]
     }
 }
 
-/// Snippet editor over ~/.s1/snippets.json — type the keyword in the
-/// ⌥Space launcher, Enter pastes the expansion into the app you were in.
+// MARK: - Snippets
+
+/// Snippet editor over ~/.s1/snippets.json — type the keyword in the ⌥Space
+/// launcher and Return pastes the expansion where you were typing.
 @available(macOS 26, *)
 private struct SnippetSettings: View {
     @State private var items: [Snippet] = Snippets.load()
     @State private var selection: Int?
-    @State private var note = ""
+    @State private var saved = true
 
     var body: some View {
-        Form {
-            Section {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
                 List(selection: $selection) {
                     ForEach(items.indices, id: \.self) { i in
-                        HStack {
-                            Text(items[i].keyword.isEmpty ? "untitled" : items[i].keyword).bold()
-                            Text(items[i].text.replacingOccurrences(of: "\n", with: " ⏎ "))
-                                .foregroundStyle(.secondary).lineLimit(1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(items[i].keyword.isEmpty ? String(localized: "Untitled") : items[i].keyword)
+                                .font(.body.weight(.medium))
+                            Text(items[i].text.replacingOccurrences(of: "\n", with: " "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         .tag(i)
                     }
                 }
-                .frame(minHeight: 200)
-                HStack {
-                    Button("Add") {
+                Divider()
+                HStack(spacing: 0) {
+                    Button {
                         items.append(Snippet(keyword: "new", text: ""))
                         selection = items.count - 1
-                    }
-                    Button("Remove") {
-                        if let s = selection, items.indices.contains(s) { items.remove(at: s); selection = nil }
-                    }
+                        persist()
+                    } label: { Image(systemName: "plus").frame(width: 24, height: 20) }
+                    Button {
+                        if let s = selection, items.indices.contains(s) {
+                            items.remove(at: s); selection = nil; persist()
+                        }
+                    } label: { Image(systemName: "minus").frame(width: 24, height: 20) }
                     .disabled(selection == nil)
                     Spacer()
-                    Button("Restore Defaults") { items = Snippets.defaults; selection = nil }
-                    Button("Open JSON") { Snippets.ensureFile(); NSWorkspace.shared.open(Snippets.path) }
-                    Button("Save") {
-                        do { try Snippets.save(items); note = "Saved" } catch { note = error.localizedDescription }
+                    Menu {
+                        Button("Restore Defaults") { items = Snippets.defaults; selection = nil; persist() }
+                        Button("Open snippets.json") { Snippets.ensureFile(); NSWorkspace.shared.open(Snippets.path) }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .buttonStyle(.borderless)
+                .padding(6)
+            }
+            .frame(width: 220)
+            Divider()
+            Group {
+                if let s = selection, items.indices.contains(s) {
+                    Form {
+                        TextField("Keyword", text: $items[s].keyword)
+                        Section("Text") {
+                            TextEditor(text: $items[s].text)
+                                .font(.body.monospaced())
+                                .frame(minHeight: 160)
+                        }
+                        Text("Placeholders: {date} {time} {datetime} {isodate} {weekday} {name} {uuid} {clipboard}")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .keyboardShortcut("s", modifiers: .command)
-                }
-            } footer: {
-                Text(note.isEmpty ? "Placeholders: {date} {time} {datetime} {isodate} {weekday} {name} {uuid} {clipboard}. Stored in ~/.s1/snippets.json." : note)
-            }
-            if let s = selection, items.indices.contains(s) {
-                Section("Edit") {
-                    TextField("Keyword", text: $items[s].keyword)
-                    TextEditor(text: $items[s].text)
-                        .font(.body.monospaced())
-                        .frame(minHeight: 90)
+                    .formStyle(.grouped)
+                    .onChange(of: items[s].keyword) { persist() }
+                    .onChange(of: items[s].text) { persist() }
+                } else {
+                    ContentUnavailableView("No Snippet Selected", systemImage: "text.badge.plus",
+                                           description: Text("Type a snippet's keyword in the ⌥Space launcher to paste it."))
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .formStyle(.grouped)
         .onAppear { items = Snippets.load() }
     }
+
+    private func persist() { try? Snippets.save(items) }
 }
 
-/// Version, license and the open-source projects s1 builds on.
-@available(macOS 26, *)
-private struct AboutSettings: View {
-    private struct Credit: Identifiable {
-        let name, license, url, use: String
-        var id: String { name }
-    }
+// MARK: - About
 
-    private let credits: [Credit] = [
-        .init(name: "Cua Driver (trycua/cua)", license: "MIT", url: "https://github.com/trycua/cua",
-              use: "Optional background executor, used when installed"),
-        .init(name: "swift-argument-parser (Apple)", license: "Apache-2.0", url: "https://github.com/apple/swift-argument-parser",
-              use: "s1 command-line interface"),
-        .init(name: "AeriVoice", license: "MIT", url: "https://github.com/DanielOu1208/aerivoice",
-              use: "Design inspiration: hold-to-talk, live notch transcript, paste-and-restore"),
-        .init(name: "Pi agent harness", license: "MIT", url: "https://github.com/badlogic/pi-mono",
-              use: "Design inspiration: JSON event stream, session history, text-file skills"),
-        .init(name: "sandbox-runtime (Anthropic)", license: "Apache-2.0", url: "https://github.com/anthropics/sandbox-runtime",
-              use: "Optional sandbox for shell steps — Seatbelt rules + network policy"),
-        .init(name: "Agent Memory Repo (Cognition)", license: "MIT", url: "https://github.com/AgentMemoryRepo/agentmemoryrepo",
-              use: "The open spec behind Devin's memory — main file + per-topic files + [[links]] index"),
-        .init(name: "Frankfurter", license: "MIT", url: "https://frankfurter.dev",
-              use: "Currency rates (European Central Bank reference data)"),
+@available(macOS 26, *)
+enum AboutPanel {
+    private static let credits: [(String, String, String)] = [
+        ("Cua Driver", "MIT", "Background executor, used when installed"),
+        ("swift-argument-parser", "Apache-2.0", "The s1 command line"),
+        ("sandbox-runtime (Anthropic)", "Apache-2.0", "Optional shell sandbox"),
+        ("Agent Memory Repo (Cognition)", "MIT", "The memory file layout"),
+        ("Pi agent harness", "MIT", "Design reference: event stream, text-file skills"),
+        ("AeriVoice", "MIT", "Design reference: hold-to-talk, live notch transcript"),
+        ("Frankfurter", "MIT", "Currency rates (ECB reference data)"),
     ]
 
-    var body: some View {
-        Form {
-            Section {
-                LabeledContent("s1", value: "\(S1Info.version)")
-                LabeledContent("License", value: "MIT")
-                Link("github.com/Matthew-Eucaristo/s1", destination: URL(string: "https://github.com/Matthew-Eucaristo/s1")!)
-            }
-            Section {
-                ForEach(credits) { c in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Link(c.name, destination: URL(string: c.url)!)
-                            Spacer()
-                            Text(c.license).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text(c.use).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                Text("Open source")
-            } footer: {
-                Text("Thanks to everyone who builds and maintains these projects. Hosted models (Jev, OpenCode Go, Liquid d1, Cloudflare Clef, Groq, OpenAI) are third-party services under their own terms.")
-            }
+    @MainActor
+    static func show() {
+        let body = NSMutableAttributedString()
+        let p = NSMutableParagraphStyle()
+        p.alignment = .center
+        p.paragraphSpacing = 6
+        let small = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let bold = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        body.append(NSAttributedString(string: String(localized: "A voice-first agent for your Mac. Open source, MIT.\n\n"),
+                                       attributes: [.font: small, .paragraphStyle: p, .foregroundColor: NSColor.labelColor]))
+        for (name, license, use) in credits {
+            body.append(NSAttributedString(string: "\(name) · \(license)\n",
+                                           attributes: [.font: bold, .paragraphStyle: p, .foregroundColor: NSColor.labelColor]))
+            body.append(NSAttributedString(string: use + "\n",
+                                           attributes: [.font: small, .paragraphStyle: p, .foregroundColor: NSColor.secondaryLabelColor]))
         }
-        .formStyle(.grouped)
+        body.append(NSAttributedString(string: "\ngithub.com/Matthew-Eucaristo/s1",
+                                       attributes: [.font: small, .paragraphStyle: p,
+                                                    .link: URL(string: "https://github.com/Matthew-Eucaristo/s1")!]))
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "s1",
+            .applicationVersion: S1Info.version,
+            .credits: body,
+        ])
     }
 }

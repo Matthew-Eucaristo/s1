@@ -2,25 +2,28 @@ import AppKit
 import SwiftUI
 import S1Core
 
-/// A borderless pill that drops from the camera-notch strip while s1 is
-/// doing something — Apple's Dynamic-Island idiom for the Mac. There is no
-/// public notch API: like every Mac notch app (boring.notch et al.) this is
-/// a plain floating panel positioned between the auxiliary-top areas.
+/// A glass pill that drops from the camera-notch strip while s1 is doing
+/// something — the Dynamic Island idiom on the Mac. There's no public notch
+/// API, so like every Mac notch app it's a floating panel positioned
+/// between the auxiliary top areas (or top-center on displays without one).
 ///
-/// Cost model: the window only exists while s1 is listening or running —
+/// Cost model: the window only exists while s1 is listening or working —
 /// idle hides *and releases* it, so the HUD's steady-state price is nil.
 @available(macOS 26, *)
 @MainActor
 final class NotchHUDController {
-    enum Phase: String { case listening, running }
+    enum Content: Equatable {
+        case listening(String)
+        case working(String)
+        case finished(Turn.State, String)
+    }
 
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
 
-    /// Show (or update) the pill for the given phase.
-    func show(phase: Phase, detail: String) {
+    func show(_ content: Content) {
         hideTask?.cancel(); hideTask = nil
-        let view = NotchHUDView(phase: phase, detail: detail)
+        let view = NotchHUDView(content: content)
         if let hosting = panel?.contentView as? NSHostingView<NotchHUDView> {
             hosting.rootView = view
         } else {
@@ -32,12 +35,11 @@ final class NotchHUDController {
         panel.orderFrontRegardless()
     }
 
-    /// A result worth glancing at (done/failed) — flash it, then get out
-    /// of the way. A later `show` cancels the pending hide.
-    func flash(phase: Phase, detail: String, after seconds: Double = 2.0) {
-        show(phase: phase, detail: detail)
+    /// An outcome worth a glance — show it, then get out of the way.
+    func flash(_ content: Content, for seconds: Double = 2.4) {
+        show(content)
         hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
             self?.hide()
         }
@@ -50,91 +52,122 @@ final class NotchHUDController {
     }
 
     private static func makePanel(rootView: NotchHUDView) -> NSPanel {
-        let p = NSPanel(
-            contentRect: NSRect(origin: .zero, size: .init(width: 280, height: 40)),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered, defer: false)
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 280, height: 40),
+                        styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
         p.level = .statusBar
-        // Visible on every Space and over fullscreen apps — like Spotlight.
+        // Every Space, over fullscreen apps — like Spotlight.
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         p.isFloatingPanel = true
         p.hidesOnDeactivate = false
         p.isMovable = false
         p.hasShadow = false
         p.worksWhenModal = true
-        p.contentView = NSHostingView(rootView: rootView)
+        let host = NSHostingView(rootView: rootView)
+        host.sizingOptions = [.intrinsicContentSize]
+        p.contentView = host
         return p
     }
 
-    /// Center horizontally in the notch gap (or mid-screen when the display
-    /// has no notch), top edge tucked just under the menu-bar strip.
+    /// Centered on the notch gap, tucked just under the menu bar.
     static func position(_ panel: NSPanel) {
-        guard let screen = panel.screen ?? NSScreen.main else { return }
+        guard let screen = NSScreen.main else { return }
         let size = panel.frame.size
-        let cx: CGFloat
-        if let left = screen.auxiliaryTopLeftArea,
-           let right = screen.auxiliaryTopRightArea {
-            cx = (left.maxX + right.minX) / 2
+        let cx: CGFloat = if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea {
+            (l.maxX + r.minX) / 2
         } else {
-            cx = screen.frame.midX
+            screen.frame.midX
         }
         let y = screen.visibleFrame.maxY - size.height - 6
-        panel.setFrame(NSRect(x: cx - size.width / 2, y: y,
-                              width: size.width, height: size.height),
-                       display: false)
+        panel.setFrame(NSRect(x: cx - size.width / 2, y: y, width: size.width, height: size.height),
+                       display: true)
     }
 }
 
 @available(macOS 26, *)
 struct NotchHUDView: View {
-    let phase: NotchHUDController.Phase
-    let detail: String
+    let content: NotchHUDController.Content
 
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: phase == .listening ? "waveform" : "brain")
-                .font(.callout.weight(.semibold))
-                .accessibilityHidden(true)
-                .symbolEffect(.pulse, isActive: true)
-                .frame(width: 16)
-            Text(phase == .listening ? "listening" : "working")
-                .font(.callout.weight(.semibold))
-            if phase == .listening {
-                // Siri-style proof the mic is hearing — flat ticks mean
-                // "tap alive, silence", dancing bars mean "voice captured".
-                LiveWaveform()
-                    .frame(width: 110, height: 18)
+        HStack(spacing: 10) {
+            leading
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: 300, alignment: .leading)
+            if case .listening = content {
+                LiveWaveform(barCount: 14, barWidth: 2.5, gap: 2)
+                    .frame(width: 52, height: 18)
                     .accessibilityHidden(true)
             }
-            if !detail.isEmpty {
-                Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 300, alignment: .leading)
+            if !isFinished {
+                Button {
+                    AppModel.shared.hudStopTapped()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .help(isListening ? "Stop listening" : "Stop")
+                .accessibilityLabel(isListening ? "Stop listening" : "Stop")
             }
-            Button {
-                AppModel.shared.hudStopTapped()
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(.caption.weight(.bold))
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.glassProminent)
-            .controlSize(.mini)
-            .help(phase == .listening ? "Sleep the listener" : "Abort the run")
-            .accessibilityLabel(phase == .listening ? "Sleep" : "Stop")
         }
-        .padding(.leading, 14).padding(.trailing, 8)
+        .padding(.leading, 12).padding(.trailing, isFinished ? 14 : 7)
         .padding(.vertical, 7)
         .fixedSize()
         .glassEffect(.regular, in: .capsule)
-        // The pill speaks its own state — VoiceOver users get the same
-        // "s1 is listening / working on step N" the sighted UI shows.
+        .padding(4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("s1 \(phase == .listening ? "listening, mic live" : "working")\(detail.isEmpty ? "" : ", \(detail)")")
+        .accessibilityLabel("s1, \(title)\(detail.isEmpty ? "" : ", \(detail)")")
+    }
+
+    private var isListening: Bool { if case .listening = content { return true }; return false }
+    private var isFinished: Bool { if case .finished = content { return true }; return false }
+
+    @ViewBuilder
+    private var leading: some View {
+        switch content {
+        case .listening:
+            Image(systemName: "waveform")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .symbolEffect(.variableColor.iterative, isActive: true)
+        case .working:
+            ProgressView().controlSize(.small)
+        case .finished(let state, _):
+            Image(systemName: state.symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(state.tint)
+                .symbolEffect(.bounce, value: true)
+        }
+    }
+
+    private var title: String {
+        switch content {
+        case .listening: String(localized: "Listening")
+        case .working: String(localized: "Working")
+        case .finished(let state, _): state.labelText
+        }
+    }
+
+    private var detail: String {
+        switch content {
+        case .listening(let t): t
+        case .working(let t): t
+        case .finished(_, let r): r
+        }
     }
 }

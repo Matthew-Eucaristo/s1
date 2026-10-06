@@ -18,6 +18,9 @@ echo "== preflight =="
 echo "== tasks =="
 "$S1" tasks
 
+echo "== roles =="
+"$S1" use
+
 echo "== config =="
 "$S1" config || true      # endpoints may be unreachable — that's the report
 

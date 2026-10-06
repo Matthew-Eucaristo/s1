@@ -6,6 +6,13 @@ s1 builds in the open on public OSS. Components we depend on directly:
 |---|---|---|
 | [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) | Apache-2.0 | CLI — the only package dependency |
 
+Assets:
+
+| Project | License | Used for |
+|---|---|---|
+| [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | MIT | Provider marks and wordmarks in Settings and on the website (names and logos belong to their owners) |
+| TypeSafe mark from [typesafe.ai](https://typesafe.ai) | trademark of its owner | TypeSafe provider badge |
+
 Optional runtime tools — installed by the user (or the s1 onboarding
 wizard) with each project's own installer, never bundled into s1:
 

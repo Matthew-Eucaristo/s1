@@ -1,207 +1,248 @@
 import SwiftUI
 import S1Core
 
-/// The S1 macOS app — Liquid Glass shell + menu-bar companion over S1Core.
+/// The s1 macOS app — one window, a menu-bar companion, Settings, and a
+/// first-run setup, all over the same `AppModel`.
 @available(macOS 26, *)
 @main
 struct S1App: App {
-    // Shared so App Intents and the UI drive the same agent state.
     @State private var model = AppModel.shared
 
     var body: some Scene {
-        WindowGroup("s1", id: "s1") {
+        Window("s1", id: "s1") {
             ContentView(model: model)
+                .frame(minWidth: 700, minHeight: 480)
         }
-        .windowStyle(.automatic)
-        .defaultSize(width: 880, height: 620)
-        .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("New Command") {
-                    model.goal = ""
-                    model.focusGoalToken += 1
-                }
-                .keyboardShortcut("n", modifiers: .command)
-            }
-            CommandGroup(after: .appInfo) {
-                Button("Set Up s1 Again…") { model.needsOnboarding = true }
-            }
-            CommandMenu("Agent") {
-                Button("Run") { Task { await model.run() } }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .disabled(model.running ||
-                              model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Stop") { model.stop() }
-                    .keyboardShortcut(".", modifiers: .command)
-                    .disabled(!model.running)
-                Divider()
-                Button(model.serveState == .idle ? "Wake (start listening)" : "Sleep (stop listening)") {
-                    model.toggleServe()
-                }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
-                Button(model.listening ? "Stop Dictation" : "Dictate Command") { model.toggleListen() }
-                    .keyboardShortcut("l", modifiers: .command)
-                Button("Show Launcher") { LauncherController.shared.show() }
-                    .keyboardShortcut(.space, modifiers: .option)
-                Divider()
-                Button("Clear Steps") { model.clearFeed() }
-                    .keyboardShortcut("k", modifiers: .command)
-                    .disabled(model.running || model.steps.isEmpty)
-                Button("Reveal Run in Finder") { model.revealRunDir() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(model.runDir == nil)
-            }
-            CommandGroup(replacing: .help) {
-                Button("s1 on GitHub") {
-                    NSWorkspace.shared.open(URL(string: "https://github.com/Matthew-Eucaristo/s1")!)
-                }
-            }
-        }
+        .defaultSize(width: DemoContent.enabled ? 1320 : 1000, height: DemoContent.enabled ? 860 : 680)
+        .windowToolbarStyle(.unified)
+        .commands { S1Commands(model: model) }
 
-        // First-run wizard — ContentView opens it when needsOnboarding is
-        // set (launch and the "Set Up s1 Again…" menu both go through it).
-        WindowGroup("Set up s1", id: "onboarding") {
+        Window("Set Up s1", id: "onboarding") {
             OnboardingView(model: model)
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         Settings {
             SettingsView(model: model)
         }
-        .defaultLaunchBehavior(.suppressed)
 
-        // The always-on companion lives here: menu bar presence, global
-        // hotkey armed, listening/running state at a glance. Label uses the
-        // s1 mark as a template glyph (system tints it for light/dark);
-        // falls back to an SF Symbol when built without the bundled PNGs.
+        // The always-on companion: state at a glance, a quick command field.
         MenuBarExtra {
-            MenuBarView(model: model)
+            MenuBarPanel(model: model)
         } label: {
-            // State at a glance: the s1 glyph while idle, animated waveform
-            // while listening, a badge while a run is in flight.
-            switch model.serveState {
-            case .idle:
-                if let glyph = NSImage(named: "s1-menubar") {
-                    Image(nsImage: { glyph.isTemplate = true; return glyph }())
-                        .accessibilityLabel("s1, idle")
-                } else {
-                    Image(systemName: "waveform")
-                        .accessibilityLabel("s1, idle")
-                }
-            case .listening:
-                // The Siri tell Matthew asked for: live bars in the menu
-                // bar itself — if his voice reaches the mic, they dance.
-                LiveWaveform(barCount: 6, barWidth: 2.5, gap: 1.5)
-                    .frame(width: 18, height: 15)
-                    .accessibilityLabel("s1, listening")
-            case .running:
-                Image(systemName: "brain")
-                    .accessibilityLabel("s1, running")
-            }
+            MenuBarLabel(state: model.serveState, running: model.running)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
 @available(macOS 26, *)
-private struct MenuBarView: View {
-    @Bindable var model: AppModel
+private struct S1Commands: Commands {
+    let model: AppModel
     @Environment(\.openWindow) private var openWindow
-    @FocusState private var goalFocused: Bool
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About s1") { AboutPanel.show() }
+        }
+        CommandGroup(after: .appInfo) {
+            Button("Set Up s1…") {
+                model.needsOnboarding = true
+                openWindow(id: "onboarding")
+            }
+        }
+        CommandGroup(replacing: .newItem) {
+            Button("New Command") {
+                openWindow(id: "s1")
+                model.focusGoalToken += 1
+            }
+            .keyboardShortcut("n")
+            Button("Transcribe Audio File…") { model.pickAudioAndTranscribe() }
+                .keyboardShortcut("o")
+        }
+        CommandMenu("Agent") {
+            Button("Stop") { model.stop() }
+                .keyboardShortcut(".")
+                .disabled(!model.running && model.serveState != .running)
+            Divider()
+            Button(model.serveState == .idle ? "Start Listening" : "Stop Listening") { model.toggleServe() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Button(model.listening ? "Stop Dictating" : "Speak a Command") { model.toggleListen() }
+                .keyboardShortcut("l")
+            Button("Show Launcher") { LauncherController.shared.show() }
+                .keyboardShortcut(.space, modifiers: .option)
+            Divider()
+            Button("Clear Conversation") { model.clearConversation() }
+                .keyboardShortcut("k")
+                .disabled(model.running || model.turns.isEmpty)
+        }
+        CommandGroup(replacing: .help) {
+            Button("s1 Website") { NSWorkspace.shared.open(URL(string: "https://s1-mac.pages.dev")!) }
+            Button("s1 on GitHub") { NSWorkspace.shared.open(URL(string: "https://github.com/Matthew-Eucaristo/s1")!) }
+        }
+    }
+}
+
+/// Menu-bar glyph: the s1 mark at rest, live bars while listening, a
+/// spinner-free "working" symbol while a run is in flight.
+@available(macOS 26, *)
+private struct MenuBarLabel: View {
+    let state: Serve.State
+    let running: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("s1").font(.headline)
-                if model.serveState == .listening {
-                    LiveWaveform(barCount: 10)
-                        .frame(width: 44, height: 14)
-                        .accessibilityHidden(true)
+        if state == .listening {
+            LiveWaveform(barCount: 6, barWidth: 2.5, gap: 1.5)
+                .frame(width: 18, height: 15)
+                .accessibilityLabel("s1, listening")
+        } else if state == .running || running {
+            Image(systemName: "ellipsis.circle")
+                .accessibilityLabel("s1, working")
+        } else if let glyph = NSImage(named: "s1-menubar") {
+            Image(nsImage: { glyph.isTemplate = true; return glyph }())
+                .accessibilityLabel("s1")
+        } else {
+            Image(systemName: "waveform")
+                .accessibilityLabel("s1")
+        }
+    }
+}
+
+@available(macOS 26, *)
+private struct MenuBarPanel: View {
+    @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("s1").font(.headline)
+                    Text(stateLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
                 }
                 Spacer()
-                stateBadge
-            }
-            Text(model.serveStatus)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .contentTransition(.opacity)
-                .animation(.smooth, value: model.serveStatus)
-            if !model.transcript.isEmpty {
-                Text("heard: \(model.transcript)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-            // Quick-goal: run a command without opening the window at all.
-            HStack(spacing: 6) {
-                TextField("Goal…", text: $model.goal)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.callout)
-                    .focused($goalFocused)
-                    .onSubmit { Task { await model.run() } }
+                let on = model.serveState != .idle
                 Button {
-                    Task { await model.run() }
+                    model.toggleServe()
                 } label: {
-                    Image(systemName: "play.fill")
+                    Image(systemName: on ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                        .contentShape(.circle)
+                        .contentTransition(.symbolEffect(.replace))
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.small)
-                .accessibilityLabel("Run")
-                .disabled(model.running ||
-                          model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive().tint(on ? .red.opacity(0.55) : .accentColor.opacity(0.35)), in: .circle)
+                .help(on ? "Stop listening" : "Listen (⇧⇧)")
+                .accessibilityLabel(on ? "Stop listening" : "Listen")
+                .disabled(!model.companionAvailable)
             }
+
+            if model.serveState == .listening || model.listening {
+                HStack(spacing: 8) {
+                    LiveWaveform(barCount: 16).frame(width: 60, height: 16)
+                    Text(model.transcript.isEmpty ? String(localized: "Listening…") : model.transcript)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            } else if let t = model.currentTurn {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(t.steps.last.map { StepPresentation($0).title } ?? t.goal)
+                        .font(.callout)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Stop") { model.stop() }.controlSize(.small)
+                }
+            } else if let last = model.turns.last, let reply = last.reply {
+                Label {
+                    Text(reply).lineLimit(2)
+                } icon: {
+                    Image(systemName: last.state.symbol).foregroundStyle(last.state.tint)
+                }
+                .font(.callout)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Ask s1…", text: $model.goal)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit { Task { await model.run() } }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .glassEffect(.regular, in: .capsule)
+            }
+
             if !model.recentGoals.isEmpty {
-                Menu("Recent goals") {
-                    ForEach(model.recentGoals.prefix(5), id: \.self) { g in
-                        Button(g) { model.goal = g; Task { await model.run() } }
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.recentGoals.prefix(3), id: \.self) { g in
+                        Button {
+                            model.runAgain(g)
+                        } label: {
+                            Label(g, systemImage: "arrow.clockwise")
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 3)
+                        .disabled(model.running)
                     }
                 }
-                .controlSize(.small)
+                .font(.callout)
             }
+
             Divider()
-            Button {
-                model.toggleServe()
-            } label: {
-                Label(model.serveState == .idle ? "Listen (⇧⇧ / ⌃⌥Space)" : "Stop listening",
-                      systemImage: model.serveState == .idle ? "mic.fill" : "stop.fill")
+
+            HStack {
+                Button("Open s1") {
+                    openWindow(id: "s1")
+                    NSApp.activate()
+                }
+                Spacer()
+                SettingsLink {
+                    Image(systemName: "gearshape")
+                }
+                .help("Settings")
+                Button {
+                    model.shutdown()
+                } label: {
+                    Image(systemName: "power")
+                }
+                .help("Quit s1")
             }
-            .buttonStyle(.glassProminent)
-            Toggle("Launch at login", isOn: Binding(
-                get: { model.launchAtLogin },
-                set: { _ in model.toggleLoginItem() }))
-            Divider()
-            SettingsLink { Text("Settings…") }
-                .keyboardShortcut(",", modifiers: .command)
-            Button("Open s1") {
-                openWindow(id: "s1")
-                NSApp.activate()   // macOS 14+ API — ignores-other-apps is deprecated
-            }
-            Button("Quit s1") { model.shutdown() }
+            .buttonStyle(.borderless)
         }
-        .padding(12)
-        .frame(width: 250)
+        .padding(14)
+        .frame(width: 300)
         .onAppear {
-            // The popover window finishes appearing after onAppear; focusing
-            // sooner makes it eat the first keystrokes.
+            // The panel finishes appearing after onAppear; focusing sooner
+            // makes it eat the first keystrokes.
             Task {
                 try? await Task.sleep(for: .milliseconds(250))
-                goalFocused = true
+                focused = true
             }
         }
     }
 
-    private var stateBadge: some View {
-        let (key, color): (LocalizedStringKey, Color) = switch model.serveState {
-        case .idle: ("idle", .secondary)
-        case .listening: ("listening", .green)
-        case .running: ("running", .orange)
+    private var stateLine: String {
+        if !model.companionAvailable { return String(localized: "Companion off — terminal listener active") }
+        switch model.serveState {
+        case .listening: return String(localized: "Listening…")
+        case .running: return String(localized: "Working…")
+        case .idle: return model.running ? String(localized: "Working…") : String(localized: "Double-tap ⇧ to talk")
         }
-        return Text(key)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.2), in: .capsule)
-            .foregroundStyle(color)
-            .contentTransition(.opacity)
-            .animation(.smooth, value: model.serveState)
     }
 }

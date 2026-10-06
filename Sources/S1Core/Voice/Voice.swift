@@ -469,7 +469,7 @@ public struct SpeechToText: Sendable {
         if !lanes.isEmpty {
             // Optional cloud STT: Apple still runs VAD + the live line; the
             // finished turn is re-transcribed by the configured model.
-            let cloud = Endpoints.stt()
+            let cloud = Models.endpoint(.transcribe)
             let wav = cloud == nil ? nil : FileManager.default.temporaryDirectory
                 .appendingPathComponent("s1-turn-\(UUID().uuidString).wav")
             defer { if let wav { try? FileManager.default.removeItem(at: wav) } }
@@ -989,10 +989,10 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     /// Cloud TTS when configured and it speaks this language; false = use Apple.
     private func speakCloud(_ text: String, language: String, timeout: Double) async -> Bool {
         let cfg = S1Config.load()
-        guard let ep = Endpoints.tts(config: cfg),
+        guard let ep = Models.endpoint(.speak, config: cfg),
               CloudSpeech.ttsSpeaks(model: ep.model, language: language) else { return false }
         let gen = lock.withLock { generation }
-        let voice = cfg.ttsCloudVoice ?? CloudSpeech.defaultVoice(for: ep)
+        let voice = cfg.cloudVoice ?? CloudSpeech.defaultVoice(for: ep)
         guard let data = try? await CloudSpeech.synthesize(text, endpoint: ep, voice: voice),
               let p = try? AVAudioPlayer(data: data) else { return false }
         // Stopped while the audio was in flight → swallow it, don't fall back.

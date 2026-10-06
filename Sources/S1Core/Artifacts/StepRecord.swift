@@ -128,6 +128,19 @@ public actor RunLogger {
         onStep?(record)
     }
 
+    /// Close the evidence trail: the outcome lands in meta.json beside
+    /// the goal, so history views read one small file per run.
+    public func finish(_ report: RunReport) {
+        let url = runDir.appendingPathComponent("meta.json")
+        var meta = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: url))) ?? [:]
+        meta["status"] = report.status.rawValue
+        meta["finished"] = ISO8601DateFormatter().string(from: Date())
+        meta["steps"] = String(report.steps)
+        meta["escalations"] = String(report.escalations)
+        if let s = report.summary, !s.isEmpty { meta["summary"] = s }
+        try? enc.encode(meta).write(to: url, options: .atomic)
+    }
+
     private var shotCount = 0
 
     /// Save a CGImage as PNG under screens/ and return the repo-relative name.

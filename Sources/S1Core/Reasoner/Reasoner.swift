@@ -19,12 +19,6 @@ public struct Endpoint: Sendable {
         self.numCtx = numCtx
     }
 
-    /// Built-in S2 preset — env vars override `~/.s1/config.json`, which
-    /// overrides the baked-in default. Resolution lives in `Endpoints.s2`.
-    public static func s2Default(env: [String: String] = ProcessInfo.processInfo.environment) -> Endpoint {
-        Endpoints.s2(env: env)
-    }
-
     /// A local server tolerates Ollama-only request keys (`think`,
     /// `options`) — a strict OpenAI-spec endpoint (OpenAI, OpenRouter, Groq)
     /// 400s on unknown fields, so the wire body keeps them local-only.
@@ -51,7 +45,7 @@ public struct Endpoint: Sendable {
 public struct ChatMessage: Codable, Sendable {
     public var role: String
     public var content: String
-    /// Base64 PNG for vision-capable models (VLMPolicy).
+    /// Base64 JPEG for models that read images (judge, reasoner).
     public var imageBase64: String?
 
     public init(role: String, content: String, imageBase64: String? = nil) {
@@ -62,7 +56,7 @@ public struct ChatMessage: Codable, Sendable {
 /// Minimal OpenAI-compatible chat client — no SDK dependency, ~80 lines.
 public struct ChatClient: Sendable {
     public var endpoint: Endpoint
-    /// Who is calling — tags usage records (`s1-vlm`, `s1-grounder`, `s2`).
+    /// Who is calling — tags usage records with the role (`reasoner`, …).
     public var role: String
     public init(endpoint: Endpoint, role: String = "chat") {
         self.endpoint = endpoint

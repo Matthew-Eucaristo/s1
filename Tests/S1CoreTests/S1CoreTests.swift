@@ -1100,24 +1100,6 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(S1Config.load(from: path).vocabulary == nil)
 }
 
-@Test func configWithKeySaves0600() throws {
-    // A config carrying API keys must land owner-only — like ~/.ssh/config.
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1cfg-\(UUID().uuidString)")
-    let path = dir.appendingPathComponent("config.json").path
-    var c = S1Config()
-    c.vlm = .init(base: "https://api.openai.com/v1", model: "gpt-5", key: "sk-test")
-    try c.save(to: path)
-    let perms = try #require(
-        (try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue)
-    #expect(perms & 0o777 == 0o600)
-    // Keyless configs don't get forced (any existing perms stand).
-    var plain = S1Config()
-    plain.locale = "id-ID"
-    let path2 = dir.appendingPathComponent("plain.json").path
-    try plain.save(to: path2)
-    #expect(FileManager.default.fileExists(atPath: path2))
-}
-
 // MARK: - all-app perception
 
 @Test func appStatesJoinsWorkspaceAndWindowTitles() {
@@ -1262,28 +1244,6 @@ private func rec(action: Action?, outcome: String?) -> StepRecord {
                verified: nil, escalation: nil)
 }
 
-@Test func vlmCursorCountsConsumedNotHistory() {
-    // [open, type, done] where "type" errored once then succeeded — raw
-    // history.count would land on 3 and declare the plan finished while
-    // "done" was never grounded. Consumed-count puts the cursor on intent 2.
-    let h = [
-        rec(action: .openApp(name: "TextEdit"), outcome: "opened TextEdit"),
-        rec(action: .typeText("hi"), outcome: "error: no editable field"),
-        rec(action: .typeText("hi"), outcome: "typed"),
-    ]
-    #expect(VLMPolicy.cursorIndex(history: h, intentCount: 3) == 2)
-    // An abstain (nil action) also doesn't consume — intent retries.
-    let a = [rec(action: nil, outcome: nil)]
-    #expect(VLMPolicy.cursorIndex(history: a, intentCount: 3) == 0)
-    // A blocked step DOES consume — a deny is final, not transient.
-    let b = [rec(action: .typeText("x"), outcome: "blocked: denylist")]
-    #expect(VLMPolicy.cursorIndex(history: b, intentCount: 3) == 1)
-    // All consumed → cursor pins at intentCount (decide returns .done).
-    let c = [rec(action: .wait(seconds: 1), outcome: "waited"),
-             rec(action: .done(summary: "x"), outcome: nil)]
-    #expect(VLMPolicy.cursorIndex(history: c, intentCount: 2) == 2)
-}
-
 // MARK: - interruptible wait
 
 @Test func sleepInterruptiblyHearsKillSwitchMidWait() async throws {
@@ -1394,50 +1354,6 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
 }
 
 // MARK: - Endpoints precedence
-
-@Test func endpointArgBeatsEnvBeatsConfig() {
-    var cfg = S1Config()
-    cfg.vlm = .init(base: "http://cfg/v1", model: "cfg-model", key: "cfg-key", numCtx: 4096)
-    let env = ["S1_VLM_BASE": "http://env/v1", "S1_VLM_MODEL": "env-model",
-               "S1_VLM_KEY": "env-key", "S1_NUM_CTX": "2048"]
-    // bare: env wins over config
-    let e1 = Endpoints.vlm(env: env, config: cfg)
-    #expect(e1.baseURL == "http://env/v1")
-    #expect(e1.model == "env-model")
-    #expect(e1.apiKey == "env-key")
-    #expect(e1.numCtx == 2048)
-    // explicit arg beats env
-    let e2 = Endpoints.vlm(base: "http://flag/v1", model: "flag-model",
-                           env: env, config: cfg)
-    #expect(e2.baseURL == "http://flag/v1")
-    #expect(e2.model == "flag-model")
-    // no env, no flag → config
-    let e3 = Endpoints.vlm(env: [:], config: cfg)
-    #expect(e3.baseURL == "http://cfg/v1")
-    #expect(e3.model == "cfg-model")
-    #expect(e3.apiKey == "cfg-key")
-    #expect(e3.numCtx == 4096)
-}
-
-@Test func endpointDefaultsWhenNothingSet() {
-    let e = Endpoints.vlm(env: [:], config: S1Config())
-    #expect(e.baseURL == "http://localhost:11434/v1")
-    #expect(e.model == "")   // vision is opt-in
-    #expect(e.apiKey == nil)
-    #expect(e.numCtx == 4096)   // VLM decision prompts fit in 4k; 8k doubled KV
-    let s = Endpoints.s2(env: ["S1_S2_MODEL": "big-model"], config: S1Config())
-    #expect(s.model == "big-model")
-    #expect(s.baseURL == "https://opencode.ai/zen/go/v1")  // env base unset → hosted default
-    let d = Endpoints.s2(env: [:], config: S1Config(), secret: { _ in nil })
-    #expect(d.model == "deepseek-v4.1-flash")
-    #expect(d.needsKey)
-    #expect(!Endpoints.s2(env: [:], config: S1Config(), secret: { _ in "k" }).needsKey)
-}
-
-@Test func endpointTrimsTrailingSlash() {
-    let e = Endpoints.vlm(base: "http://x/v1/", env: [:], config: S1Config())
-    #expect(e.baseURL == "http://x/v1")
-}
 
 @Test func endpointIsLocalMatchesHostNotSubstring() {
     // isLocal gates Ollama-only wire keys (`think`, `options`) — a false
@@ -1573,32 +1489,6 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(!xml.contains("--wake"))
 }
 
-@Test func autoPolicyFallsBackWhenEndpointDead() async {
-    // A dead endpoint must resolve `auto` to the deterministic AX policy —
-    // the whole point of the default: model when reachable, ax when not.
-    let dead = Endpoint(baseURL: "http://127.0.0.1:1", model: "none")
-    #expect(await AutoPolicy.endpointAlive(dead) == false)
-    let (pol, name) = await AutoPolicy.resolve(
-        vlmBase: "http://127.0.0.1:1", vlmModel: "none", useScreenshot: false)
-    #expect(name == "ax")
-    #expect(pol.name == "ax")
-}
-
-@Test func autoPolicyProbeRequiresTheConfiguredModel() {
-    // A server that answers 200 but never pulled our model is NOT usable —
-    // auto would resolve vlm and burn every step on "model not found".
-    // Both wire shapes: OpenAI {"data":[{"id"}]}, Ollama {"models":[{"name"}]}.
-    let openai = #"{"data":[{"id":"gemma3:4b"},{"id":"llama3.2:3b"}]}"#.data(using: .utf8)!
-    let ollama = #"{"models":[{"name":"gemma3:4b"}]}"#.data(using: .utf8)!
-    #expect(AutoPolicy.modelListed("gemma3:4b", in: openai))
-    #expect(AutoPolicy.modelListed("gemma3", in: openai))      // tag-suffix match
-    #expect(AutoPolicy.modelListed("gemma3:4b", in: ollama))
-    #expect(!AutoPolicy.modelListed("qwen3-vl:4b", in: openai))
-    #expect(AutoPolicy.modelListed("anything", in: #"{"weird":true}"#.data(using: .utf8)!))
-    #expect(AutoPolicy.modelListed("anything", in: #"{"data":[]}"#.data(using: .utf8)!))
-    #expect(AutoPolicy.modelListed("anything", in: Data("not json".utf8)))
-}
-
 @Test func artifactPruneKeepsNewestAndNonRunDirs() throws {
     // Storage bound: oldest run dirs go first, non-run dirs survive, and
     // `cleanAll` empties the whole root. Sort order = name = time.
@@ -1730,62 +1620,11 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
     #expect(ModelPull.parseOllamaList("NAME  ID  SIZE  MODIFIED\n") == [])
 }
 
-@Test func catalogCoversBothBrainKinds() {
-    let names = ModelPull.catalog.map(\.name)
-    // The default brain ships in the catalog and must be vision-capable.
-    let gemma = ModelPull.catalog.first { $0.name == "gemma3:4b" }
-    #expect(gemma?.vision == true)
-    // At least one cheap vision pick and one text-only S2 pick exist.
-    #expect(ModelPull.catalog.contains { $0.vision && $0.name != "gemma3:4b" })
-    #expect(ModelPull.catalog.contains { !$0.vision })
-    #expect(names.count == Set(names).count, "catalog entries must be unique")
-}
-
 @Test func pullProgressStripsOllamaANSI() {
     #expect(ModelPull.stripANSI("pulling manifest \u{1B}[K") == "pulling manifest ")
     #expect(ModelPull.stripANSI("\u{1B}[?25l\u{1B}[?2026hverifying sha256 digest") ==
         "verifying sha256 digest")
     #expect(ModelPull.stripANSI("clean line") == "clean line")
-}
-
-@Test func vlmFastPathSkipsModelForGroundingFreeIntents() async throws {
-    // Port 9 (discard) — any model call would throw; fast-path intents never make one.
-    let pol = VLMPolicy(endpoint: Endpoints.vlm(base: "http://127.0.0.1:9/v1", model: "none"),
-                        useScreenshot: false, grounder: nil)
-    let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
-                       windows: [], axTree: nil, screenshotPath: nil)
-    let d = try await pol.decide(observation: obs, goal: "buka Notes lalu ketik halo", history: [])
-    if case .openApp(let n)? = d.action { #expect(n == "Notes") } else { Issue.record("expected openApp") }
-    #expect(d.rationale.hasPrefix("fast path"))
-    let slow = await VLMPolicy.fastPath(.init(verb: "klik", arg: "Save"), observation: obs)
-    #expect(slow == nil)
-}
-
-@Test func grounderParsesCommonReplyShapes() {
-    func pt(_ s: String) -> [Double]? { Grounder.parsePoint(s).map { [$0.x, $0.y] } }
-    #expect(pt("(412, 88)") == [412, 88])
-    #expect(pt("[500,500]") == [500, 500])
-    #expect(pt("Thought: the 2nd icon.\nAction: click(start_box='(197,525)')") == [197, 525])
-    #expect(pt("<point>10 990</point>") == [10, 990])
-    #expect(pt(#"{"x": 300, "y": 700}"#) == [300, 700])
-    #expect(pt(#"{"bbox_2d": [100, 200, 300, 400], "label": "Save"}"#) == [200, 300])
-    #expect(pt("<think>at (5,5)?</think>(640, 360)") == [640, 360])
-    #expect(pt("(1920, 1080)") == nil)   // pixel space, not [0,1000] — refuse
-    #expect(pt("not found") == nil)
-}
-
-@Test func grounderUserTurnRestatesFormat() {
-    let p = Grounder.userPrompt("Save button")
-    #expect(p.contains("click Save button"))
-    #expect(p.contains("(x, y)") && p.contains("[0,1000]"))
-}
-
-@Test func grounderIsOptIn() {
-    #expect(Endpoints.grounder(env: [:], config: S1Config()) == nil)
-    let e = Endpoints.grounder(env: ["S1_GROUNDER_MODEL": "holo"],
-                               config: S1Config(vlm: .init(base: "http://h:1/v1")))
-    #expect(e?.model == "holo")
-    #expect(e?.baseURL == "http://h:1/v1")
 }
 
 // The live-mic converter is reused for every tap buffer — a converter that
@@ -1890,52 +1729,6 @@ private struct StubJudge: DecisionJudge {
     #expect(down.rationale.contains("judge unavailable"))
 }
 
-@Test func endpointKeysPreferEnvThenKeychainThenFile() {
-    var cfg = S1Config()
-    cfg.s2 = .init(base: "https://openrouter.ai/api/v1", model: "x", key: "file-key")
-    cfg.decision = .init(base: "http://localhost:11434", model: "nimble")
-    #expect(Endpoints.s2(env: [:], config: cfg, secret: { _ in nil }).apiKey == "file-key")
-    #expect(Endpoints.s2(env: [:], config: cfg, secret: { $0 == .s2 ? "kc-key" : nil }).apiKey == "kc-key")
-    #expect(Endpoints.s2(env: ["S1_S2_KEY": "env-key"], config: cfg, secret: { _ in "kc-key" }).apiKey == "env-key")
-    #expect(Endpoints.decision(env: [:], config: cfg, secret: { _ in nil }, installed: { nil })?.baseURL == "http://localhost:11434")
-}
-
-@Test func decisionDefaultsToHostedJevOnlyWithKey() {
-    let none = S1Config()
-    let jevDefault = Endpoints.decision(env: [:], config: none, secret: { $0 == .decision ? "k" : nil }, installed: { [] })
-    #expect(jevDefault?.model == "jev-latest")
-    #expect(jevDefault?.baseURL == "https://api.typesafe.ai")
-    // No key yet → judge quietly off, deterministic S1 keeps working.
-    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil }, installed: { nil }) == nil)
-}
-
-@Test func localDecisionModelOnlyWhenPulled() {
-    var none = S1Config(); none.decision = .init(base: "http://localhost:11434", model: "nimble")
-    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
-                               installed: { ["nimble:latest"] })?.model == "nimble")
-    // Not pulled → judge quietly off instead of failing every step.
-    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
-                               installed: { ["gemma3:4b"] }) == nil)
-    // Can't ask Ollama (no CLI) → trust the server.
-    #expect(Endpoints.decision(env: [:], config: none, secret: { _ in nil },
-                               installed: { nil })?.model == "nimble")
-    var off = S1Config(); off.decision = .init(model: "")
-    #expect(Endpoints.decision(env: [:], config: off, secret: { _ in nil }, installed: { ["nimble:latest"] }) == nil)
-    #expect(Endpoints.decision(env: ["S1_DECISION_MODEL": "off"], config: none, secret: { _ in nil },
-                               installed: { ["nimble:latest"] }) == nil)
-    // Remote servers aren't gated on the local model list.
-    var jev = S1Config(); jev.decision = .init(base: "https://api.typesafe.ai", model: "jev-latest")
-    #expect(Endpoints.decision(env: [:], config: jev, secret: { _ in "k" }, installed: { [] })?.model == "jev-latest")
-}
-
-@Test func catalogShipsNimbleAsDecisionModel() {
-    let n = ModelPull.catalog.first { $0.name == "nimble" }
-    #expect(n?.decision == true && n?.vision == false)
-    #expect(ModelPull.contains(["nimble:latest"], "nimble"))
-    #expect(!ModelPull.contains(["nimble:latest"], "nimble:9b"))
-    #expect(ModelPull.contains(["tev1:0.8b"], "tev1:0.8b"))
-}
-
 @Test func autoLanguageCandidates() {
     let en = SpokenLanguage.candidates(for: "auto", preferred: ["en-US"]).map(SpokenLanguage.code)
     #expect(en == ["en", "id"])
@@ -2007,14 +1800,6 @@ private struct StubJudge: DecisionJudge {
         .decide(observation: NullPerceiver().observation, goal: "open TextEdit", history: [])
     #expect(d.confidence > 0.5)
     #expect(!d.rationale.contains("judge"))
-}
-
-@Test func vlmReusesS2KeyOnSameProvider() {
-    var cfg = S1Config()
-    cfg.vlm = .init(base: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash-vision-exp")
-    #expect(Endpoints.vlm(env: [:], config: cfg, secret: { $0 == .s2 ? "go" : nil }).apiKey == "go")
-    cfg.vlm = .init(base: "https://openrouter.ai/api/v1", model: "x")
-    #expect(Endpoints.vlm(env: [:], config: cfg, secret: { $0 == .s2 ? "go" : nil }).apiKey == nil)
 }
 
 @Test func usageCountsFromEveryProviderShape() {
@@ -2102,40 +1887,6 @@ private struct StubJudge: DecisionJudge {
     #expect(e.state == .speaking)
     for _ in 0 ..< 9 { e.feed(dB: -40, seconds: 0.1) }
     #expect(e.state == .ended)
-}
-
-@Test func oldLocalDefaultsMigrateToHostedOnce() throws {
-    let path = NSTemporaryDirectory() + "cfg-\(UUID().uuidString).json"
-    defer { try? FileManager.default.removeItem(atPath: path) }
-    var old = S1Config(s2: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"))
-    old.decision = .init(base: "http://localhost:11434", model: "nimble")
-    try old.save(to: path)
-    let m = S1Config.load(from: path)
-    #expect(m.decision?.model == "jev-latest" && m.s2?.model == "deepseek-v4.1-flash")
-    // A user's own local pick after migration is left alone.
-    var mine = m; mine.s2 = .init(base: "http://localhost:11434/v1", model: "gemma3:4b")
-    try mine.save(to: path)
-    #expect(S1Config.load(from: path).s2?.model == "gemma3:4b")
-    // Custom choices pre-migration are kept too.
-    var custom = S1Config(s2: .init(base: "https://openrouter.ai/api/v1", model: "x"))
-    custom.decision = .init(base: "http://localhost:11434", model: "tev1")
-    try custom.save(to: path)
-    let c = S1Config.load(from: path)
-    #expect(c.s2?.model == "x" && c.decision?.model == "tev1")
-}
-
-@Test func visionOffByDefaultAndOldLocalVLMMigratesOff() async throws {
-    #expect(await AutoPolicy.endpointAlive(Endpoints.vlm(env: [:], config: S1Config())) == false)
-    let path = NSTemporaryDirectory() + "cfg-\(UUID().uuidString).json"
-    defer { try? FileManager.default.removeItem(atPath: path) }
-    var old = S1Config(vlm: .init(base: "http://localhost:11434/v1", model: "gemma3:4b"))
-    old.defaultsVersion = 2
-    try old.save(to: path)
-    #expect(S1Config.load(from: path).vlm?.model == "")
-    var picked = S1Config(vlm: .init(base: "http://localhost:11434/v1", model: "qwen3-vl:4b"))
-    picked.defaultsVersion = 2
-    try picked.save(to: path)
-    #expect(S1Config.load(from: path).vlm?.model == "qwen3-vl:4b")
 }
 
 @Test func endpointerEndsDespiteDigitalSilenceStartAndRoomNoise() {
@@ -2372,12 +2123,6 @@ private struct DelegatingReasoner: Reasoner {
     #expect(body.hasSuffix("RIFF\r\n--B--\r\n"))
     #expect(!CloudSpeech.ttsSpeaks(model: "canopylabs/orpheus-v1-english", language: "id-ID"))
     #expect(CloudSpeech.ttsSpeaks(model: "gpt-4o-mini-tts", language: "id-ID"))
-    var cfg = S1Config()
-    cfg.stt = .init(base: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo")
-    #expect(Endpoints.stt(env: [:], config: cfg, secret: { _ in nil }) == nil)   // hosted, no key
-    #expect(Endpoints.stt(env: [:], config: cfg, secret: { _ in "k" })?.model == "whisper-large-v3-turbo")
-    #expect(Endpoints.stt(env: [:], config: S1Config(), secret: { _ in "k" }) == nil) // default off
-    #expect(Endpoints.tts(env: [:], config: S1Config(), secret: { _ in "k" }) == nil)
 }
 
 @Test func turnRecorderWritesPCM16Wav() throws {
@@ -2501,45 +2246,6 @@ struct DoneEachSubgoal: Policy {
 
 // MARK: - Standardized config files (providers / convert / doctor / sandbox)
 
-@Test func providerMergeOverridesInPlaceAndAppendsByRole() {
-    // Replacing a builtin id keeps the menu order; a new id lands at the
-    // end of its own role group, not the file's tail.
-    let user = [
-        ProviderPreset(id: "typesafe-jev", label: "Custom Jev", role: "decision",
-                       base: "https://x.example/v1", model: "jev-9", note: nil,
-                       recommended: nil, voice: nil),
-        ProviderPreset(id: "my-s2", label: "Mine", role: "s2",
-                       base: "http://localhost:1234/v1", model: "m", note: nil,
-                       recommended: nil, voice: nil),
-    ]
-    let merged = Providers.merge(user)
-    let jevIdx = merged.firstIndex { $0.id == "typesafe-jev" }!
-    #expect(merged[jevIdx].base == "https://x.example/v1")
-    #expect(merged[jevIdx].model == "jev-9")
-    // typesafe-jev was the first decision builtin — replacement stays there.
-    #expect(jevIdx == Providers.builtin.firstIndex { $0.role == "decision" })
-    let s2s = merged.filter { $0.role == "s2" }
-    #expect(s2s.last?.id == "my-s2")
-    #expect(merged.count == Providers.builtin.count + 1)
-}
-
-@Test func providerValidationCatchesBadEntries() {
-    let bad = [
-        ProviderPreset(id: "", label: "x", role: "s2", base: "https://a", model: "m",
-                       note: nil, recommended: nil, voice: nil),
-        ProviderPreset(id: "dup", label: "a", role: "nope", base: "notaurl", model: "m",
-                       note: nil, recommended: nil, voice: nil),
-        ProviderPreset(id: "dup", label: "b", role: "s2", base: "", model: "m",
-                       note: nil, recommended: nil, voice: nil),
-    ]
-    let issues = Providers.validate(bad)
-    #expect(issues.contains { $0.contains("empty id") })
-    #expect(issues.contains { $0.contains("duplicate id 'dup'") })
-    #expect(issues.contains { $0.contains("unknown role 'nope'") })
-    #expect(issues.contains { $0.contains("not a URL") })
-    #expect(Providers.validate(Providers.builtin).isEmpty)
-}
-
 @Test func convertExtensionsAliasUnitsAndCurrencies() {
     let ext = Convert.Extensions(units: ["click": "km", "furlong": "mi"],
                                  currencies: ["dolar": "usd"])
@@ -2614,16 +2320,14 @@ struct DoneEachSubgoal: Policy {
     try? FileManager.default.createDirectory(atPath: home + "/skills",
                                              withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(atPath: home) }
-    // Corrupt config + corrupt providers + a broken skill.
+    // Corrupt config + a broken skill.
     try? "{ not json".write(toFile: home + "/config.json", atomically: true, encoding: .utf8)
-    try? "[{\"id\": 1}]".write(toFile: home + "/providers.json", atomically: true, encoding: .utf8)
     try? "{\"name\":\"x\",\"steps\":[]}".write(toFile: home + "/skills/x.json",
                                              atomically: true, encoding: .utf8)
     // No real keychain: reading the login service from a test binary pops a
     // SecurityAgent prompt on whoever's Mac runs the suite.
     let items = Doctor.run(home: home, secret: { _ in nil })
     #expect(items.contains { $0.level == .fail && $0.what == "config.json" })
-    #expect(items.contains { $0.level == .fail && $0.what == "providers.json" })
     #expect(items.contains { $0.level == .warn && $0.what == "skills" })
     // Sandbox off is a healthy default.
     #expect(items.contains { $0.what == "sandbox-runtime" && $0.level == .ok })
@@ -2680,50 +2384,6 @@ struct DoneEachSubgoal: Policy {
 }
 
 // MARK: - provider families
-
-@Test func providerFamiliesGroupRolesIntoPills() {
-    let fams = Providers.families()
-    let byID = Dictionary(uniqueKeysWithValues: fams.map { ($0.id, $0) })
-    // The headline multi-role providers.
-    #expect(byID["groq"]?.roles == ["s2", "stt", "tts"])
-    #expect(byID["openai"]?.roles == ["s2", "stt", "tts"])
-    #expect(byID["gemini"]?.roles == ["s2"])
-    #expect(byID["xai"]?.roles == ["s2"])
-    #expect(byID["openrouter"]?.roles == ["s2"])
-    #expect(byID["cloudflare"]?.roles == ["decision", "s2"])
-    #expect(byID["typesafe"]?.roles == ["decision"])
-    // The on-device/off rows never appear — nothing to connect.
-    #expect(byID["builtin"] == nil)
-    // Names come from labels, not raw ids.
-    #expect(byID["groq"]?.name == "Groq")
-    #expect(byID["opencode"]?.name == "OpenCode Go")
-    // Every family carries at least one preset and keeps catalog order.
-    #expect(fams.allSatisfy { !$0.presets.isEmpty })
-    #expect(fams.map(\.id).first == "typesafe")
-}
-
-@Test func providerOwnershipIsPerProviderNotPerRole() {
-    let byID = Dictionary(uniqueKeysWithValues: Providers.families().map { ($0.id, $0) })
-    let jev = Endpoints.defaultDecisionBase
-    // A decision role on TypeSafe is TypeSafe's — not Liquid's/Cloudflare's/Local's.
-    #expect(byID["typesafe"]?.owns(role: "decision", base: jev) == true)
-    #expect(byID["liquid"]?.owns(role: "decision", base: jev) == false)
-    #expect(byID["cloudflare"]?.owns(role: "decision", base: jev) == false)
-    #expect(byID["ollama"]?.owns(role: "decision", base: jev) == false)
-    // S2 on OpenCode belongs only to OpenCode.
-    let s2 = Endpoints.defaultS2Base
-    #expect(byID["opencode"]?.owns(role: "s2", base: s2) == true)
-    #expect(byID["deepseek"]?.owns(role: "s2", base: s2) == false)
-    // Same host, different port = different local provider.
-    #expect(byID["ollama"]?.owns(role: "s2", base: "http://localhost:11434/v1") == true)
-    #expect(byID["local"]?.owns(role: "stt", base: "http://localhost:11434/v1") == false)
-    // Role must match too, and an unset role belongs to nobody.
-    #expect(byID["groq"]?.owns(role: "stt", base: "https://api.groq.com/openai/v1") == true)
-    #expect(byID["groq"]?.owns(role: "decision", base: "https://api.groq.com/openai/v1") == false)
-    #expect(byID["groq"]?.owns(role: "stt", base: "") == false)
-    // Each provider gets its own Keychain account.
-    #expect(byID["liquid"]?.keyAccount != byID["typesafe"]?.keyAccount)
-}
 
 // MARK: - S1 grammar: window/media verbs + click flavors
 

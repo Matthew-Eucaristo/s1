@@ -18,18 +18,15 @@ public enum Doctor {
     /// config.json keys S1Config knows — anything else is almost certainly
     /// a typo the decoder silently ignores.
     static let knownConfigKeys: Set<String> = [
-        "vlm", "s2", "locale", "speak", "vocabulary", "recent", "vlmScreenshot",
-        "brain", "useS2", "notchHUD", "grounder", "decision", "voice", "executor",
-        "stt", "tts", "ttsCloudVoice", "memory", "sandbox", "onboarded",
+        "providers", "models", "cloudVoice", "vision", "locale", "speak", "vocabulary", "recent",
+        "notchHUD", "voice", "executor", "memory", "sandbox", "onboarded",
         "voiceInterrupt", "vad", "vadSensitivity",
-        "defaultsVersion",
     ]
 
     /// The whole ~/.s1 sweep. Synchronous and cheap — every check is a
     /// local file read or a binary probe.
     public static func run(home: String = S1Home.path,
-                           secret: (ModelRole) -> String? = { SecretStore.get(account: $0.rawValue) })
-        -> [Item] {
+                           secret: Models.Secret = Models.keychain) -> [Item] {
         var out: [Item] = []
         let fm = FileManager.default
 
@@ -44,7 +41,7 @@ public enum Doctor {
         }
 
         checkConfig(home: home, out: &out)
-        checkProviders(home: home, out: &out)
+        checkModels(S1Config.load(from: home + "/config.json"), secret: secret, out: &out)
         checkSnippets(home: home, out: &out)
         checkConvert(home: home, out: &out)
         checkSkills(home: home, out: &out)
@@ -93,52 +90,7 @@ public enum Doctor {
                             "off (default) — set sandbox:\"srt\" in config.json to enable"))
         }
 
-        // Keys: warn when a *configured* remote endpoint lacks one. The
-        // decision judge tolerates missing keys (optional) — warn not fail.
-        for role in ModelRole.allCases {
-            let ep = roleEndpoint(role, cfg, secret: secret)
-            guard let ep, !ep.model.isEmpty, !Endpoints.isLocal(ep.base),
-                  !ep.base.isEmpty else { continue }
-            if ep.apiKey.isEmpty {
-                out.append(Item(.warn, "\(role.rawValue) key",
-                                "\(ep.model) @ \(ep.base) has no key — `s1 key set \(role.rawValue)`"))
-            } else {
-                out.append(Item(.ok, "\(role.rawValue) key", "present"))
-            }
-        }
         return out
-    }
-
-    /// Resolved endpoint for a role (nil where the role has none —
-    /// decision/grounder are optional).
-    static func roleEndpoint(_ role: ModelRole, _ cfg: S1Config,
-                             secret: (ModelRole) -> String?)
-        -> (base: String, model: String, apiKey: String)? {
-        let k = secret(role)
-        switch role {
-        case .decision:
-            let d = cfg.decision ?? .init(base: Endpoints.defaultDecisionBase,
-                                          model: Endpoints.defaultDecisionModel)
-            guard !(d.model ?? "").isEmpty else { return nil }
-            return (d.base ?? Endpoints.defaultDecisionBase,
-                    d.model ?? "", k ?? d.key ?? "")
-        case .s2:
-            let s = cfg.s2
-            return (s?.base ?? Endpoints.defaultS2Base,
-                    s?.model ?? Endpoints.defaultS2Model, k ?? s?.key ?? "")
-        case .vlm:
-            guard let v = cfg.vlm, !(v.model ?? "").isEmpty else { return nil }
-            return (v.base ?? "http://localhost:11434/v1", v.model ?? "", k ?? v.key ?? "")
-        case .grounder:
-            guard let g = cfg.grounder, !(g.model ?? "").isEmpty else { return nil }
-            return (g.base ?? "http://localhost:11434/v1", g.model ?? "", k ?? g.key ?? "")
-        case .stt:
-            guard let s = cfg.stt, !(s.model ?? "").isEmpty else { return nil }
-            return (s.base ?? "", s.model ?? "", k ?? s.key ?? "")
-        case .tts:
-            guard let s = cfg.tts, !(s.model ?? "").isEmpty else { return nil }
-            return (s.base ?? "", s.model ?? "", k ?? s.key ?? "")
-        }
     }
 
     static func checkConfig(home: String, out: inout [Item]) {
@@ -169,27 +121,46 @@ public enum Doctor {
         out.append(Item(.ok, "config.json", "valid"))
     }
 
-    static func checkProviders(home: String, out: inout [Item]) {
-        let p = home + "/providers.json"
-        guard let d = try? Data(contentsOf: URL(fileURLWithPath: p)) else {
-            out.append(Item(.ok, "providers.json",
-                            "not customized — \(Providers.builtin.count) builtin presets"))
-            return
+    /// Providers + role assignments — structure only, no network (the
+    /// app and `s1 providers` check live). A role that can't resolve is a
+    /// warning: s1 still runs, that role just sits idle.
+    static func checkModels(_ cfg: S1Config, secret: Models.Secret, out: inout [Item]) {
+        var seen = Set<String>()
+        for entry in cfg.providers ?? [] {
+            guard seen.insert(entry.id).inserted else {
+                out.append(Item(.warn, "providers", "“\(entry.id)” is listed twice"))
+                continue
+            }
+            if let t = entry.template, ProviderCatalog.template(t) == nil {
+                out.append(Item(.warn, "providers", "“\(entry.id)”: unknown template “\(t)”"))
+            }
+            guard let p = Models.provider(entry.id, config: cfg) else { continue }
+            if p.kind == .custom, p.base(.chat) == nil, p.base(.systemOne) == nil {
+                out.append(Item(.fail, "provider \(p.id)", "custom server without a URL"))
+            } else if p.needsKey, (secret(p) ?? "").isEmpty {
+                out.append(Item(.warn, "provider \(p.id)", "no API key — `s1 connect \(p.id)`"))
+            } else {
+                out.append(Item(.ok, "provider \(p.id)", p.needsKey ? "key in Keychain" : "no key needed"))
+            }
         }
-        guard let list = try? JSONDecoder().decode([ProviderPreset].self, from: d) else {
-            out.append(Item(.fail, "providers.json",
-                            "doesn't parse as a preset array — fix or delete to restore builtins"))
-            return
+        for (name, value) in (cfg.models ?? [:]).sorted(by: { $0.key < $1.key }) {
+            guard let role = ModelRole(rawValue: name) else {
+                out.append(Item(.warn, "models", "unknown role “\(name)” — roles: \(ModelRole.allCases.map(\.rawValue).joined(separator: ", "))"))
+                continue
+            }
+            guard ModelRef(value) != nil else {
+                out.append(Item(.warn, "models.\(name)", "“\(value)” isn't provider/model"))
+                continue
+            }
+            switch Models.resolve(role, config: cfg, env: [:], secret: secret) {
+            case .success(let r)?: out.append(Item(.ok, "models.\(name)", "\(r.ref)"))
+            case .failure(let why)?: out.append(Item(.warn, "models.\(name)", "\(value) — \(why), role idle"))
+            case nil: break
+            }
         }
-        for issue in Providers.validate(list) {
-            out.append(Item(.warn, "providers.json", issue))
+        if cfg.models?.isEmpty ?? true {
+            out.append(Item(.ok, "models", "none assigned — grammar only (`s1 connect` adds a provider)"))
         }
-        // The seeded file (s1 setup / ensureFile) equals the builtin
-        // catalog — call it what it is instead of "custom".
-        let isSeed = list == Providers.builtin
-        out.append(Item(.ok, "providers.json", isSeed
-            ? "\(list.count) presets (default catalog — edit to add your own)"
-            : "\(list.count) entries (customized)"))
     }
 
     static func checkSnippets(home: String, out: inout [Item]) {

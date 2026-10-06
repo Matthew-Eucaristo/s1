@@ -227,6 +227,12 @@ public struct AgentLoop {
                 let reason = why
                 esc = StepRecord.Escalation(to: "s2:\(s2.name)", reason: reason)
                 do {
+                    // A reasoner that can see gets the screen with the
+                    // escalation; capture failures fall back to AX only.
+                    if s2.wantsScreenshot, obs.screenshotPath == nil,
+                       let shot = try? await perceiver.observe(wantScreenshot: true) {
+                        obs = shot
+                    }
                     let s2Obs = obs
                     onPhase?("reasoning (S2)…")
                     decision = try await S1Runner.racingKillSwitch(config.killSwitchPath) {

@@ -1,483 +1,591 @@
 import SwiftUI
 import S1Core
 
-/// Liquid Glass shell, Messages-style: the conversation is the content —
-/// it scrolls edge-to-edge and fades under the floating chrome (companion
-/// strip up top, composer at the bottom). Glass is reserved for chrome and
-/// controls; feed rows use plain fills so a long run doesn't stack dozens
-/// of material layers on the GPU. Everything configurable lives in
-/// Settings (⌘,).
+/// The main window: history in the sidebar, the live conversation (or a
+/// past run) in the detail. Glass is reserved for the navigation layer —
+/// toolbar, sidebar, composer, banners; content uses plain fills so a long
+/// run never stacks dozens of material layers.
 @available(macOS 26, *)
 struct ContentView: View {
-    @Bindable var model: AppModel
+    enum Item: Hashable {
+        case conversation
+        case run(URL)
+    }
 
-    @FocusState private var goalFocused: Bool
+    @Bindable var model: AppModel
+    @State private var selection: Item? = .conversation
+    @State private var history: [RunSummary] = []
+    @State private var search = ""
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 340)
+        } detail: {
+            detail
+        }
+        .navigationTitle("s1")
+        .navigationSubtitle(subtitle)
+        .toolbar { toolbar }
+        .task(id: model.historyRevision) { await loadHistory() }
+        .onAppear {
+            model.openSettingsAction = { openSettings() }
+            if model.needsOnboarding { openWindow(id: "onboarding") }
+        }
+        .onChange(of: model.needsOnboarding) {
+            if model.needsOnboarding { openWindow(id: "onboarding") }
+        }
+        // A new command always brings the conversation forward.
+        .onChange(of: model.turns.count) { selection = .conversation }
+        .onChange(of: model.focusGoalToken) { selection = .conversation }
+    }
+
+    // MARK: - sidebar
+
+    private var sidebar: some View {
+        List(selection: $selection) {
+            Label {
+                HStack {
+                    Text("Conversation")
+                    Spacer()
+                    if model.currentTurn != nil {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+            } icon: {
+                Image(systemName: "bubble.left.and.text.bubble.right")
+            }
+            .tag(Item.conversation)
+
+            ForEach(groups, id: \.id) { group in
+                Section(group.title) {
+                    ForEach(group.runs) { run in
+                        HistoryRow(run: run)
+                            .tag(Item.run(run.dir))
+                            .contextMenu {
+                                Button("Run Again") { model.runAgain(run.goal) }
+                                Button("Copy Command") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(run.goal, forType: .string)
+                                }
+                                Divider()
+                                Button("Show in Finder") { model.revealRunDir(run.dir.path) }
+                            }
+                    }
+                }
+            }
+        }
+        .searchable(text: $search, placement: .sidebar, prompt: "Search history")
+        .overlay {
+            if !search.isEmpty && groups.isEmpty {
+                ContentUnavailableView.search(text: search)
+            }
+        }
+    }
+
+    private struct Group { let id: Int; let title: LocalizedStringKey; let runs: [RunSummary] }
+
+    private var groups: [Group] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        let runs = q.isEmpty ? history : history.filter { $0.goal.localizedCaseInsensitiveContains(q) }
+        let cal = Calendar.current
+        var today: [RunSummary] = [], yesterday: [RunSummary] = [], week: [RunSummary] = [], earlier: [RunSummary] = []
+        for r in runs {
+            guard let d = r.started else { earlier.append(r); continue }
+            if cal.isDateInToday(d) { today.append(r) }
+            else if cal.isDateInYesterday(d) { yesterday.append(r) }
+            else if d > Date().addingTimeInterval(-7 * 86_400) { week.append(r) }
+            else { earlier.append(r) }
+        }
+        return [Group(id: 0, title: "Today", runs: today), Group(id: 1, title: "Yesterday", runs: yesterday),
+                Group(id: 2, title: "Previous 7 Days", runs: week), Group(id: 3, title: "Earlier", runs: earlier)]
+            .filter { !$0.runs.isEmpty }
+    }
+
+    private func loadHistory() async {
+        history = DemoContent.enabled ? DemoContent.history() : await Task.detached { RunHistory.list() }.value
+        if case .run(let url)? = selection, !history.contains(where: { $0.dir == url }) {
+            selection = .conversation
+        }
+    }
+
+    // MARK: - detail
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selection {
+        case .run(let url)?:
+            if let run = history.first(where: { $0.dir == url }) {
+                RunDetailView(run: run, model: model)
+                    .id(url)
+            } else {
+                ConversationView(model: model)
+            }
+        default:
+            ConversationView(model: model)
+        }
+    }
+
+    // MARK: - toolbar
+
+    private var subtitle: String {
+        if !model.companionAvailable { return String(localized: "Companion off — a terminal listener is active") }
+        switch model.serveState {
+        case .listening: return String(localized: "Listening…")
+        case .running: return String(localized: "Working…")
+        case .idle: return model.running ? String(localized: "Working…") : String(localized: "Press ⇧⇧ anywhere to talk")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                selection = .conversation
+                model.clearConversation()
+                model.focusGoalToken += 1
+            } label: {
+                Label("New Conversation", systemImage: "square.and.pencil")
+            }
+            .help("New Conversation (⌘K)")
+            .disabled(model.running || model.turns.isEmpty)
+        }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarItem(placement: .primaryAction) {
+            let on = model.serveState != .idle
+            Button {
+                model.toggleServe()
+            } label: {
+                Label(on ? "Stop Listening" : "Listen", systemImage: on ? "waveform" : "mic")
+                    .symbolEffect(.variableColor.iterative, isActive: model.serveState == .listening)
+            }
+            .tint(on ? .red : nil)
+            .buttonStyle(on ? AnyPrimitiveButtonStyle(.glassProminent) : AnyPrimitiveButtonStyle(.automatic))
+            .help(on ? "Stop listening (⇧⇧)" : "Listen for commands (⇧⇧ or ⌃⌥Space, anywhere)")
+            .disabled(!model.companionAvailable)
+        }
+    }
+}
+
+/// Type-erased button style so one toolbar button can switch looks.
+struct AnyPrimitiveButtonStyle: PrimitiveButtonStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: PrimitiveButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
+}
+
+@available(macOS 26, *)
+private struct HistoryRow: View {
+    let run: RunSummary
+
+    var body: some View {
+        let state = Turn.State(status: run.status)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: state.symbol)
+                .font(.caption)
+                .foregroundStyle(state.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(run.goal).lineLimit(2)
+                if let d = run.started {
+                    Text(d, format: .relative(presentation: .named))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - conversation
+
+@available(macOS 26, *)
+struct ConversationView: View {
+    @Bindable var model: AppModel
+    @FocusState private var composerFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        feed
-            // Chrome floats over content; the soft edge effect is the
-            // standard macOS 26 fade as rows pass underneath.
-            .safeAreaInset(edge: .top, spacing: 0) { topChrome }
-            .safeAreaInset(edge: .bottom, spacing: 0) { bottomChrome }
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .frame(minWidth: 620, minHeight: 500)
-            .onAppear { model.openSettingsAction = { openSettings() } }
-            .toolbar {
-                ToolbarItem(placement: .secondaryAction) {
-                    Button {
-                        model.pickAudioAndTranscribe()
-                    } label: {
-                        Label("Transcribe audio file", systemImage: "doc.waveform")
-                    }
-                    .help("Transcribe an audio file instead of the mic")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    SettingsLink {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    .help("Settings (⌘,)")
-                }
-            }
-            .onChange(of: model.focusGoalToken) { goalFocused = true }
-            .onAppear { goalFocused = true }
-            // First run and "Set Up s1 Again…" both flip needsOnboarding; the
-            // wizard is a separate window so it survives this view's lifecycle.
-            .onAppear { if model.needsOnboarding { openWindow(id: "onboarding") } }
-            .onChange(of: model.needsOnboarding) {
-                if model.needsOnboarding { openWindow(id: "onboarding") }
-            }
-    }
-
-    // MARK: - chrome
-
-    /// Floating header: permission/key banners only when needed, always
-    /// the companion state strip. Glass on chrome, not on content.
-    @ViewBuilder
-    private var topChrome: some View {
-        VStack(spacing: 10) {
-            if !model.permissions.ready { onboardingBanner }
-            else if !model.missingKeys.isEmpty { keysBanner }
-            companionRow
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-    }
-
-    /// Floating footer: the one place to type or talk, with the run
-    /// status tucked under it.
-    private var bottomChrome: some View {
-        VStack(spacing: 8) {
-            composer
-            statusBar
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-    }
-
-    /// Hosted brains need a key once; until then s1 still runs on its
-    /// deterministic grammar, so this is a hint, not a gate.
-    private var keysBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "key.fill").foregroundStyle(.orange).accessibilityHidden(true)
-            Text("Add an API key for \(model.missingKeys.joined(separator: " and ")) to turn on the hosted models.")
-                .font(.callout)
-            Spacer()
-            SettingsLink { Text("Add Key…") }
-        }
-        .padding(10)
-        .glassEffect(in: .rect(cornerRadius: 12))
-    }
-
-    /// First-run guidance: without AX + Screen Recording nothing works,
-    /// so the biggest surface in the window points straight at the fix.
-    private var onboardingBanner: some View {
-        GlassEffectContainer {
-            HStack(spacing: 12) {
-                Image(systemName: "hand.raised.fill")
-                    .font(.title2)
-                    .foregroundStyle(.orange)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Grant \(missingPermissions) to begin")
-                        .font(.callout.weight(.semibold))
-                    Text("Turn on S1 in Privacy & Security → Accessibility. Already on but still here? Click Fix — an updated app needs a fresh grant.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Fix") { model.resetAccessibility() }
-                    .controlSize(.small)
-                Button("Grant…") { model.requestPermissions() }
-                    .buttonStyle(.glassProminent)
-                    .controlSize(.small)
-            }
-            .padding(12)
-            .glassEffect(.regular.tint(.orange.opacity(0.25)), in: .rect(cornerRadius: 14))
-        }
-    }
-
-    /// Names the grants still missing — the banner claims exactly what
-    /// isn't granted yet rather than a hardcoded pair.
-    private var missingPermissions: String {
-        "Accessibility"
-    }
-
-    /// Always-on companion strip — same surface as the menu bar item.
-    private var companionRow: some View {
-        GlassEffectContainer {
-            HStack(spacing: 10) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 7))
-                    .foregroundStyle(model.serveState == .idle ? Color.secondary
-                                     : model.serveState == .listening ? .green : .orange)
-                    .symbolEffect(.pulse, isActive: model.serveState == .listening)
-                    .accessibilityHidden(true)   // decorative; the text beside it carries state
-                Text(model.serveStatus)
-                    .font(.callout)
-                    .lineLimit(1)
-                    .contentTransition(.opacity)
-                if model.serveState == .listening {
-                    LiveWaveform(barCount: 16)
-                        .frame(width: 76, height: 16)
-                        .accessibilityHidden(true)
-                }
-                Spacer()
-                Button(model.serveState == .idle ? "Listen" : "Sleep") {
-                    model.toggleServe()
-                }
-                .buttonStyle(.glass)
-                .controlSize(.small)
-                .help("Always-on companion (⌘⇧L, or ⇧⇧ / ⌃⌥Space anywhere)")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: .rect(cornerRadius: 14))
-            .animation(.smooth, value: model.serveState)
-        }
-    }
-
-    // MARK: - the conversation
-
-    /// The conversation — your goal on the right, the agent's steps as a
-    /// compact activity list, and its closing line on the left. Fills
-    /// instead of glass: a long run stays cheap to render and reads like
-    /// Messages, not a stack of tiles.
-    private var feed: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(model.feed) { item in
-                    switch item.kind {
-                    case .goal(let text): goalBubble(text)
-                    case .step(let rec): stepRow(rec)
-                    case .reply(let text): replyText(text)
+            LazyVStack(alignment: .leading, spacing: 22) {
+                ForEach(model.turns) { turn in
+                    TurnView(turn: turn, model: model)
+                        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 20)
+            .frame(maxWidth: 780)
+            .frame(maxWidth: .infinity)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: model.turns.count)
+        }
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .scrollEdgeEffectStyle(.soft, for: .all)
+        .overlay {
+            if model.turns.isEmpty {
+                EmptyConversation(model: model) { composerFocused = true }
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !model.permissions.accessibility && !DemoContent.enabled { AccessibilityBanner(model: model) }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Composer(model: model, focused: $composerFocused)
+        }
+        .onAppear { composerFocused = true }
+        .onChange(of: model.focusGoalToken) { composerFocused = true }
+    }
+}
+
+@available(macOS 26, *)
+private struct TurnView: View {
+    let turn: Turn
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Spacer(minLength: 90)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if turn.spoken {
+                        Image(systemName: "waveform")
+                            .font(.caption.weight(.semibold))
+                            .accessibilityLabel("spoken")
+                    }
+                    Text(turn.goal).textSelection(.enabled)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .foregroundStyle(.white)
+                .background(Color.accentColor.gradient, in: .rect(cornerRadius: 18, style: .continuous))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("You: \(turn.goal)")
+
+            if !turn.steps.isEmpty || turn.state == .running {
+                ActivityCard(turn: turn, model: model)
+            }
+
+            if let reply = turn.reply {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: turn.state.symbol)
+                        .foregroundStyle(turn.state.tint)
+                        .symbolEffect(.bounce, value: turn.state)
+                    Text(reply)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+/// The agent's work for one turn — open while it runs, folded to one line
+/// when it's done (click to see every step again).
+@available(macOS 26, *)
+private struct ActivityCard: View {
+    let turn: Turn
+    let model: AppModel
+    @State private var expanded: Bool?
+
+    private var isOpen: Bool { expanded ?? (turn.state == .running) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.smooth(duration: 0.25)) { expanded = !isOpen }
+            } label: {
+                HStack(spacing: 10) {
+                    if turn.state == .running {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "list.bullet.rectangle")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(header)
+                        .font(.callout)
+                        .foregroundStyle(turn.state == .running ? .primary : .secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                    Spacer()
+                    if !turn.steps.isEmpty {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
                     }
                 }
-                if model.running && model.steps.isEmpty {
-                    Label("working…", systemImage: "sparkles")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .symbolEffect(.pulse, isActive: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                }
+                .contentShape(.rect)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 6)
-            .animation(reduceMotion ? nil : .smooth, value: model.feed.count)
-        }
-        .scrollIndicators(.automatic)
-        .defaultScrollAnchor(.bottom)
-        .overlay {
-            if model.feed.isEmpty && !model.running { emptyState }
-        }
-    }
-
-    /// Empty feed = the landing — the standard macOS unavailable-content
-    /// pattern with one-tap starters.
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("Tell s1 what to do", systemImage: "waveform.and.mic")
-        } description: {
-            Text("Type or talk — on the Mac, in Indonesian or English.")
-        } actions: {
-            HStack(spacing: 8) {
-                ForEach(examples, id: \.self) { ex in
-                    Button(ex) { model.goal = ex; goalFocused = true }
-                        .buttonStyle(.glass)
-                        .controlSize(.small)
-                }
-            }
-        }
-    }
-
-    /// One-tap starters that exercise the common verbs.
-    private var examples: [String] {
-        SpokenLanguage.code(SpokenLanguage.candidates(for: model.locale)[0]) == "id"
-            ? ["buka TextEdit lalu ketik halo", "buka Notes", "tangkap layar"]
-            : ["open TextEdit then type hello", "open Notes", "screenshot"]
-    }
-
-    private func goalBubble(_ text: String) -> some View {
-        HStack {
-            Spacer(minLength: 60)
-            Text(text)
-                .font(.callout)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.tint.opacity(0.18), in: .rect(cornerRadius: 16))
-                .textSelection(.enabled)
-        }
-        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-        .accessibilityLabel("you asked: \(text)")
-    }
-
-    private func replyText(_ text: String) -> some View {
-        HStack {
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            Spacer(minLength: 60)
-        }
-        .padding(.horizontal, 4)
-        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-        .accessibilityLabel("s1: \(text)")
-    }
-
-    private func stepRow(_ rec: StepRecord) -> some View {
-        let row = HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("#\(rec.index)")
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
-                .frame(width: 30, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(actionLabel(rec.action))
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                if let out = rec.outcome {
-                    Text(out)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 8)
-            if let esc = rec.escalation {
-                Image(systemName: "arrow.up.right.circle")
-                    .foregroundStyle(.orange)
-                    .help("\(esc.to): \(esc.reason)")
-                    .accessibilityLabel("escalated to \(esc.to)")
-            }
-            if let conf = rec.confidence {
-                Text(conf, format: .number.precision(.fractionLength(2)))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            badge(rec.decidedBy)
-            if let v = rec.verified {
-                Image(systemName: v ? "checkmark.seal.fill" : "xmark.seal")
-                    .foregroundStyle(v ? .green : .red)
-                    .symbolEffect(.bounce, value: v)
-                    .accessibilityLabel(v ? "verified" : "not verified")
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.primary.opacity(0.05), in: .rect(cornerRadius: 12))
-        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-        return Button { model.revealRunDir() } label: { row }
             .buttonStyle(.plain)
-            .help("Reveal this run's artifacts")
-            // One spoken line per step instead of every child announced raw.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(stepSummary(rec))
-            .accessibilityHint("Reveal run artifacts")
+            .disabled(turn.steps.isEmpty)
+
+            if isOpen && !turn.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(Array(turn.steps.enumerated()), id: \.offset) { _, step in
+                        StepRow(step: step)
+                    }
+                }
+                .padding(.top, 12)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(.quaternary.opacity(0.55), in: .rect(cornerRadius: 14, style: .continuous))
+        .contextMenu {
+            if let dir = turn.runDir {
+                Button("Show in Finder") { model.revealRunDir(dir) }
+            }
+            Button("Run Again") { model.runAgain(turn.goal) }
+        }
     }
 
-    // MARK: - composer
+    private var header: String {
+        if turn.state == .running {
+            if let p = turn.phase { return p }
+            if let last = turn.steps.last { return StepPresentation(last).title }
+            return String(localized: "Working…")
+        }
+        let n = turn.steps.count
+        let steps = String(localized: "\(n) steps")
+        guard let d = turn.duration else { return steps }
+        return "\(steps) · \(StepPresentation.duration(d))"
+    }
+}
 
-    /// The composer — one obvious place to type or talk. Mic, input, and
-    /// send live in a single glass bar, ChatGPT-style; it doubles as the
-    /// stop button while a run is in flight.
-    private var composer: some View {
-        GlassEffectContainer {
-            VStack(alignment: .leading, spacing: 8) {
-                if !model.transcript.isEmpty {
-                    Label(model.transcript, systemImage: "waveform")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .transition(.opacity)
-                }
-                HStack(spacing: 10) {
+// MARK: - composer
+
+@available(macOS 26, *)
+private struct Composer: View {
+    @Bindable var model: AppModel
+    var focused: FocusState<Bool>.Binding
+    @Namespace private var glass
+
+    private var canSend: Bool { !model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.callout)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .glassEffect(.regular, in: .capsule)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            GlassEffectContainer(spacing: 10) {
+                HStack(alignment: .bottom, spacing: 10) {
                     Button {
                         model.toggleListen()
                     } label: {
                         Image(systemName: model.listening ? "stop.fill" : "mic.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 34, height: 34)
-                            .contentShape(Circle())
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 38, height: 38)
+                            .contentShape(.circle)
                             .contentTransition(.symbolEffect(.replace))
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive().tint(
-                        model.listening ? .red.opacity(0.5) : .clear), in: .circle)
-                    .help("Dictate a command (⌘L) — on-device, auto language")
-                    .accessibilityLabel(model.listening ? "Stop dictation" : "Dictate a command")
+                    .glassEffect(.regular.interactive().tint(model.listening ? .red.opacity(0.55) : nil), in: .circle)
+                    .help("Speak a command (⌘L)")
+                    .accessibilityLabel(model.listening ? "Stop listening" : "Speak a command")
 
-                    TextField("Message s1 — e.g. buka TextEdit lalu ketik halo",
-                              text: $model.goal, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.body)
-                        .lineLimit(1...4)
-                        .focused($goalFocused)
-                        .onSubmit { Task { await model.run() } }
-
-                    if model.listening {
-                        LiveWaveform()
-                            .frame(width: 60, height: 22)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if model.listening {
+                            HStack(spacing: 8) {
+                                LiveWaveform(barCount: 18).frame(width: 64, height: 16)
+                                Text(model.transcript.isEmpty ? String(localized: "Listening…") : model.transcript)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .font(.callout)
                             .transition(.opacity)
-                            .accessibilityHidden(true)
+                        }
+                        TextField("Ask s1 to do something…", text: $model.goal, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .lineLimit(1...6)
+                            .focused(focused)
+                            .onSubmit { Task { await model.run() } }
+                            .onKeyPress(.upArrow) {
+                                guard model.goal.isEmpty, let last = model.recentGoals.first else { return .ignored }
+                                model.goal = last
+                                return .handled
+                            }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 38)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 19, style: .continuous))
 
                     if model.running {
-                        Button {
-                            model.stop()
-                        } label: {
+                        Button { model.stop() } label: {
                             Image(systemName: "stop.fill")
                                 .font(.system(size: 13, weight: .bold))
-                                .frame(width: 34, height: 34)
+                                .frame(width: 38, height: 38)
+                                .contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive().tint(.red.opacity(0.45)), in: .circle)
+                        .glassEffect(.regular.interactive().tint(.red.opacity(0.6)), in: .circle)
+                        .glassEffectID("action", in: glass)
+                        .keyboardShortcut(".", modifiers: .command)
                         .help("Stop (⌘.)")
                         .accessibilityLabel("Stop")
-                        .transition(.scale.combined(with: .opacity))
                     } else {
-                        Button {
-                            Task { await model.run() }
-                        } label: {
+                        Button { Task { await model.run() } } label: {
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 14, weight: .bold))
-                                .frame(width: 34, height: 34)
+                                .font(.system(size: 15, weight: .bold))
+                                .frame(width: 38, height: 38)
+                                .contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive().tint(.accentColor.opacity(0.45)), in: .circle)
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .help("Run (⌘↩)")
+                        .foregroundStyle(canSend ? .white : .secondary)
+                        .glassEffect(.regular.interactive().tint(canSend ? .accentColor : nil), in: .circle)
+                        .glassEffectID("action", in: glass)
+                        .disabled(!canSend)
+                        .help("Run (↩)")
                         .accessibilityLabel("Run")
-                        .disabled(model.goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .animation(.smooth, value: model.running)
-                .animation(.smooth, value: model.transcript.isEmpty)
-                if !model.recentGoals.isEmpty {
-                    HStack(spacing: 8) {
-                        Menu("Recent") {
-                            ForEach(model.recentGoals, id: \.self) { g in
-                                Button(g) { model.goal = g }
-                            }
-                        }
-                        .controlSize(.mini)
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
+            .animation(.smooth(duration: 0.3), value: model.running)
+            .animation(.smooth(duration: 0.25), value: model.listening)
         }
+        .animation(.smooth, value: model.notice)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 18)
+        .padding(.top, 8)
+        .frame(maxWidth: 780)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - empty state + banners
+
+@available(macOS 26, *)
+private struct EmptyConversation: View {
+    @Bindable var model: AppModel
+    var focusComposer: () -> Void
+
+    private var examples: [String] {
+        SpokenLanguage.code(SpokenLanguage.candidates(for: model.locale)[0]) == "id"
+            ? ["buka Notes", "buka TextEdit lalu ketik halo", "tangkap layar", "ingat bahwa editorku Zed"]
+            : ["open Notes", "open TextEdit then type hello", "take a screenshot", "remember that my editor is Zed"]
     }
 
-    // MARK: - status
-
-    private var statusBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 7))
-                .foregroundStyle(statusColor)
-                .accessibilityHidden(true)   // decorative; status text follows
-            Text(model.status)
-                .font(.callout)
-                .contentTransition(.opacity)
-                .animation(.smooth, value: model.status)
-            if let runDir = model.runDir {
-                Button(runDir) { model.revealRunDir() }
-                    .buttonStyle(.plain)
-                    .font(.caption.monospaced())
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 72, height: 72)
+                .accessibilityHidden(true)
+            VStack(spacing: 6) {
+                Text("What should s1 do?")
+                    .font(.title.weight(.semibold))
+                Text("Type it below — or press ⇧⇧ anywhere on your Mac and say it.")
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
-            Spacer()
-            Text("\(model.steps.count) steps")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .contentTransition(.numericText())
-                .animation(.smooth, value: model.steps.count)
+            FlowLayout(spacing: 8) {
+                ForEach(Array((model.recentGoals.prefix(3) + examples).prefix(6)), id: \.self) { ex in
+                    Button(ex) {
+                        model.goal = ex
+                        focusComposer()
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+            .frame(maxWidth: 520)
+            if !model.models.hasReasoner {
+                Button {
+                    model.openSettings("models")
+                } label: {
+                    Label("Only the built-in grammar is on. Connect a model to handle anything else.",
+                          systemImage: "sparkles")
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+                .padding(.top, 4)
+            }
         }
-        .padding(.horizontal, 8)
+        .multilineTextAlignment(.center)
+        .padding(40)
+    }
+}
+
+@available(macOS 26, *)
+private struct AccessibilityBanner: View {
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hand.raised.fill")
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("s1 needs Accessibility access")
+                    .font(.callout.weight(.semibold))
+                Text("It's how s1 sees and uses your Mac. Already turned on? Click Repair — every update needs a fresh grant.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            Button("Repair") { model.resetAccessibility() }
+            Button("Open Settings") { model.requestPermissions() }
+                .buttonStyle(.glassProminent)
+        }
+        .controlSize(.small)
+        .padding(12)
+        .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .rect(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .frame(maxWidth: 820)
+    }
+}
+
+/// Wrapping row layout for chips.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(proposal.width ?? .infinity, subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: width, height: height)
     }
 
-    private func badge(_ decidedBy: String) -> some View {
-        let (text, color): (String, Color) = decidedBy.hasPrefix("s1")
-            ? ("S1", .teal)
-            : decidedBy.hasPrefix("s2") ? ("S2", .purple) : ("SYS", .gray)
-        return Text(text)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.2), in: .capsule)
-            .foregroundStyle(color)
-    }
-
-    private var statusColor: Color {
-        if model.running || model.listening { return .accentColor }
-        switch model.status {
-        case "done": return .green
-        case "idle", "transcribed": return .secondary
-        default: return model.status.hasPrefix("error") || model.status.hasPrefix("mic") || model.status.hasPrefix("stt") ? .red : .orange
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(bounds.width, subviews) {
+            var x = bounds.minX + (bounds.width - row.width) / 2
+            for i in row.indices {
+                let s = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+                x += s.width + spacing
+            }
+            y += row.height + spacing
         }
     }
 
-    /// VoiceOver line for one step — action, outcome, brain, verification.
-    private func stepSummary(_ rec: StepRecord) -> String {
-        var s = "step \(rec.index): \(actionLabel(rec.action))"
-        if let out = rec.outcome { s += ", \(out)" }
-        s += ", \(rec.decidedBy.hasPrefix("s2") ? "system 2" : rec.decidedBy.hasPrefix("s1") ? "system 1" : "system")"
-        if let esc = rec.escalation { s += ", escalated to \(esc.to)" }
-        if let v = rec.verified { s += v ? ", verified" : ", verification failed" }
-        return s
-    }
+    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
 
-    private func actionLabel(_ action: Action?) -> String {
-        guard let action else { return "no action" }
-        switch action {
-        case .captureScreenshot(let r): return "screenshot — \(r)"
-        case .verify(let e): return "verify — \(e)"
-        case .done(let s): return "done — \(s)"
-        case .moveMouse(let x, let y): return "move mouse (\(Int(x)), \(Int(y)))"
-        case .click(let x, let y): return "click (\(Int(x)), \(Int(y)))"
-        case .rightClick(let x, let y): return "right-click (\(Int(x)), \(Int(y)))"
-        case .doubleClick(let x, let y): return "double-click (\(Int(x)), \(Int(y)))"
-        case .drag(let fx, let fy, let tx, let ty):
-            return "drag (\(Int(fx)), \(Int(fy))) → (\(Int(tx)), \(Int(ty)))"
-        case .typeText(let t): return "type \"\(t)\""
-        case .keyCombo(let k): return "keys \(k.joined(separator: "+"))"
-        case .scroll(let dx, let dy): return "scroll (\(Int(dx)), \(Int(dy)))"
-        case .axPress(let r): return "ax press \(r)"
-        case .axSetValue(let r, let v): return "ax set \(r) = \"\(v)\""
-        case .axAction(let r, let n): return "\(n) \(r)"
-        case .axSetAttribute(let r, let a, let v): return "\(a)=\(v) \(r)"
-        case .openApp(let n): return "open \(n)"
-        case .wait(let s): return "wait \(s)s"
-        case .shell(let c): return "shell: \(c)"
-        case .custom(let n, _): return "custom: \(n)"
+    private func arrange(_ maxWidth: CGFloat, _ subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for i in subviews.indices {
+            let s = subviews[i].sizeThatFits(.unspecified)
+            let extra = rows[rows.count - 1].indices.isEmpty ? s.width : s.width + spacing
+            if rows[rows.count - 1].width + extra > maxWidth, !rows[rows.count - 1].indices.isEmpty {
+                rows.append(Row())
+            }
+            let r = rows.count - 1
+            rows[r].width += rows[r].indices.isEmpty ? s.width : s.width + spacing
+            rows[r].height = max(rows[r].height, s.height)
+            rows[r].indices.append(i)
         }
+        return rows.filter { !$0.indices.isEmpty }
     }
 }

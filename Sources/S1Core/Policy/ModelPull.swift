@@ -29,58 +29,6 @@ public enum ModelPull {
     /// source and takes much longer).
     public static let installHint = "brew install --cask ollama"
 
-    /// A curated pick for the app's model catalog — one tap installs it.
-    /// `vision` marks brains the VLM policy can ground screenshots with;
-    /// text-only models are S2 candidates (reasoning) but can't see.
-    public struct CatalogEntry: Sendable {
-        public let name: String
-        /// e.g. "3.3 GB" — what the download roughly costs.
-        public let size: String
-        /// One line on why you'd pick it.
-        public let blurb: String
-        public let vision: Bool
-        /// GUI-grounding specialist — wired as the click grounder, not the brain.
-        public let grounding: Bool
-        /// System One decision judge (typed yes/no · choice · score) — not a chat model.
-        public let decision: Bool
-        public init(_ name: String, _ size: String, _ blurb: String, vision: Bool,
-                    grounding: Bool = false, decision: Bool = false) {
-            self.name = name; self.size = size; self.blurb = blurb
-            self.vision = vision; self.grounding = grounding; self.decision = decision
-        }
-    }
-
-    /// The shipped shortlist — smallest-useful first, all Apache/MIT and
-    /// all one `ollama pull` away. S1 wants vision; S2 wants reasoning.
-    public static let catalog: [CatalogEntry] = [
-        .init("nimble", "9.5 GB",
-              "default S1 decision judge — calibrated yes/no · choice · score",
-              vision: false, decision: true),
-        .init("tev1:0.8b", "811 MB",
-              "tiny decision judge — fast, but poorly calibrated for step checks",
-              vision: false, decision: true),
-        .init("gemma3:4b", "3.3 GB",
-              "default — sees screenshots, decent reasoning, ships tested", vision: true),
-        .init("qwen2.5vl:3b", "3.1 GB",
-              "smallest vision brain — snappier steps, weaker at long goals", vision: true),
-        .init("qwen3-vl:8b", "6.1 GB",
-              "strongest vision brain that fits 16 GB — best grounding, slower per step", vision: true),
-        .init("llama3.2:3b", "2.0 GB",
-              "text-only featherweight — S2 chats, cannot see screens", vision: false),
-        .init("qwen3:8b", "5.2 GB",
-              "stronger S2 reasoning — slower but better multi-step plans", vision: false),
-        .init("gpt-oss:20b", "13 GB",
-              "heaviest brain — best plans on Apple Silicon, needs the RAM", vision: false),
-        .init("llava:7b", "4.7 GB",
-              "classic vision agent — fallback when gemma3 stumbles", vision: true),
-        // Community GGUF packaging of H Company's Holo-3.1 (Apache 2.0).
-        .init("ahmadwaqar/holo-3.1:0.8b", "1.3 GB",
-              "click grounder — GUI-trained, finds buttons from a screenshot, tiny", vision: true,
-              grounding: true),
-        .init("ahmadwaqar/holo-3.1:4b", "5.8 GB",
-              "click grounder — sharper GUI grounding, heavier", vision: true, grounding: true),
-    ]
-
     /// Models already pulled — parses `ollama list` ("NAME  ID  SIZE  MODIFIED").
     /// Returns [] when ollama or its server is missing; never throws.
     /// `nimble` matches `nimble:latest`; a tagged name must match exactly.

@@ -5,7 +5,7 @@ import Foundation
 /// prompts, replies, screen text, or keys — only numbers and names.
 public struct UsageRecord: Codable, Sendable, Equatable {
     public var ts: Date
-    public var role: String          // s1-decision | s1-vlm | s1-grounder | s2
+    public var role: String          // a ModelRole raw value: judge | reasoner | vision | …
     public var host: String
     public var model: String
     public var served: String?       // versioned model the provider reports

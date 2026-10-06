@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 /// API keys live in the login Keychain, never in `~/.s1/config.json`.
-/// One generic-password item per model role, under one service name.
+/// One generic-password item per connected provider, under one service name.
 public enum SecretStore {
     public static let defaultService = "com.matthew.s1.api-keys"
 
@@ -51,22 +51,4 @@ public enum SecretStore {
         let status = SecItemDelete(q as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
-}
-
-/// The model roles s1 wires — each owns one endpoint and one Keychain key.
-public enum ModelRole: String, CaseIterable, Sendable {
-    /// S1 decision model: typed choice/score/yes-no over current + past state.
-    case decision
-    /// S1 vision brain (VLM policy) — OpenAI-compatible chat with images.
-    case vlm
-    /// S1 click grounder — OpenAI-compatible GUI-grounding model.
-    case grounder
-    /// S2 reasoner — any OpenAI-compatible LLM.
-    case s2
-    /// Optional cloud speech-to-text (OpenAI-compatible audio API).
-    case stt
-    /// Optional cloud text-to-speech (OpenAI-compatible audio API).
-    case tts
-
-    public var envPrefix: String { "S1_\(rawValue.uppercased())" }
 }

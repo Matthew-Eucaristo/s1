@@ -78,7 +78,7 @@ public enum CloudSpeech {
         if let k = ep.apiKey, !k.isEmpty { req.setValue("Bearer \(k)", forHTTPHeaderField: "Authorization") }
         req.httpBody = multipart(file: try Data(contentsOf: wav), filename: "turn.wav",
                                  fields: fields, boundary: boundary)
-        let data = try await send(req, role: "stt", model: ep.model)
+        let data = try await send(req, role: "transcribe", model: ep.model)
         struct R: Decodable { var text: String }
         return try JSONDecoder().decode(R.self, from: data).text
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,7 +96,7 @@ public enum CloudSpeech {
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": ep.model, "input": text, "voice": voice, "response_format": "wav",
         ], options: [.sortedKeys])
-        return try await send(req, role: "tts", model: ep.model)
+        return try await send(req, role: "speak", model: ep.model)
     }
 
     /// Whether a TTS model can read `language` — Groq's Orpheus English
@@ -111,31 +111,5 @@ public enum CloudSpeech {
     public static func defaultVoice(for ep: Endpoint) -> String {
         let host = URL(string: ep.baseURL)?.host ?? ""
         return host.contains("groq") ? "troy" : "alloy"
-    }
-}
-
-public extension Endpoints {
-    /// Cloud STT endpoint, nil = on-device only (the default).
-    static func stt(env: [String: String] = ProcessInfo.processInfo.environment,
-                    config: S1Config = .load(),
-                    secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint? {
-        endpoint(.stt, env: env, ep: config.stt, secret: secret)
-    }
-
-    /// Cloud TTS endpoint, nil = Apple voices (the default).
-    static func tts(env: [String: String] = ProcessInfo.processInfo.environment,
-                    config: S1Config = .load(),
-                    secret: (ModelRole) -> String? = Endpoints.keychainSecret) -> Endpoint? {
-        endpoint(.tts, env: env, ep: config.tts, secret: secret)
-    }
-
-    private static func endpoint(_ role: ModelRole, env: [String: String], ep: S1Config.ModelEndpoint?,
-                                 secret: (ModelRole) -> String?) -> Endpoint? {
-        let p = role.envPrefix
-        guard let model = (env["\(p)_MODEL"] ?? ep?.model)?.trimmingCharacters(in: .whitespaces),
-              !model.isEmpty, let base = env["\(p)_BASE"] ?? ep?.base, !base.isEmpty else { return nil }
-        let key = env["\(p)_KEY"] ?? secret(role) ?? ep?.key
-        if !isLocal(base), (key ?? "").isEmpty { return nil }
-        return Endpoint(baseURL: base, model: model, apiKey: key)
     }
 }

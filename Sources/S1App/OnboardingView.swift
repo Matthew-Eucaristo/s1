@@ -1,244 +1,332 @@
 import SwiftUI
 import S1Core
 
-/// First-run setup wizard — opens once (until `onboarded` lands in
-/// config.json) and walks the only things s1 genuinely needs:
-///   welcome → permissions → Cua Driver → API keys → done.
-/// Every step has a skip path; the recommended default is always the
-/// button on the right. `s1 setup` is the same flow for the terminal.
+/// First-run setup — opens until `onboarded` lands in config.json, and from
+/// the app menu ("Set Up s1…"). Only what s1 genuinely needs, every step
+/// skippable, the recommended choice always the default button.
+/// `s1 setup` is the same flow in Terminal.
 @available(macOS 26, *)
 struct OnboardingView: View {
     @Bindable var model: AppModel
     @Environment(\.dismissWindow) private var dismissWindow
-    @State private var step = 0
-    @State private var decisionKey = ""
-    @State private var s2Key = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var step = Step.welcome
+    @State private var forward = true
+    /// Asked once — after that, Continue works with or without the grant.
+    @State private var askedForAccess = false
+
+    enum Step: Int, CaseIterable { case welcome, permissions, models, executor, ready }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Progress dots — five steps, current highlighted.
-            HStack(spacing: 8) {
-                ForEach(0..<5, id: \.self) { i in
-                    Circle()
-                        .fill(i == step ? Color.accentColor
-                                        : i < step ? Color.accentColor.opacity(0.4)
-                                                   : Color.secondary.opacity(0.25))
-                        .frame(width: 7, height: 7)
-                        .animation(.spring(response: 0.3), value: step)
-                }
+            ZStack {
+                page(step)
+                    .id(step)
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+                        removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
             }
-            .padding(.top, 18)
-
-            Group {
-                switch step {
-                case 0: welcomeStep
-                case 1: permissionsStep
-                case 2: cuaStep
-                case 3: keysStep
-                default: doneStep
-                }
-            }
-            .id(step)
-            .transition(.asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)))
-            .animation(.smooth, value: step)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 36)
+            .clipped()
 
-            Divider()
-            footer
+            HStack {
+                if step == .welcome {
+                    Button("Skip Setup") { finish() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Back") { go(-1) }
+                }
+                Spacer()
+                HStack(spacing: 7) {
+                    ForEach(Step.allCases, id: \.self) { s in
+                        Capsule()
+                            .fill(s == step ? Color.accentColor : Color.secondary.opacity(0.3))
+                            .frame(width: s == step ? 18 : 7, height: 7)
+                    }
+                }
+                .animation(.smooth, value: step)
+                .accessibilityHidden(true)
+                Spacer()
+                Button(primaryTitle) { primary() }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(step == .executor && model.cuaInstalling)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 18)
         }
-        .frame(width: 560, height: 480)
+        .frame(width: 620, height: 560)
+        .background(.background)
     }
 
-    // MARK: - steps
+    // MARK: pages
 
-    private var welcomeStep: some View {
+    @ViewBuilder
+    private func page(_ s: Step) -> some View {
+        switch s {
+        case .welcome: welcome
+        case .permissions: permissions
+        case .models: models
+        case .executor: executor
+        case .ready: ready
+        }
+    }
+
+    private func header(_ symbol: String, _ tint: Color, _ title: LocalizedStringKey,
+                        _ body: LocalizedStringKey) -> some View {
         VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(.tint)
-                .symbolEffect(.pulse)
-            Text("Welcome to s1").font(.largeTitle.weight(.bold))
-            Text("A voice-first agent for your Mac — say it, watch it act,\n" +
-                 "every step logged. Local-first and fully open source.")
+            Image(systemName: symbol)
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 76, height: 76)
+                .glassEffect(.regular.tint(tint.opacity(0.18)), in: .circle)
+                .symbolEffect(.bounce, value: step)
+            Text(title)
+                .font(.system(size: 26, weight: .bold))
+            Text(body)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6) {
-                Label("⇧⇧ or ⌃⌥Space wakes the listener", systemImage: "mic")
-                Label("⌥Space opens the launcher", systemImage: "command.circle")
-                Label("⌃⌥D dictates into whatever you're typing", systemImage: "keyboard")
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .padding(.top, 6)
-            Spacer()
+                .frame(maxWidth: 440)
         }
     }
 
-    private var permissionsStep: some View {
-        VStack(spacing: 14) {
+    private var welcome: some View {
+        VStack(spacing: 26) {
             Spacer()
-            Image(systemName: "hand.raised.circle.fill")
-                .font(.system(size: 44)).foregroundStyle(.orange)
-                .symbolEffect(.bounce, value: step)
-            Text("Permissions").font(.title.weight(.bold))
-            Text("Only Accessibility is required — it's how s1 sees and\n" +
-                 "touches your screen. The rest unlock extras.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 8) {
-                PermRow(label: "Accessibility (required)",
-                        ok: model.permissions.accessibility, pane: "Privacy_Accessibility")
-                PermRow(label: "Input Monitoring (global hotkey)",
-                        ok: model.permissions.inputMonitoring, pane: "Privacy_ListenEvent")
-                PermRow(label: "Screen Recording (screenshots / vision)",
-                        ok: model.permissions.screenRecording, pane: "Privacy_ScreenCapture")
-                PermRow(label: "Microphone (voice commands)",
-                        ok: model.permissions.microphone, pane: "Privacy_Microphone")
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 96, height: 96)
+                .accessibilityHidden(true)
+            VStack(spacing: 8) {
+                Text("Welcome to s1")
+                    .font(.system(size: 32, weight: .bold))
+                Text("Say what you want done. s1 does it on your Mac — and shows every step it took.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 420)
             }
-            .frame(maxWidth: 420)
-            Button("Request missing permissions") { model.requestPermissions() }
-                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 12) {
+                feature("waveform", "Talk from anywhere", "Double-tap ⇧, then just say it.")
+                feature("bolt", "Instant for the everyday", "Opening, typing and shortcuts need no model at all.")
+                feature("checkmark.shield", "Careful by design", "Passwords, purchases and anything irreversible wait for you.")
+            }
+            .frame(maxWidth: 400)
             Spacer()
+        }
+        .padding(.horizontal, 40)
+    }
+
+    private func feature(_ symbol: String, _ title: LocalizedStringKey, _ detail: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(detail).foregroundStyle(.secondary)
+            }
         }
     }
 
-    private var cuaStep: some View {
-        VStack(spacing: 14) {
+    private var permissions: some View {
+        VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "cursorarrow.rays")
-                .font(.system(size: 44)).foregroundStyle(.tint)
-                .symbolEffect(.bounce, value: step)
-            Text("Cua Driver").font(.title.weight(.bold))
-            Text("Recommended — s1 types, presses keys and launches apps in\n" +
-                 "the background without stealing your focus. Installed with\n" +
-                 "CUA's own installer; s1's built-in path is the fallback.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            if CuaInstaller.installed {
-                Label("Already installed — nothing to do", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else if model.cuaInstalling || !model.cuaInstallLog.isEmpty {
-                ScrollView {
-                    Text(model.cuaInstallLog.isEmpty ? "installing…" : model.cuaInstallLog)
-                        .font(.caption.monospaced())
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxWidth: 460, maxHeight: 110)
-                .padding(8)
-                .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
-            } else {
-                Text(CuaInstaller.officialCommand)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                    .frame(maxWidth: 460)
+            header("hand.raised.fill", .orange, "Let s1 use your Mac",
+                   "Only Accessibility is required. The rest unlock the shortcut, your voice and screenshots.")
+            VStack(spacing: 4) {
+                PermissionRow(title: "Accessibility", detail: "Required — see and use apps.",
+                              granted: model.permissions.accessibility, pane: .accessibility)
+                PermissionRow(title: "Input Monitoring", detail: "The ⇧⇧ shortcut.",
+                              granted: model.permissions.inputMonitoring, pane: .inputMonitoring)
+                PermissionRow(title: "Microphone", detail: "Voice commands.",
+                              granted: model.permissions.microphone, pane: .microphone)
+                PermissionRow(title: "Screen Recording", detail: "Checking work with screenshots.",
+                              granted: model.permissions.screenRecording, pane: .screenRecording)
             }
+            .padding(16)
+            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 16, style: .continuous))
+            .frame(maxWidth: 480)
             Spacer()
         }
+        .padding(.horizontal, 40)
     }
 
-    private var keysStep: some View {
-        VStack(spacing: 14) {
+    private var models: some View {
+        VStack(spacing: 22) {
             Spacer()
-            Image(systemName: "key.fill").font(.system(size: 40)).foregroundStyle(.tint)
-                .symbolEffect(.bounce, value: step)
-            Text("Model keys").font(.title.weight(.bold))
-            Text("Optional — s1 acts on its own without them. Keys unlock the\n" +
-                 "step judge and the reasoning brain. Stored in the Keychain.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            VStack(spacing: 12) {
-                keyField(role: .decision, draft: $decisionKey,
-                         title: "S1 decision judge — TypeSafe Jev",
-                         hint: "typesafe.ai")
-                keyField(role: .s2, draft: $s2Key,
-                         title: "S2 reasoning — OpenCode Go (DeepSeek V4.1 Flash)",
-                         hint: "opencode.ai")
+            header("sparkles", .purple, "Give s1 a brain",
+                   "Optional. s1's grammar handles everyday commands with no model. Connect a judge and a reasoner for everything else.")
+            VStack(spacing: 10) {
+                QuickConnect(model: model, id: "typesafe", role: .judge)
+                QuickConnect(model: model, id: "opencode", role: .reasoner)
             }
-            .frame(maxWidth: 440)
+            .frame(maxWidth: 480)
+            Button("Use a different provider…") { pickingOther = true }
+                .buttonStyle(.link)
             Spacer()
         }
+        .padding(.horizontal, 40)
+        .sheet(isPresented: $pickingOther) { AddProviderSheet(model: model) }
     }
+    @State private var pickingOther = false
 
-    private func keyField(role: ModelRole, draft: Binding<String>,
-                          title: String, hint: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title).font(.callout.weight(.medium))
-                Spacer()
-                if model.hasKey(role) {
-                    Label("saved", systemImage: "checkmark.circle.fill")
-                        .font(.caption).foregroundStyle(.green)
+    private var executor: some View {
+        VStack(spacing: 22) {
+            Spacer()
+            header("cursorarrow.rays", .blue, "Work in the background",
+                   "Cua Driver lets s1 type and press keys without taking over your cursor or focus. Installed with CUA's official installer.")
+            Group {
+                if CuaInstaller.installed {
+                    Label("Installed", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.headline)
+                } else if model.cuaInstalling || !model.cuaInstallLog.isEmpty {
+                    ScrollView {
+                        Text(model.cuaInstallLog.isEmpty ? String(localized: "Installing…") : model.cuaInstallLog)
+                            .font(.caption.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .frame(height: 120)
+                    .padding(10)
+                    .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12))
                 } else {
-                    Link(hint, destination: URL(string: "https://\(hint)")!)
-                        .font(.caption)
+                    Text("You can skip this — s1 falls back to its own input path.")
+                        .foregroundStyle(.secondary)
                 }
             }
-            HStack {
-                SecureField(model.hasKey(role) ? "saved — type to replace" : "paste key (optional)",
-                            text: draft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") { model.saveKey(draft.wrappedValue, for: role); draft.wrappedValue = "" }
-                    .disabled(draft.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
+            .frame(maxWidth: 480)
+            Spacer()
+        }
+        .padding(.horizontal, 40)
+    }
+
+    private var ready: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            header("checkmark.seal.fill", .green, "You're all set",
+                   "Try it now: double-tap ⇧ and say “open Notes”. Or type in the s1 window.")
+            VStack(spacing: 12) {
+                LabeledContent("Talk to s1") { KeyCaps(keys: ["⇧", "⇧"]) }
+                LabeledContent("Launcher") { KeyCaps(keys: ["⌥", "Space"]) }
+                LabeledContent("Dictate anywhere") { KeyCaps(keys: ["⌃", "⌥", "D"]) }
+                Divider()
+                Toggle("Open s1 at login", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { _ in model.toggleLoginItem() }))
             }
+            .padding(16)
+            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 16, style: .continuous))
+            .frame(maxWidth: 380)
+            Spacer()
+        }
+        .padding(.horizontal, 40)
+    }
+
+    // MARK: navigation
+
+    private var primaryTitle: LocalizedStringKey {
+        switch step {
+        case .welcome: "Get Started"
+        case .permissions: model.permissions.accessibility || askedForAccess ? "Continue" : "Grant Access"
+        case .models: model.models.providers.isEmpty ? "Skip for Now" : "Continue"
+        case .executor:
+            CuaInstaller.installed || !model.cuaInstallLog.isEmpty || model.cuaInstalling ? "Continue" : "Install"
+        case .ready: "Start Using s1"
         }
     }
 
-    private var doneStep: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 48)).foregroundStyle(.green)
-                .symbolEffect(.bounce, value: step)
-            Text("You're set").font(.title.weight(.bold))
-            Text("Try it: press ⇧⇧ and say “open Notes” — or type a goal\n" +
-                 "in the window. Everything lives in ~/.s1 as plain files\n" +
-                 "you can read, edit and check (`s1 doctor`).")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Toggle("Launch s1 at login", isOn: Binding(
-                get: { model.launchAtLogin },
-                set: { _ in model.toggleLoginItem() }))
-            .frame(maxWidth: 240)
-            Spacer()
-        }
-    }
-
-    // MARK: - footer nav
-
-    private var footer: some View {
-        HStack {
-            Button("Skip setup") { finish() }
-                .foregroundStyle(.secondary)
-                .controlSize(.small)
-            Spacer()
-            if step > 0 { Button("Back") { step -= 1 } }
-            Button(step == 4 ? "Done"
-                    : step == 2 && !CuaInstaller.installed && !model.cuaInstalling
-                        && model.cuaInstallLog.isEmpty ? "Install & continue" : "Continue") {
-                advance()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(step == 2 && model.cuaInstalling)
-        }
-        .padding(14)
-    }
-
-    private func advance() {
-        if step == 2, !CuaInstaller.installed, !model.cuaInstalling,
-           model.cuaInstallLog.isEmpty {
-            // The recommended path is one click — the official installer
-            // runs inline and Continue lights up again when it's done.
+    private func primary() {
+        switch step {
+        case .permissions where !model.permissions.accessibility && !askedForAccess:
+            askedForAccess = true
+            model.requestPermissions()
+        case .executor where !CuaInstaller.installed && model.cuaInstallLog.isEmpty && !model.cuaInstalling:
             Task { await model.installCuaDriver() }
-            return
+        case .ready:
+            finish()
+        default:
+            go(1)
         }
-        if step == 4 { finish() } else { step += 1 }
+    }
+
+    private func go(_ delta: Int) {
+        guard let next = Step(rawValue: step.rawValue + delta) else { return }
+        forward = delta > 0
+        withAnimation(.smooth(duration: 0.35)) { step = next }
     }
 
     private func finish() {
         model.markOnboarded()
         dismissWindow(id: "onboarding")
+    }
+}
+
+/// One recommended provider as an inline card: paste the key, done.
+@available(macOS 26, *)
+private struct QuickConnect: View {
+    let model: AppModel
+    let id: String
+    let role: ModelRole
+    @State private var key = ""
+    @State private var working = false
+    @State private var error: String?
+
+    private var template: ProviderTemplate { ProviderCatalog.template(id)! }
+    private var connected: Bool { model.models.providers.contains { $0.id == id } }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProviderBadge(template: template, size: 34)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(template.name).font(.headline)
+                    Text(role.short)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(.tint.opacity(0.15), in: .capsule)
+                        .foregroundStyle(.tint)
+                }
+                if connected {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .font(.callout).foregroundStyle(.green)
+                } else {
+                    HStack {
+                        SecureField(template.keyHint ?? "API key", text: $key)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { Task { await connect() } }
+                        if working {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button("Connect") { Task { await connect() } }
+                                .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    if let error {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    } else if let link = template.keyURL, let u = URL(string: link) {
+                        Link("Get a key at \(u.host ?? link)", destination: u).font(.caption)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 14, style: .continuous))
+        .animation(.smooth, value: connected)
+    }
+
+    private func connect() async {
+        working = true
+        defer { working = false }
+        error = nil
+        if case .failure(let f) = await model.models.connect(ProviderConfig(id: id), key: key) {
+            error = f.message
+        } else {
+            key = ""
+        }
     }
 }

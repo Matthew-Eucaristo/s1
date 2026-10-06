@@ -43,7 +43,13 @@ public extension Policy {
 /// providers; the protocol is fixed now so escalation logging already works.
 public protocol Reasoner: Sendable {
     var name: String { get }
+    /// Escalations should carry a screenshot (a vision-capable model).
+    var wantsScreenshot: Bool { get }
     func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision
+}
+
+public extension Reasoner {
+    var wantsScreenshot: Bool { false }
 }
 
 /// Placeholder policy that always abstains — drives escalation paths in tests.

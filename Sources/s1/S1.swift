@@ -15,9 +15,9 @@ struct S1: AsyncParsableCommand {
                       AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
-                      ModelsCmd.self, PullCmd.self, GroundCmd.self, DecideCmd.self,
-                      KeyCmd.self, UsageCmd.self, SetupCmd.self, DoctorCmd.self,
-                      UseCmd.self])
+                      ProvidersCmd.self, ConnectCmd.self, DisconnectCmd.self, UseCmd.self,
+                      ModelsCmd.self, PullCmd.self, DecideCmd.self,
+                      UsageCmd.self, SetupCmd.self, DoctorCmd.self])
 }
 
 struct PreflightCmd: AsyncParsableCommand {
@@ -41,7 +41,7 @@ struct RunCmd: AsyncParsableCommand {
     var goal: String?
     @Option(help: "Task library name — reads tasks/<name>.txt (cwd) or ~/.s1/tasks/<name>.txt as the goal.")
     var task: String?
-    @Option(help: "Policy: auto | scripted | dummy | ax | vlm (default: auto; --plan implies scripted)")
+    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only) | scripted | dummy (default auto; --plan implies scripted)")
     var policy: String?
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
@@ -57,15 +57,8 @@ struct RunCmd: AsyncParsableCommand {
     var allowIrreversible = false
     @Option(help: "Kill-switch file path (abort if it appears). Default: the shared s1-stop file `s1 stop` writes.")
     var killSwitch: String = NSTemporaryDirectory() + "s1-stop"
-    @Option(help: "VLM endpoint base URL for --policy vlm (OpenAI-compatible).")
-    var vlmBase: String?
-    @Option(help: "VLM model name for --policy vlm.")
-    var vlmModel: String?
-    @Flag(inversion: .prefixedNo,
-          help: "Attach a screenshot to each VLM decision (default: config vlmScreenshot, else on).")
-    var vlmScreenshot: Bool? = nil
-    @Flag(help: "Enable System 2 via S1_S2_* env or defaults (Ollama gemma3:4b).")
-    var s2 = false
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    var s2 = true
 
     func run() async throws {
         // --plan is a program to replay: scripted is the only policy that
@@ -78,12 +71,7 @@ struct RunCmd: AsyncParsableCommand {
         let pol: any Policy
         switch policyName {
         case "dummy": pol = DummyPolicy()
-        case "ax":    pol = AXPolicy()
-        case "auto":  pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel,
-                                                    screenshot: vlmScreenshot)
-        case "vlm":
-            pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                            useScreenshot: vlmScreenshot ?? S1Config.load().vlmScreenshot ?? true)
+        case "auto", "ax": pol = try makePolicy(policyName)
         case "scripted":
             guard let plan else { throw ValidationError("--plan required for scripted policy") }
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: plan)) else {
@@ -101,7 +89,7 @@ struct RunCmd: AsyncParsableCommand {
                     {"action":{"done":{"summary":"ok"}},"confidence":0.9,"rationale":"end"}]
                     """)
             }
-        default: throw ValidationError("unknown policy \(policyName) — use auto, ax, vlm, scripted or dummy")
+        default: throw ValidationError("unknown policy \(policyName) — use auto, ax, scripted or dummy")
         }
         let goalText: String
         if let task {
@@ -135,81 +123,17 @@ struct RunCmd: AsyncParsableCommand {
         guard !goalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ValidationError("empty goal — pass --goal or --task")
         }
-        let s2: (any Reasoner)? = s2 ? hostedS2() : nil
+        let s2: (any Reasoner)? = cliReasoner(s2)
         // A stale switch from an earlier `s1 stop` would abort this run at
         // step 0 — disarm it now that a run is genuinely starting.
         try? FileManager.default.removeItem(atPath: killSwitch)
         // Live step feed — a 25-step run is otherwise silent for minutes and
         // reads as hung. Same digest format the app feed shows.
-        let (report, _) = try await S1Runner.run(goal: goalText, policy: JudgedPolicy.wrapIfConfigured(pol), artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2,
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
-    }
-}
-
-struct ConfigCmd: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "config",
-        abstract: "Show the resolved model config (file, env overrides) and where to edit it.")
-    func run() async throws {
-        let exists = FileManager.default.fileExists(atPath: S1Config.path)
-        let vlm = Endpoints.vlm()
-        let s2 = Endpoints.s2()
-        print("config file: \(S1Config.path)\(exists ? "" : " (not found — defaults in use)")")
-        if exists {
-            let malformed = (try? Data(contentsOf: URL(fileURLWithPath: S1Config.path)))
-                .flatMap { try? JSONDecoder().decode(S1Config.self, from: $0) } == nil
-            if malformed {
-                print("  ⚠ malformed JSON — falling back to defaults; fix or delete the file")
-            }
-        }
-        print("vlm  → \(vlm.baseURL) model=\(vlm.model) numCtx=\(vlm.numCtx)")
-        print("s2   → \(s2.baseURL) model=\(s2.model) numCtx=\(s2.numCtx)")
-        let grounder = Endpoints.grounder()
-        print("grounder → \(grounder.map { "\($0.baseURL) model=\($0.model)" } ?? "none (VLM grounds clicks itself)")")
-        let decision = Endpoints.decision()
-        print("decision → \(decision.map { "\($0.baseURL) model=\($0.model)" } ?? "none (no S1 decision judge)")")
-        let keys = ModelRole.allCases.map { r in
-            "\(r.rawValue)=\(SecretStore.has(account: r.rawValue) ? "keychain" : "-")" }
-        print("api keys → \(keys.joined(separator: " ")) (set with `s1 key set <role>`)")
-        print("env overrides: S1_DECISION_BASE/S1_DECISION_MODEL/S1_DECISION_KEY, S1_VLM_BASE/S1_VLM_MODEL/S1_VLM_KEY, S1_S2_BASE/S1_S2_MODEL/S1_S2_KEY, S1_GROUNDER_BASE/S1_GROUNDER_MODEL/S1_GROUNDER_KEY, S1_NUM_CTX")
-        let cfg = S1Config.load()
-        // The CLI honors these too — surface the values a flag-less run
-        // will actually get (flag → config → default).
-        print("locale → \(cfg.locale ?? "id-ID (default)") · speak → \(cfg.speak ?? false) · notchHUD → \(cfg.notchHUD ?? true)")
-        let vocab = cfg.vocabulary ?? []
-        print("vocabulary → \(vocab.count) custom words + installed app names (auto)")
-        let assembled = Vocabulary.assemble(custom: vocab)
-        print("  resolved: \(assembled.prefix(10).joined(separator: ", ").terminalSafe)\(assembled.count > 10 ? " … (\(assembled.count) total)" : "")")
-        print("edit the JSON file to swap brains permanently — no rebuild needed")
-        // Reachability: a misconfigured brain is the #1 user-facing failure —
-        // say it plainly instead of failing mid-run.
-        print("endpoints:")
-        for (label, ep) in [("vlm", vlm), ("s2", s2)] + (grounder.map { [("grounder", $0)] } ?? []) {
-            print("  \(label) \(await endpointStatus(ep))")
-        }
-    }
-
-    /// Ping an OpenAI-compatible endpoint: /models (OpenAI) then /api/tags
-    /// (Ollama) — 3s budget each, answer is human-readable either way.
-    private func endpointStatus(_ ep: Endpoint) async -> String {
-        for path in ["/models", "/api/tags"] {
-            guard let url = URL(string: ep.baseURL + path) else { break }
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 3
-            if let key = ep.apiKey {
-                req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-            }
-            guard let (data, resp) = try? await URLSession.shared.data(for: req),
-                  let http = resp as? HTTPURLResponse else { continue }
-            if http.statusCode == 200 {
-                let hasModel = AutoPolicy.modelListed(ep.model, in: data)
-                return "\(ep.baseURL) reachable ✓\(hasModel ? " · \(ep.model) present" : " · WARNING: '\(ep.model)' not listed")"
-            }
-            if http.statusCode != 404 { return "\(ep.baseURL) → HTTP \(http.statusCode)" }
-        }
-        return "\(ep.baseURL) unreachable — start the server (e.g. `ollama serve`)"
     }
 }
 
@@ -219,13 +143,6 @@ func sttVocabulary(_ csv: String?) -> [String] {
     let flag = csv?.split(separator: ",").map {
         $0.trimmingCharacters(in: .whitespaces) } ?? []
     return Vocabulary.assemble(custom: flag + (S1Config.load().vocabulary ?? []))
-}
-
-func validatedSTTPolicy(_ policy: String) throws -> String {
-    guard ["auto", "ax", "vlm"].contains(policy) else {
-        throw ValidationError("unknown policy \(policy) — use auto, ax or vlm")
-    }
-    return policy
 }
 
 /// `--locale`/`--language` flags → config.json's `locale` → auto, in that
@@ -248,19 +165,6 @@ func claimMicOrThrow() throws {
     try S1Runner.claimMic()
 }
 
-/// Shared `auto` resolution: probe the VLM endpoint once, log which brain
-/// the run actually got, return the concrete policy.
-func resolveAutoPolicy(vlmBase: String?, vlmModel: String?,
-                       screenshot: Bool? = nil) async -> any Policy {
-    let useShot = screenshot ?? S1Config.load().vlmScreenshot ?? true
-    let (pol, name) = await AutoPolicy.resolve(vlmBase: vlmBase, vlmModel: vlmModel,
-                                              useScreenshot: useShot)
-    let note = name == "vlm"
-        ? "policy auto → vlm (local decision model)\n"
-        : "policy auto → ax (model endpoint unreachable — deterministic grammar)\n"
-    FileHandle.standardError.write(note.data(using: .utf8)!)
-    return pol
-}
 
 struct TranscribeCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "transcribe",
@@ -321,7 +225,7 @@ struct ListenCmd: AsyncParsableCommand {
     var file: String?
     @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
-    @Option(help: "Policy for the run (default auto — model if reachable, else ax).")
+    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only).")
     var policy: String = "auto"
     @Option(help: "Artifacts root directory.")
     var artifacts: String = S1Home.path + "/artifacts"
@@ -332,12 +236,8 @@ struct ListenCmd: AsyncParsableCommand {
     var maxSteps: Int = 25
     @Flag(help: "Log everything, execute nothing.")
     var dryRun = false
-    @Flag(help: "Enable System 2 escalation (LLM endpoint).")
-    var s2 = false
-    @Option(help: "VLM endpoint base URL (--policy vlm).")
-    var vlmBase: String?
-    @Option(help: "VLM model name (--policy vlm).")
-    var vlmModel: String?
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    var s2 = true
     @Option(help: "Comma-separated words the recognizer should bias toward.")
     var vocabulary: String?
 
@@ -345,7 +245,7 @@ struct ListenCmd: AsyncParsableCommand {
         guard #available(macOS 26, *) else {
             throw ValidationError("SpeechAnalyzer needs macOS 26+")
         }
-        let polName = try validatedSTTPolicy(policy)   // fail fast, before the mic turn
+        let pol = try makePolicy(policy)   // fail fast, before the mic turn
         let loc = resolveLocale(locale)
         let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
                                vocabulary: sttVocabulary(vocabulary))
@@ -366,22 +266,12 @@ struct ListenCmd: AsyncParsableCommand {
         print("heard: \(goal.terminalSafe)")
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
-        let pol: any Policy
-        switch polName {
-        case "vlm":
-            pol = VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                            useScreenshot: S1Config.load().vlmScreenshot ?? true)
-        case "auto":
-            pol = await resolveAutoPolicy(vlmBase: vlmBase, vlmModel: vlmModel)
-        default:
-            pol = AXPolicy()
-        }
-        let reasoner: (any Reasoner)? = s2 ? hostedS2() : nil
+        let reasoner: (any Reasoner)? = cliReasoner(s2)
         // A fresh listen clears a stale kill switch — the user just asked for
         // a new run, so an old "stop" file must not silently abort step 0.
         let kill = NSTemporaryDirectory() + "s1-stop"
         try? FileManager.default.removeItem(atPath: kill)
-        let (report, _) = try await S1Runner.run(goal: goal, policy: JudgedPolicy.wrapIfConfigured(pol), artifacts: artifacts,
+        let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: kill, s2: reasoner,
@@ -449,38 +339,6 @@ struct CaptureCmd: AsyncParsableCommand {
     }
 }
 
-struct GroundCmd: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "ground",
-        abstract: "Ask the click grounder where a target is in an image (debug a grounding model).")
-    @Argument(help: "Screenshot path (PNG/JPEG).") var image: String
-    @Argument(help: "What to click, e.g. \"Save button\".") var target: String
-    @Option(help: "Grounder model (default: configured grounder, else the VLM model).") var model: String?
-    @Option(help: "OpenAI-compatible base URL (default: configured).") var base: String?
-
-    func run() async throws {
-        let cfgEp = Endpoints.grounder() ?? Endpoints.vlm()
-        let ep = Endpoint(baseURL: base ?? cfgEp.baseURL, model: model ?? cfgEp.model,
-                          apiKey: cfgEp.apiKey, numCtx: cfgEp.numCtx)
-        guard FileManager.default.fileExists(atPath: image),
-              let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: image) as CFURL, nil),
-              let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
-              let b64 = VLMPolicy.downscaledJPEG(path: image) else {
-            throw ValidationError("cannot read image \(image)")
-        }
-        let started = Date()
-        let (p, reply) = try await Grounder(endpoint: ep).normalizedPoint(target, imageBase64: b64)
-        let secs = String(format: "%.1f", Date().timeIntervalSince(started))
-        print("model    \(ep.model) (\(secs)s)")
-        print("reply    \(reply.trimmingCharacters(in: .whitespacesAndNewlines).terminalSafe)")
-        guard let p else {
-            print("point    none (unparseable or outside [0,1000])")
-            throw ExitCode(2)
-        }
-        let px = Int(p.x / 1000 * Double(img.width)), py = Int(p.y / 1000 * Double(img.height))
-        print("point    (\(Int(p.x)), \(Int(p.y))) /1000 → pixel (\(px), \(py)) in \(img.width)x\(img.height)")
-    }
-}
-
 struct AXCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "ax",
         abstract: "Dump an app's accessibility tree (default: frontmost).")
@@ -530,10 +388,10 @@ struct ServeCmd: AsyncParsableCommand {
         abstract: "Always-on companion: hotkey toggles continuous listening (double-tap Shift or ⌃⌥Space).")
     @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
-    @Option(help: "Policy for runs (default auto — model if reachable, else ax).")
+    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only).")
     var policy: String = "auto"
-    @Flag(help: "Enable System 2 escalation (LLM endpoint).")
-    var s2 = false
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    var s2 = true
     @Flag(inversion: .prefixedNo,
           help: "Speak results with TTS (default: config speak, else off).")
     var speak: Bool?
@@ -541,10 +399,6 @@ struct ServeCmd: AsyncParsableCommand {
     var idleTurns: Int = 3
     @Option(help: "Seconds per listening turn.")
     var listenSeconds: Double = 12
-    @Option(help: "VLM endpoint base URL (--policy vlm).")
-    var vlmBase: String?
-    @Option(help: "VLM model name (--policy vlm).")
-    var vlmModel: String?
     @Option(help: "Transcribe this audio file once, run it, exit (testing — no mic needed).")
     var file: String?
     @Option(help: "Comma-separated words the recognizer should bias toward.")
@@ -566,55 +420,18 @@ struct ServeCmd: AsyncParsableCommand {
         let loc = resolveLocale(locale)
         let resolvedSpeak = speak ?? S1Config.load().speak ?? false
         setbuf(stdout, nil)   // daemon: stream events unbuffered
-        _ = try validatedSTTPolicy(policy)
+        let polName = policy
+        _ = try makePolicy(polName)   // fail fast on a bad policy name
         let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
                                vocabulary: sttVocabulary(vocabulary))
-        let reasoner: (any Reasoner)? = s2 ? hostedS2() : nil
+        let reasoner: (any Reasoner)? = cliReasoner(s2)
         // Warm the speech model in the background — the first hotkey press
         // shouldn't pay the cold-load cost mid-conversation.
         Task { await stt.warmup() }
-
-        // `auto` resolves once here — a daemon must not re-probe the
-        // endpoint on every utterance (each probe is up to 3s). But the
-        // daemon also outlives the endpoint: if Ollama comes up AFTER
-        // `s1 serve` started, a once-probe pins it to `ax` forever. So the
-        // flag lives in a box; while it's down a slow background re-probe
-        // upgrades the brain when the endpoint answers (upgrade only — a
-        // dead endpoint mid-run still fails per-step, which is honest).
-        let vlmUp = LockedBox(false)
-        if policy == "auto" {
-            vlmUp.value = await AutoPolicy.endpointAlive(Endpoints.vlm(base: vlmBase, model: vlmModel))
-            FileHandle.standardError.write(
-                (vlmUp.value ? "policy auto → vlm (local decision model)\n"
-                        : "policy auto → ax (model endpoint unreachable — deterministic grammar)\n")
-                .data(using: .utf8)!)
-            if !vlmUp.value {
-                Task.detached {
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(60))
-                        if Task.isCancelled { return }
-                        vlmUp.value = await AutoPolicy.endpointAlive(
-                            Endpoints.vlm(base: vlmBase, model: vlmModel))
-                        if vlmUp.value {
-                            FileHandle.standardError.write(
-                                "policy auto → vlm (endpoint came up — brain upgraded)\n"
-                                    .data(using: .utf8)!)
-                            return
-                        }
-                    }
-                }
-            }
-        } else {
-            vlmUp.value = policy == "vlm"
-        }
-        let decisionEp = Endpoints.decision()
-        let makePol: @Sendable () -> any Policy = {
-            let pol: any Policy = vlmUp.value
-                ? VLMPolicy(endpoint: Endpoints.vlm(base: vlmBase, model: vlmModel),
-                            useScreenshot: S1Config.load().vlmScreenshot ?? true)
-                : AXPolicy()
-            return JudgedPolicy.wrapIfConfigured(pol, endpoint: decisionEp)
-        }
+        FileHandle.standardError.write(Data("brain: \(Brain.describe())\n".utf8))
+        // Rebuilt per utterance: a model assigned in the app (or with
+        // `s1 use`) while the daemon runs applies to the next command.
+        let makePol: @Sendable () -> any Policy = { (try? makePolicy(polName)) ?? AXPolicy() }
 
         // --file: one utterance through the same pipeline, then exit.
         if let file {
@@ -758,9 +575,7 @@ struct ServeCmd: AsyncParsableCommand {
                     "--idle-turns", "\(idleTurns)",
                     "--listen-seconds", "\(listenSeconds)",
                     (speak ?? S1Config.load().speak ?? false) ? "--speak" : "--no-speak"]
-        if s2 { args.append("--s2") }
-        if let v = vlmBase { args += ["--vlm-base", v] }
-        if let v = vlmModel { args += ["--vlm-model", v] }
+        args.append(s2 ? "--s2" : "--no-s2")
         if let v = vocabulary { args += ["--vocabulary", v] }
         try ServeLaunchd.plist(args: args)
             .write(toFile: plistPath, atomically: true, encoding: .utf8)
@@ -876,32 +691,10 @@ struct TasksCmd: AsyncParsableCommand {
     }
 }
 
-struct ModelsCmd: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "models",
-        abstract: "List installed Ollama models and the downloadable catalog.")
-
-    func run() async throws {
-        guard ModelPull.ollamaBinary() != nil else {
-            print("ollama not installed — \(ModelPull.installHint)")
-            return
-        }
-        let installed = Set(ModelPull.installed())
-        print("installed (ollama list):")
-        if installed.isEmpty { print("  (none)") }
-        for m in installed.sorted() { print("  \(m)") }
-        print("\ncatalog — `s1 pull <name>`:")
-        for e in ModelPull.catalog {
-            let mark = installed.contains(e.name) ? "✓" : " "
-            let kind = e.vision ? "vision" : "text  "
-            print("  [\(mark)] \(e.name)\t\(e.size)\t\(kind)\t\(e.blurb)")
-        }
-    }
-}
-
 struct PullCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "pull",
         abstract: "Download a model with `ollama pull` (progress streams to stdout).")
-    @Argument(help: "Model name, e.g. gemma3:4b — any model ollama can pull, not just the app catalog.")
+    @Argument(help: "Model name, e.g. gemma3:4b — any model ollama can pull (`s1 models ollama` lists picks).")
     var model: String
 
     func run() async throws {
@@ -1159,16 +952,22 @@ struct DecideCmd: AsyncParsableCommand {
     @Argument(help: "State text to judge.") var state: String
     @Argument(help: "The question, e.g. \"Is this urgent?\"") var question: String
     @Option(help: "Comma-separated options → a Choice question (default: yes/no Noul).") var options: String?
-    @Option(help: "Decision model (default: configured, e.g. nimble, tev1, jev-latest, clef).") var model: String?
-    @Option(help: "Server root (default: configured, else http://localhost:11434).") var base: String?
+    @Option(help: "provider/model to ask (default: the judge role), e.g. ollama/tev1:0.8b.") var model: String?
 
     func run() async throws {
-        let cfg = Endpoints.decision()
-        guard let name = model ?? cfg?.model else {
-            throw ValidationError("no decision model — pass --model (e.g. tev1:0.8b) or set one in the app's Connections")
+        let ep: Endpoint
+        if let model {
+            guard let ref = ModelRef(model), let p = Models.provider(ref.provider),
+                  let base = p.base(.systemOne, model: ref.model) else {
+                throw ValidationError("expected a provider/model whose provider speaks the System One API, got \(model)")
+            }
+            ep = Endpoint(baseURL: base, model: ref.model, apiKey: Models.keychain(p))
+        } else if let e = Models.endpoint(.judge) {
+            ep = e
+        } else {
+            throw ValidationError("no judge assigned — pass --model (e.g. ollama/tev1:0.8b) or `s1 use judge …`")
         }
-        let ep = Endpoint(baseURL: base ?? cfg?.baseURL ?? "http://localhost:11434", model: name,
-                          apiKey: cfg?.apiKey)
+        let name = ep.model
         let q: DecisionQuestion = options.map { o in
             .choice(question, options: Dictionary(uniqueKeysWithValues: o.split(separator: ",")
                 .map { (String($0).trimmingCharacters(in: .whitespaces), String?.none) }))
@@ -1187,72 +986,6 @@ struct DecideCmd: AsyncParsableCommand {
         }
         if let c = a.confidence { print(String(format: "confidence %.3f", c)) }
     }
-}
-
-struct KeyCmd: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "key",
-        abstract: "Store API keys in the macOS Keychain (never in config.json).",
-        subcommands: [Set.self, Remove.self, List.self])
-
-    static func role(_ s: String) throws -> ModelRole {
-        guard let r = ModelRole(rawValue: s) else {
-            throw ValidationError("role must be one of: \(ModelRole.allCases.map(\.rawValue).joined(separator: ", "))")
-        }
-        return r
-    }
-
-    struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "set",
-            abstract: "Read a key from stdin (hidden when interactive) into the Keychain.")
-        @Argument(help: "decision | vlm | grounder | s2") var role: String
-        func run() async throws {
-            let r = try KeyCmd.role(role)
-            let raw: String?
-            if isatty(STDIN_FILENO) != 0 {
-                var buf = [CChar](repeating: 0, count: 4096)
-                raw = readpassphrase("\(r.rawValue) API key: ", &buf, buf.count, 0).map { String(cString: $0) }
-                buf.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
-            } else {
-                raw = readLine(strippingNewline: true)
-            }
-            guard let key = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
-                throw ValidationError("empty key")
-            }
-            try SecretStore.set(key, account: r.rawValue)
-            try S1Config.stripPlaintextKey(r)
-            print("saved \(r.rawValue) key to Keychain (\(SecretStore.defaultService))")
-        }
-    }
-
-    struct Remove: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "rm", abstract: "Delete a role's key.")
-        @Argument(help: "decision | vlm | grounder | s2") var role: String
-        func run() async throws {
-            let r = try KeyCmd.role(role)
-            SecretStore.delete(account: r.rawValue)
-            try S1Config.stripPlaintextKey(r)
-            print("removed \(r.rawValue) key")
-        }
-    }
-
-    struct List: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "ls", abstract: "Which roles have a key (values never shown).")
-        func run() async throws {
-            for r in ModelRole.allCases {
-                print("\(r.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(SecretStore.has(account: r.rawValue) ? "keychain ✓" : "—")")
-            }
-        }
-    }
-}
-
-/// S2 reasoner, or nil (with a hint) when the hosted default has no key yet.
-func hostedS2() -> (any Reasoner)? {
-    let ep = Endpoints.s2()
-    if ep.needsKey {
-        FileHandle.standardError.write(Data("s2: no API key for \(ep.baseURL) — `s1 key set s2` (S2 off)\n".utf8))
-        return nil
-    }
-    return LLMReasoner(endpoint: ep)
 }
 
 struct UsageCmd: AsyncParsableCommand {
@@ -1281,71 +1014,17 @@ struct UsageCmd: AsyncParsableCommand {
     }
 }
 
-/// `s1 use <preset>` — apply a providers.json entry to its role in
-/// config.json. This is the CLI half of the Settings preset menus: the
-/// file is the catalog, `use` is the one-liner that points a role at it.
-struct UseCmd: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "use",
-        abstract: "Apply a provider preset (~/.s1/providers.json) — `s1 use typesafe-jev`. No args lists presets.")
-    @Argument(help: "Preset id, e.g. typesafe-jev / opencode-flash / groq-whisper-turbo / vlm-off")
-    var preset: String?
-
-    func run() async throws {
-        let all = Providers.all()
-        guard let want = preset else {
-            var lastRole = ""
-            for p in all {
-                if p.role != lastRole {
-                    lastRole = p.role
-                    print("\n[\(lastRole)]")
-                }
-                let star = p.recommended == true ? " ★" : ""
-                print("  \(p.id)\(star)\(p.note.map { " — \($0)" } ?? "")")
-            }
-            print("\napply: s1 use <id> · edit the catalog: ~/.s1/providers.json")
-            return
-        }
-        guard let p = all.first(where: { $0.id == want }) else {
-            throw ValidationError("no preset '\(want)' — `s1 use` lists them, or add your own in providers.json")
-        }
-        let role = ModelRole(rawValue: p.role)!
-        var cfg = S1Config.load()
-        // model is written verbatim: "" is the explicit "off" (nil would
-        // fall back to the hosted default on next resolve).
-        let ep = S1Config.ModelEndpoint(base: p.base.isEmpty ? nil : p.base,
-                                      model: p.model,
-                                      key: nil, numCtx: nil)
-        switch role {
-        case .decision: cfg.decision = ep
-        case .s2: cfg.s2 = ep
-        case .vlm: cfg.vlm = ep
-        case .grounder: cfg.grounder = ep
-        case .stt: cfg.stt = ep
-        case .tts:
-            cfg.tts = ep
-            if let v = p.voice { cfg.ttsCloudVoice = v }
-        }
-        try cfg.save()
-        print("✓ \(role.rawValue) → \(p.model.isEmpty ? "(off)" : p.model) @ \(p.base.isEmpty ? "on-device" : p.base)")
-        if !p.base.isEmpty, !p.model.isEmpty, !Endpoints.isLocal(p.base),
-           !SecretStore.has(account: role.rawValue) {
-            print("  ⚠ remote endpoint — set its key with `s1 key set \(role.rawValue)`")
-        }
-    }
-}
-
 /// `s1 doctor` — every standardized file under ~/.s1 checked at once, plus
 /// the moving parts outside it (keychain keys, cua-driver, srt). Exit 1
 /// when anything fails so scripts can gate on it.
 struct DoctorCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "doctor",
-        abstract: "Check every ~/.s1 config file (config, providers, snippets, convert, skills, memory, tasks) + keys, cua-driver, sandbox.")
+        abstract: "Check every ~/.s1 file (config, providers + roles, snippets, convert, skills, memory, tasks), cua-driver, sandbox.")
     @Flag(help: "Also fix what's fixable: write missing default files, rebuild the memory index.")
     var fix = false
 
     func run() async throws {
         if fix {
-            Providers.ensureFile()
             if !FileManager.default.fileExists(atPath: Convert.extensionsPath.path) {
                 try? "{\n  \"units\": { },\n  \"currencies\": { }\n}\n"
                     .write(to: Convert.extensionsPath, atomically: true, encoding: .utf8)
@@ -1397,19 +1076,9 @@ struct SetupCmd: AsyncParsableCommand {
         // 2 · Config defaults — write config.json only when absent so a
         // re-run never stomps the user's edits. `ensureFile` helpers do
         // the same for the standardized data files.
-        var cfg = S1Config.load()
-        if !FileManager.default.fileExists(atPath: S1Config.path) {
-            cfg.defaultsVersion = S1Config.currentDefaults
-            cfg.onboarded = true
-            try cfg.save()
-            print("✓ wrote \(S1Config.path) — hosted defaults (Jev judge + OpenCode Go S2)")
-        } else {
-            cfg.onboarded = true
-            try cfg.save()
-            print("✓ config.json already yours — marked onboarded, nothing overwritten")
-        }
-        Providers.ensureFile()
-        print("✓ ~/.s1/providers.json — preset catalog you can edit (`s1 doctor` checks it)")
+        let fresh = !FileManager.default.fileExists(atPath: S1Config.path)
+        try S1Config.update { $0.onboarded = true }
+        print(fresh ? "✓ wrote \(S1Config.path)" : "✓ config.json already yours — marked onboarded, nothing overwritten")
 
         // 3 · Cua Driver — recommended, via CUA's own installer.
         if CuaInstaller.installed {
@@ -1439,31 +1108,28 @@ struct SetupCmd: AsyncParsableCommand {
             print("  recommended for the most faithful typing/keys — CGEvent is the fallback")
         }
 
-        // 4 · API keys — optional; the agent works AX-only without them,
-        // they just unlock the judge + S2. Offer the prompts interactively.
+        // 4 · Models — optional; the grammar works without any. The
+        // recommended pair: TypeSafe Jev judges steps, OpenCode Go reasons.
         if interactive {
-            for (role, hint) in [("decision", "TypeSafe Jev — typesafe.ai"),
-                                 ("s2", "OpenCode Go — opencode.ai")] {
-                if SecretStore.has(account: role) {
-                    print("✓ \(role) key already in Keychain")
+            for id in ["typesafe", "opencode"] {
+                guard let t = ProviderCatalog.template(id) else { continue }
+                if S1Config.load().providers?.contains(where: { $0.id == id }) == true {
+                    print("✓ \(t.name) already connected")
                     continue
                 }
-                if askYes("Paste a \(role) API key now? (\(hint)) [y/N] ") {
-                    var buf = [CChar](repeating: 0, count: 4096)
-                    let raw = readpassphrase("\(role) API key: ", &buf, buf.count, 0)
-                    _ = buf.withUnsafeMutableBytes { memset_s($0.baseAddress, $0.count, 0, $0.count) }
-                    if let key = raw.map({ String(cString: $0) })
-                        .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }),
-                       !key.isEmpty {
-                        try SecretStore.set(key, account: role)
-                        print("✓ saved \(role) key to Keychain")
-                    } else {
-                        print("- empty — skipped (`s1 key set \(role)` later)")
-                    }
+                guard askYes("Connect \(t.name)? (\(t.summary) — key at \(t.keyURL ?? "")) [Y/n] ") else { continue }
+                guard let key = readSecret("\(t.name) API key: ") else {
+                    print("- empty — skipped (`s1 connect \(id)` later)")
+                    continue
                 }
+                try SecretStore.set(key, account: id)
+                var cfg = S1Config.load()
+                let took = Models.connect(ProviderConfig(id: id), in: &cfg)
+                try cfg.save()
+                print("✓ \(t.name) connected" + (took.isEmpty ? "" : " — \(took.map(\.rawValue).joined(separator: ", "))"))
             }
         } else {
-            print("- key prompts skipped (non-interactive) — `s1 key set decision` / `s1 key set s2`")
+            print("- model prompts skipped (non-interactive) — `s1 connect typesafe` / `s1 connect opencode`")
         }
 
         // 5 · Doctor — prove the whole layout is sane before saying done.

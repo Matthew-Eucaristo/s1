@@ -3,7 +3,60 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-06
+
+### Changed: one model per job, vision as a capability (breaking)
+- **Four roles:** `judge` (System 1 decision model), `reasoner` (System 2
+  LLM), `transcribe`, `speak`. The separate `vision` and `grounder` roles,
+  the VLM policy, the click grounder, `s1 ground` and `--policy vlm` are gone.
+- **Seeing the screen follows the models.** A judge that reads images (d1,
+  Clef) gets screenshots; otherwise a reasoner that reads images gets one with
+  each escalation and can click by position; with neither, s1 uses the
+  accessibility tree only. The catalog marks every model that sees, names
+  outside it are judged by name, and "Let models see the screen" (config
+  `vision`, `S1_VISION=off`) turns it off.
+- Recommended reasoners that see: Groq Llama 4 Scout, OpenRouter Gemini 2.5
+  Flash, Cloudflare Llama 4 Scout, Ollama Qwen3-VL; OpenCode Go lists models live
+  and adds DeepSeek V4 Flash Vision.
+- **Official provider logos** in Settings (brand tiles), from Lobe Icons and
+  typesafe.ai.
+- **Screenshot mode** (`S1_DEMO=1`): sample conversation and history for
+  README and website shots, hotkeys untouched.
+
+### Changed: providers + roles (breaking, no migration; reconnect your providers once)
+- **Providers + roles replace per-role endpoints.** A *provider* is one
+  account or server with one Keychain key (`TypeSafe`, `OpenCode Go`,
+  `Groq`, `Ollama`, a custom OpenAI-compatible server…); a *role* is what
+  s1 uses a model for (`judge`, `reasoner`, `transcribe`, `speak`),
+  assigned as `provider/model`. `config.json` now
+  carries `providers` + `models`; the old `vlm`/`s2`/`decision`/`grounder`/
+  `stt`/`tts`/`brain`/`vlmScreenshot` keys, `providers.json`, per-role
+  Keychain items and every config migration are gone.
+- **CLI:** `s1 providers`, `s1 connect <provider>` (key → Keychain, live
+  check, fills empty judge/reasoner), `s1 disconnect`, `s1 use <role>
+  <provider/model|off>`, `s1 models` (catalog + live lists). `s1 key` and
+  the old preset `s1 use` are removed; `--vlm-base/--vlm-model/--vlm-screenshot`
+  are gone and S2 is on whenever a reasoner is assigned (`--no-s2` opts out).
+  Env: `S1_<ROLE>=provider/model|off`, `S1_<PROVIDER>_KEY`.
+- **One brain factory.** `Brain` builds S1 (the grammar, judged when a judge
+  is assigned) and S2 for the app, `s1 run`,
+  `s1 listen` and `s1 serve` alike — the app's Auto/AX picker is gone, and
+  the daemon picks up model changes on the next command.
+- **App redesign.** Sidebar history of every run (search, run again, show
+  evidence) beside the conversation; each command is one turn — your
+  request, a live activity card that folds when done, a plain-language
+  outcome. Settings → Models is two sections (Brains, Providers) with an
+  Add Provider flow that verifies before saving and a detail sheet per
+  provider (key, server, roles, models, one-tap Ollama downloads).
+  Rebuilt onboarding, notch pill, menu-bar panel; standard About panel
+  with credits; Advanced pane for executor, sandbox and config files;
+  Indonesian strings updated throughout.
+- Run meta.json now records the outcome (`status`, `finished`, `steps`,
+  `summary`); usage records use role names.
+
+## [0.2.x] - 2026-10-03 to 2026-10-06
+
+Shipped across the 0.2 pre-releases (see the GitHub releases for each tag).
 
 ### Added
 - **First-run onboarding** — the app opens a setup wizard once (welcome →
