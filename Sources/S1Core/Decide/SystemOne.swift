@@ -159,6 +159,13 @@ public struct SystemOneClient: DecisionJudge {
                                    images: images.isEmpty ? nil : Array(images.prefix(4))))
     }
 
+    /// Images as each server wants them: Liquid takes `data:` URLs; Ollama and
+    /// Workers AI take bare base64 (what `ScreenImage` produces).
+    static func wire(_ images: [String], for url: URL) -> [String] {
+        guard url.host?.hasSuffix("liquid.ai") == true else { return images }
+        return images.map { $0.hasPrefix("data:") ? $0 : "data:image/jpeg;base64,\($0)" }
+    }
+
     /// Decode a reply — bare `{model, answers}` or Cloudflare's
     /// `{"result": {…}, "success": true}` envelope.
     public static func decode(_ data: Data) throws -> DecisionResult {
@@ -189,7 +196,7 @@ public struct SystemOneClient: DecisionJudge {
         }
         for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
         req.httpBody = try Self.body(model: endpoint.model, state: state, questions: questions,
-                                     images: acceptsImages ? images : [])
+                                     images: acceptsImages ? Self.wire(images, for: url) : [])
         let started = Date()
         let host = url.host ?? endpoint.baseURL
         func record(_ ok: Bool, _ r: DecisionResult? = nil, error: String? = nil) {

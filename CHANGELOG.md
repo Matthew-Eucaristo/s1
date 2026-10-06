@@ -3,6 +3,13 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.8] - 2026-10-06
+
+### Fixed
+- **Liquid d1 actually sees the screen.** Its API wants images as `data:` URLs
+  and rejected s1's bare base64 (HTTP 422), so the Judge's screenshots never
+  arrived. Ollama and Workers AI keep bare base64.
+
 ## [0.3.7] - 2026-10-06
 
 ### Changed: the Judge does real work (System 1 got stronger)

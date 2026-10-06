@@ -2601,3 +2601,9 @@ private struct ChoosingJudge: DecisionJudge {
         .decide(observation: obs, goal: "open Notes", history: [opened])
     #expect(launch.confidence > 0.5)                 // a launch is exact: no check
 }
+
+@Test func liquidGetsImagesAsDataURLs() {
+    let liquid = URL(string: "https://api.liquid.ai/v1/systemone")!
+    #expect(SystemOneClient.wire(["AAAA"], for: liquid) == ["data:image/jpeg;base64,AAAA"])
+    #expect(SystemOneClient.wire(["AAAA"], for: URL(string: "http://localhost:11434/v1/systemone")!) == ["AAAA"])
+}
