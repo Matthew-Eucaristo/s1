@@ -3,6 +3,13 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.21] - 2026-10-07
+
+### Fixed
+- Usage chart: day and hour axis labels, the full period on the time axis, and
+  a clear "Nothing billed" note instead of an empty cost chart when every call
+  was in a plan or free.
+
 ## [0.3.20] - 2026-10-07
 
 ### Added: Settings → Usage

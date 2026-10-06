@@ -96,6 +96,28 @@ struct UsageSettings: View {
                 }
                 .chartForegroundStyleScale(domain: Self.roleOrder.map(Self.roleName),
                                            range: Self.roleColors)
+                .chartXAxis {
+                    if period == .day {
+                        AxisMarks(values: .stride(by: .hour, count: 6)) {
+                            AxisGridLine(); AxisValueLabel(format: .dateTime.hour())
+                        }
+                    } else {
+                        AxisMarks(values: .stride(by: .day, count: period == .week ? 1 : 5)) {
+                            AxisGridLine(); AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                        }
+                    }
+                }
+                .chartXScale(domain: Date().addingTimeInterval(-period.seconds)...Date())
+                .overlay {
+                    if metric == .cost, report.spentUSD == 0 {
+                        Text(report.planCalls + report.freeCalls > 0
+                             ? "Nothing billed: every call was in a plan or free."
+                             : "No priced calls in this period.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(.background.opacity(0.8), in: .capsule)
+                    }
+                }
                 .chartYAxis {
                     AxisMarks { v in
                         AxisGridLine()

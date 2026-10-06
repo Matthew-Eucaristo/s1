@@ -391,3 +391,5 @@
 "Billed" = "Ditagih";
 "Est." = "Perk.";
 "Billed: the provider reported the charge. Est.: tokens × the public list price (OpenRouter's catalog, refreshed daily). Plan: a subscription, nothing per call. Local and :free models cost nothing. Full log: `s1 usage`." = "Ditagih: provider melaporkan biayanya. Perk.: token × harga publik (katalog OpenRouter, diperbarui harian). Paket: langganan, tidak ada biaya per panggilan. Model lokal dan :free gratis. Log lengkap: `s1 usage`.";
+"Nothing billed: every call was in a plan or free." = "Tidak ada tagihan: semua panggilan termasuk paket atau gratis.";
+"No priced calls in this period." = "Tidak ada panggilan berharga di periode ini.";
