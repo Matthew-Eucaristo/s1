@@ -3,6 +3,20 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.3] - 2026-10-06
+
+### Fixed
+- **Commands no longer fail when Screen Recording is unavailable.** With a
+  Judge or Reasoner that can see, s1 took a screenshot before each step and a
+  refused capture ("The user declined TCCs…") stopped the whole command. A
+  failed capture now falls back to the accessibility tree, as the vision rule
+  always promised; only an explicit "take a screenshot" still needs the grant.
+- A clear message when Screen Recording is off, instead of ScreenCaptureKit's.
+- Settings → Permissions: **Repair** for Screen Recording (next to
+  Accessibility) plus **Restart s1**, for a switch that's on in System
+  Settings but belongs to an older copy of s1. The old "every update needs a
+  fresh grant" copy is gone: releases share one signature, so grants persist.
+
 ## [0.3.2] - 2026-10-06
 
 ### Fixed

@@ -33,6 +33,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 
 ## Invariants
 - The safety gate runs before every action; judges can only lower confidence.
+- Screenshots are optional evidence: perception uses `observe(preferScreenshot:)` so a missing Screen
+  Recording grant degrades to the AX tree; only an explicit `.captureScreenshot` action requires it.
 - Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save).
 - Keychain: `SecretStore.has` reads attributes only (never prompts); `get` caches per process. Never read a
   secret just to test presence. Data-protection keychain needs a provisioning profile (AMFI kills the

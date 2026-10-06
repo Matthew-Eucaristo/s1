@@ -686,14 +686,27 @@ final class AppModel {
         if !permissions.accessibility { PermissionPane.accessibility.open() }
     }
 
-    /// A toggle that's ON in System Settings but not honored belongs to an
-    /// older build (TCC pins the old signature). Drop the stale entry and ask again.
+    /// A toggle that's ON in System Settings but not honored belongs to a
+    /// copy of s1 signed differently (TCC pins the signature it saw when you
+    /// granted). Drop the stale entry and ask again.
     func resetAccessibility() {
+        resetGrant("Accessibility")
+        requestPermissions()
+    }
+
+    /// Same repair for Screen Recording. ScreenCaptureKit reads the grant at
+    /// launch, so the new one applies after a restart.
+    func resetScreenRecording() {
+        resetGrant("ScreenCapture")
+        _ = CGRequestScreenCaptureAccess()
+        PermissionPane.screenRecording.open()
+    }
+
+    private func resetGrant(_ service: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "com.mattheweuc.s1"]
+        p.arguments = ["reset", service, Bundle.main.bundleIdentifier ?? "com.mattheweuc.s1"]
         try? p.run(); p.waitUntilExit()
-        requestPermissions()
     }
 
     func markOnboarded() {

@@ -531,7 +531,7 @@ private struct AccessibilityBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("s1 needs Accessibility access")
                     .font(.callout.weight(.semibold))
-                Text("It's how s1 sees and uses your Mac. Already turned on? Click Repair — every update needs a fresh grant.")
+                Text("It's how s1 sees and uses your Mac. Already on? Click Repair to refresh it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

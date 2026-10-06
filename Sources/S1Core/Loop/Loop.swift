@@ -89,7 +89,7 @@ public struct AgentLoop {
             let obs: Snapshot
             do {
                 onPhase?("observing…")
-                obs = try await perceiver.observe(wantScreenshot: policy.wantsScreenshot)
+                obs = try await perceiver.observe(preferScreenshot: policy.wantsScreenshot)
             } catch {
                 // Evidence continuity: a perception failure must land in
                 // steps.jsonl too — otherwise the run file ends mid-thought

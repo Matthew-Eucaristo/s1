@@ -260,11 +260,19 @@ private struct PermissionSettings: View {
                 FootNote("Only Accessibility is required. Screen Recording applies after s1 restarts.")
             }
             Section {
-                LabeledContent("Accessibility is on but s1 still asks") {
+                LabeledContent("Accessibility") {
                     Button("Repair") { model.resetAccessibility() }
                 }
+                LabeledContent("Screen Recording") {
+                    HStack {
+                        Button("Repair") { model.resetScreenRecording() }
+                        Button("Restart s1") { model.relaunchApp() }
+                    }
+                }
+            } header: {
+                Text("On in System Settings but not working?")
             } footer: {
-                FootNote("Each update has a new signature. Repair removes the old entry and asks again.")
+                FootNote("A switch can belong to an older copy of s1. Repair removes it and asks again; turn it back on, then restart s1 for Screen Recording.")
             }
         }
         .formStyle(.grouped)

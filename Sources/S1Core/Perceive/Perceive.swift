@@ -7,6 +7,17 @@ public protocol Perceiver: Sendable {
     func observe(wantScreenshot: Bool) async throws -> Snapshot
 }
 
+extension Perceiver {
+    /// A screenshot when one can be taken, else the accessibility view alone.
+    /// Models that see are a bonus: a missing Screen Recording grant must
+    /// never stop a command the AX tree can handle.
+    public func observe(preferScreenshot: Bool) async throws -> Snapshot {
+        guard preferScreenshot else { return try await observe(wantScreenshot: false) }
+        do { return try await observe(wantScreenshot: true) }
+        catch { return try await observe(wantScreenshot: false) }
+    }
+}
+
 /// Canned perception for tests — never touches the OS.
 public struct NullPerceiver: Perceiver {
     public var observation: Snapshot
@@ -126,8 +137,14 @@ public struct SystemPerceiver: Perceiver {
     /// One-shot capture via SCScreenshotManager (macOS 14+) — cheaper than
     /// running an SCStream for a stepwise agent loop.
     public static func captureScreen() async throws -> CGImage {
-        let content = try await SCShareableContent.excludingDesktopWindows(
-            false, onScreenWindowsOnly: true)
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+        } catch let e as SCStreamError where e.code == .userDeclined {
+            throw S1Error.screenshotFailed(
+                "Screen Recording isn't on for s1. Turn it on in System Settings → Privacy & Security, then reopen s1 (macOS applies it at launch).")
+        }
         guard !content.displays.isEmpty else {
             throw S1Error.screenshotFailed("no displays")
         }

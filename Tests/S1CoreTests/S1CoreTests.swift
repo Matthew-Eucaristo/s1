@@ -2485,3 +2485,20 @@ struct DoneEachSubgoal: Policy {
     #expect(CGEventActuator.mediaKeys["volumeup"] == 0)
     #expect(CGEventActuator.keyCodes["playpause"] == nil)
 }
+
+/// A seeing model must not make Screen Recording mandatory: a failed capture
+/// falls back to the accessibility view.
+private struct NoScreenPerceiver: Perceiver {
+    func observe(wantScreenshot: Bool) async throws -> Snapshot {
+        if wantScreenshot { throw S1Error.screenshotFailed("declined") }
+        return Snapshot(timestamp: Date(), frontmostApp: "TestApp", frontmostPID: 1,
+                        windows: [], axTree: nil, screenshotPath: nil)
+    }
+}
+
+@Test func screenshotFailureFallsBackToAccessibility() async throws {
+    let obs = try await NoScreenPerceiver().observe(preferScreenshot: true)
+    #expect(obs.frontmostApp == "TestApp")
+    #expect(obs.screenshotPath == nil)
+    await #expect(throws: S1Error.self) { try await NoScreenPerceiver().observe(wantScreenshot: true) }
+}

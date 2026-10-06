@@ -37,7 +37,7 @@
 "Type it below — or press ⇧⇧ anywhere on your Mac and say it." = "Ketik di bawah — atau tekan ⇧⇧ di mana saja di Mac lalu ucapkan.";
 "Only the built-in grammar is on. Connect a model to handle anything else." = "Baru grammar bawaan yang aktif. Hubungkan model untuk menangani hal lainnya.";
 "s1 needs Accessibility access" = "s1 butuh akses Aksesibilitas";
-"It's how s1 sees and uses your Mac. Already turned on? Click Repair — every update needs a fresh grant." = "Dengan ini s1 bisa melihat dan memakai Mac-mu. Sudah aktif? Klik Perbaiki — setiap pembaruan butuh izin baru.";
+"It's how s1 sees and uses your Mac. Already on? Click Repair to refresh it." = "Dengan ini s1 bisa melihat dan memakai Mac-mu. Sudah aktif? Klik Perbaiki untuk menyegarkannya.";
 "Repair" = "Perbaiki";
 "Open Settings" = "Buka Pengaturan";
 "Screenshots" = "Tangkapan Layar";
@@ -281,8 +281,8 @@
 "Voice commands and dictation." = "Perintah suara dan dikte.";
 "Screenshots for checking work and vision models." = "Tangkapan layar untuk memeriksa hasil dan model penglihatan.";
 "Only Accessibility is required. Screen Recording applies after s1 restarts." = "Hanya Aksesibilitas yang wajib. Rekaman Layar berlaku setelah s1 dimulai ulang.";
-"Accessibility is on but s1 still asks" = "Aksesibilitas sudah aktif tapi s1 masih meminta";
-"Each update has a new signature. Repair removes the old entry and asks again." = "Setiap pembaruan punya tanda tangan baru. Perbaiki menghapus entri lama lalu meminta lagi.";
+"On in System Settings but not working?" = "Aktif di Pengaturan Sistem tapi tidak berfungsi?";
+"A switch can belong to an older copy of s1. Repair removes it and asks again; turn it back on, then restart s1 for Screen Recording." = "Sakelar bisa milik salinan s1 yang lama. Perbaiki menghapusnya lalu meminta lagi; nyalakan kembali, lalu mulai ulang s1 untuk Rekaman Layar.";
 "granted" = "diizinkan";
 "not granted" = "belum diizinkan";
 
