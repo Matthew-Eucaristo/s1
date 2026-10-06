@@ -3,10 +3,22 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
-## [Unreleased]
+## [0.3.6] - 2026-10-06
 
 ### Fixed
-- Empty-state suggestions no longer repeat a command (recent and example chips are de-duplicated).
+- **Dictated typing works.** "Can you type, I want to eat you" types the text
+  instead of splitting at the comma into "type" (nothing) plus an unknown
+  command. Commas stay inside typed text ("type hello, world"), a verb after a
+  comma still starts a new command, and dictation that arrives as sentences
+  ("Please open Notes. Please type, see you soon.") becomes one command per
+  sentence that starts with a verb.
+- **Reasoner failures say what happened**: a usage limit, a rejected key or no
+  connection, instead of "I couldn't work out how to do that."
+- Finished commands say "Done." rather than the grammar's "goal completed".
+- Empty-state suggestions no longer repeat a command.
+- **Cua Driver**: when it reports missing permissions, s1 stops trying it for
+  the rest of the session instead of failing and falling back on every
+  action. Settings → Advanced has a **Grant…** button for its own permissions.
 
 ## [0.3.5] - 2026-10-06
 

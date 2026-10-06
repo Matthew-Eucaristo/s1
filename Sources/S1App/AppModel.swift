@@ -438,16 +438,32 @@ final class AppModel {
         switch status {
         case .done:
             state = .done
-            reply = answer ?? String(localized: "Done.")
+            // The grammar's own summary isn't an answer worth showing.
+            let real = answer.flatMap { ["done", "goal completed"].contains($0.lowercased()) ? nil : $0 }
+            reply = real ?? String(localized: "Done.")
         case .needsHuman:
             state = .needsYou
             reply = why.map { String(localized: "This one needs you — \($0).") }
                 ?? String(localized: "This one needs you.")
         case .escalatedToS2:
             state = .failed
-            reply = models.hasReasoner
-                ? String(localized: "I couldn't work out how to do that.")
-                : String(localized: "I don't know how to do that yet. Connect a Reasoner in Settings → Models.")
+            let steps = runDir.flatMap { try? RunReader.steps(in: URL(fileURLWithPath: $0)) } ?? []
+            if !models.hasReasoner {
+                reply = String(localized: "I don't know how to do that yet. Connect a Reasoner in Settings → Models.")
+            } else {
+                switch ReasonerFailure.last(in: steps) {
+                case .usageLimit?:
+                    reply = String(localized: "Your Reasoner hit its usage limit. Pick another in Settings → Models, or try again later.")
+                case .badKey?:
+                    reply = String(localized: "Your Reasoner's key was rejected. Check it in Settings → Models.")
+                case .unreachable?:
+                    reply = String(localized: "I couldn't reach your Reasoner. Check your connection.")
+                case .other(let message)?:
+                    reply = String(localized: "Your Reasoner failed: \(message)")
+                case nil:
+                    reply = String(localized: "I couldn't work out how to do that.")
+                }
+            }
         case .maxStepsReached:
             state = .failed
             reply = String(localized: "I gave up after too many steps.")

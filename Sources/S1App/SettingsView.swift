@@ -321,6 +321,14 @@ private struct AdvancedSettings: View {
                     get: { CuaDriver.enabled() },
                     set: { on in try? S1Config.update { $0.executor = on ? nil : "cgevent" } }))
                     .disabled(CuaDriver.binary() == nil)
+                if CuaDriver.binary() != nil, CuaDriver.enabled() {
+                    LabeledContent("Cua Driver's own permissions") {
+                        Button("Grant…") {
+                            CuaActuator.resetAvailability()
+                            Task.detached { try? await CuaInstaller.grantPermissions() }
+                        }
+                    }
+                }
                 if CuaDriver.binary() == nil {
                     LabeledContent("Cua Driver isn't installed") {
                         Button(model.cuaInstalling ? "Installing…" : "Install") {
@@ -335,7 +343,7 @@ private struct AdvancedSettings: View {
             } header: {
                 Text("Executor")
             } footer: {
-                FootNote("Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. The safety gate runs first either way.")
+                FootNote("Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. Cua Driver is a separate app and needs its own Accessibility and Screen Recording; until it has them, s1 acts directly. The safety gate runs first either way.")
             }
 
             Section {

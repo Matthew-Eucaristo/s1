@@ -60,6 +60,10 @@
 "This one needs you — %@." = "Yang ini butuh kamu — %@.";
 "This one needs you." = "Yang ini butuh kamu.";
 "I couldn't work out how to do that." = "Aku tidak menemukan cara melakukannya.";
+"Your Reasoner hit its usage limit. Pick another in Settings → Models, or try again later." = "Reasoner-mu mencapai batas pemakaian. Pilih yang lain di Pengaturan → Model, atau coba lagi nanti.";
+"Your Reasoner's key was rejected. Check it in Settings → Models." = "Kunci Reasoner-mu ditolak. Periksa di Pengaturan → Model.";
+"I couldn't reach your Reasoner. Check your connection." = "Aku tidak bisa menghubungi Reasoner-mu. Periksa koneksimu.";
+"Your Reasoner failed: %@" = "Reasoner-mu gagal: %@";
 "I don't know how to do that yet. Connect a Reasoner in Settings → Models." = "Aku belum tahu cara melakukannya. Hubungkan Reasoner di Pengaturan → Model.";
 "I gave up after too many steps." = "Aku menyerah setelah terlalu banyak langkah.";
 "I got stuck repeating the same step." = "Aku tersangkut mengulang langkah yang sama.";
@@ -291,7 +295,7 @@
 "Cua Driver isn't installed" = "Cua Driver belum terinstal";
 "Install" = "Instal";
 "Executor" = "Eksekutor";
-"Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. The safety gate runs first either way." = "Disarankan. Mengetik, pintasan, dan membuka app berjalan tanpa mencuri fokus; selebihnya memakai jalur input s1 sendiri. Gerbang keamanan tetap berjalan lebih dulu.";
+"Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. Cua Driver is a separate app and needs its own Accessibility and Screen Recording; until it has them, s1 acts directly. The safety gate runs first either way." = "Disarankan. Mengetik, pintasan, dan membuka app berjalan tanpa mengambil fokus; selain itu memakai jalur input s1 sendiri. Cua Driver adalah app terpisah dan butuh izin Aksesibilitas dan Rekaman Layar sendiri; sampai izin itu ada, s1 bertindak langsung. Gerbang keamanan tetap berjalan lebih dulu.";
 "Sandbox shell commands" = "Sandbox perintah shell";
 "Shell Sandbox" = "Sandbox Shell";
 "Runs shell steps inside Anthropic's sandbox-runtime. Install it with `npm install -g @anthropic-ai/sandbox-runtime`." = "Menjalankan langkah shell di dalam sandbox-runtime Anthropic. Instal dengan `npm install -g @anthropic-ai/sandbox-runtime`.";
@@ -355,3 +359,6 @@
 
 // ---- Launcher ----
 "Search apps, files, snippets, 100 usd to idr — or ask s1…" = "Cari app, file, snippet, 100 usd ke idr — atau tanya s1…";
+
+"Cua Driver's own permissions" = "Izin Cua Driver sendiri";
+"Grant…" = "Beri izin…";

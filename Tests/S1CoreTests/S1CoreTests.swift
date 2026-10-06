@@ -2522,3 +2522,29 @@ private struct NoScreenPerceiver: Perceiver {
     let d = try await AXPolicy().decide(observation: obs, goal: "Open Notepad.", history: [])
     if case .openApp(let name)? = d.action { #expect(name == "Notepad") } else { Issue.record("expected openApp") }
 }
+
+@Test func dictatedTypeCommandsKeepTheirText() {
+    // "type," then the text: the comma belongs to dictation, not a new command.
+    let a = AXPolicy.intents(of: "Can you type, I want to eat you?")
+    #expect(a.map(\.verb) == ["type"])
+    #expect(a.first?.arg == "I want to eat you")
+    // Commas inside typed text stay; a verb after a comma still splits.
+    let b = AXPolicy.intents(of: "type hello, world, press enter")
+    #expect(b.map(\.verb) == ["type", "press"])
+    #expect(b.first?.arg == "hello, world")
+    // Sentences: a new sentence that starts with a verb is a new command.
+    let c = AXPolicy.intents(of: "Please open Notes. Please type, see you soon.")
+    #expect(c.map(\.verb) == ["open", "type"])
+    #expect(c.last?.arg == "see you soon")
+    // A sentence without a verb continues the text.
+    let d = AXPolicy.intents(of: "type I'm late. See you there")
+    #expect(d.map(\.verb) == ["type"])
+    #expect(d.first?.arg == "I'm late. See you there")
+}
+
+@Test func reasonerFailuresAreNamed() {
+    #expect(ReasonerFailure(rationale: #"s2 error: aborted: LLM 429: {"message":"Go usage limit exceeded"}"#) == .usageLimit)
+    #expect(ReasonerFailure(rationale: "s2 error: aborted: LLM 401: invalid api key") == .badKey)
+    #expect(ReasonerFailure(rationale: "s2 error: The request timed out.") == .unreachable)
+    #expect(ReasonerFailure(rationale: "s1 abstained") == nil)
+}

@@ -52,23 +52,17 @@ public struct AXPolicy: Policy {
     /// Also splits on conjunctions — voice transcriptions rarely use commas:
     /// "buka TextEdit lalu ketik halo" → [buka TextEdit, ketik halo].
     static func intents(of goal: String) -> [Intent] {
-        // Drop leading politeness/wake filler that dictation loves to prepend —
-        // "tolong buka …", "please open …", "s1 buka …", "hey s1, open …".
-        // Without this the first word becomes an unknown verb and escalates.
-        var g = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "tolong", "please",
-                       "coba", "bisa", "boleh", "mohon", "can you", "could you",
-                       "ayo", "c'mon", "yuk"]
-        var stripped = true
-        while stripped {
-            stripped = false
-            let low = g.lowercased()
-            for f in fillers where low == f || low.hasPrefix(f + " ") || low.hasPrefix(f + ",") {
-                g = String(g.dropFirst(f.count)).trimmingCharacters(
-                    in: .whitespacesAndNewlines.union(.punctuationCharacters))
-                stripped = true
-                break
-            }
+        // Dictation arrives as sentences: "Please type hi. Please open Notes."
+        // A sentence that starts (after filler) with a verb is a new command;
+        // any other sentence continues the previous one's text.
+        var segments: [String] = []
+        let sentences = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"(?<=[.!?])\s+"#, with: "\u{0}", options: .regularExpression)
+            .split(separator: "\u{0}").map(String.init)
+        for sentence in sentences {
+            let t = stripFillers(sentence)
+            if segments.isEmpty || startsWithVerb(t) { segments.append(t) }
+            else { segments[segments.count - 1] += " " + sentence }
         }
         // Punctuation is an unconditional separator. Word conjunctions are
         // NOT — "lalu"/"then" also appear inside text the user wants typed
@@ -78,9 +72,20 @@ public struct AXPolicy: Policy {
         let conjWords = ["and then", "habis itu", "abis itu", "setelah itu",
                          "kemudian", "lantas", "lalu", "then",
                          "terus", "trus"]
-        var parts = g.components(separatedBy: CharacterSet(charactersIn: ",;"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        var parts: [String] = []
+        for segment in segments {
+            for piece in segment.components(separatedBy: CharacterSet(charactersIn: ",;"))
+                .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }) where !piece.isEmpty {
+                // Text keeps its commas: "type, I want to eat" and "type hello,
+                // world" are one thing to type, not a verb plus an unknown one.
+                if let last = parts.last, startsWithTypeVerb(last), !startsWithVerb(stripFillers(piece)) {
+                    let bare = last.split(separator: " ").count == 1
+                    parts[parts.count - 1] = last + (bare ? " " : ", ") + piece
+                } else {
+                    parts.append(stripFillers(piece))
+                }
+            }
+        }
         for c in conjWords { parts = parts.flatMap { splitOnConj($0, conj: c) } }
         return parts
             // "and"/"dan" are ambiguous — real words inside typed text
@@ -131,6 +136,34 @@ public struct AXPolicy: Policy {
     /// "type copy and paste" still types all three words.
     static let editVerbs: Set<String> = ["copy", "salin", "paste", "tempel", "cut", "potong",
                                          "undo", "redo", "save", "simpan"]
+
+    /// Leading politeness/wake filler dictation loves to prepend — "tolong
+    /// buka …", "please open …", "hey s1, open …". Without this the first
+    /// word becomes an unknown verb and escalates.
+    static func stripFillers(_ s: String) -> String {
+        var g = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "tolong", "please",
+                       "coba", "bisa", "boleh", "mohon", "can you", "could you",
+                       "ayo", "c'mon", "yuk"]
+        var stripped = true
+        while stripped {
+            stripped = false
+            let low = g.lowercased()
+            for f in fillers where low == f || low.hasPrefix(f + " ") || low.hasPrefix(f + ",") {
+                g = String(g.dropFirst(f.count)).trimmingCharacters(
+                    in: .whitespacesAndNewlines.union(.punctuationCharacters))
+                stripped = true
+                break
+            }
+        }
+        return g
+    }
+
+    static func startsWithVerb(_ s: String) -> Bool {
+        let first = s.split(separator: " ", maxSplits: 1).first
+            .map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) } ?? ""
+        return verbs.contains(first) || editVerbs.contains(first)
+    }
 
     static func startsWithTypeVerb(_ s: String) -> Bool {
         typeVerbs.contains(s.split(separator: " ", maxSplits: 1).first?.lowercased() ?? "")

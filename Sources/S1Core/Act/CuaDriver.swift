@@ -157,10 +157,18 @@ public struct CuaActuator: Actuator {
     let binary: String
     let fallback = CGEventActuator()
 
+    /// Set once Cua Driver reports it lacks its own permissions: every later
+    /// call would fail the same way, so this process stops paying for it.
+    /// Cleared by a relaunch (after granting) or `resetAvailability()`.
+    nonisolated(unsafe) private static var missingPermissions = false
+    private static let lock = NSLock()
+    public static var needsPermissions: Bool { lock.withLock { missingPermissions } }
+    public static func resetAvailability() { lock.withLock { missingPermissions = false } }
+
     public init(binary: String) { self.binary = binary }
 
     public func perform(_ action: Action, frontmostPID: pid_t?) async throws -> String {
-        if let c = try? await cuaCall(for: action, pid: frontmostPID) {
+        if !Self.needsPermissions, let c = try? await cuaCall(for: action, pid: frontmostPID) {
             let bin = binary
             do {
                 let out = try await Task.detached { try CuaDriver.run(bin, argv: c) }.value
@@ -168,6 +176,7 @@ public struct CuaActuator: Actuator {
                 return "cua \(c[0]): \(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))"
             } catch {
                 DebugTrace.event("cua", ["tool": c[0], "ok": false, "error": "\(error)"])
+                if "\(error)".contains("permissions_pending") { Self.lock.withLock { Self.missingPermissions = true } }
                 let r = try await fallback.perform(action, frontmostPID: frontmostPID)
                 return r + " (cua fallback: \(error.localizedDescription.prefix(120)))"
             }
