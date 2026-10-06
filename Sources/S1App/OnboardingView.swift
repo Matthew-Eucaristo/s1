@@ -41,7 +41,7 @@ struct OnboardingView: View {
                 HStack(spacing: 7) {
                     ForEach(Step.allCases, id: \.self) { s in
                         Capsule()
-                            .fill(s == step ? Color.accentColor : Color.secondary.opacity(0.3))
+                            .fill(s == step ? model.accent : Color.secondary.opacity(0.3))
                             .frame(width: s == step ? 18 : 7, height: 7)
                     }
                 }
@@ -59,6 +59,7 @@ struct OnboardingView: View {
         }
         .frame(width: 620, height: 560)
         .background(.background)
+        .tint(model.accent)
     }
 
     // MARK: pages
@@ -157,8 +158,8 @@ struct OnboardingView: View {
     private var models: some View {
         VStack(spacing: 22) {
             Spacer()
-            header("sparkles", .purple, "Give s1 a brain",
-                   "Optional. s1's grammar handles everyday commands with no model. Connect a judge and a reasoner for everything else.")
+            header("sparkles", model.accent, "Pick your models",
+                   "Optional. The built-in grammar needs no model. Add a Judge (System 1) to check each step and a Reasoner (System 2) for everything else.")
             VStack(spacing: 10) {
                 QuickConnect(model: model, id: "typesafe", role: .judge)
                 QuickConnect(model: model, id: "opencode", role: .reasoner)

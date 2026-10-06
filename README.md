@@ -21,11 +21,14 @@ s1 is a voice-first agent for macOS. Double-tap <kbd>⇧</kbd> anywhere, say
 screen through the Accessibility tree, acts like you would, checks its work,
 and keeps the evidence.
 
-It thinks in two speeds. **System 1** is a deterministic grammar that handles
-the everyday (opening apps, typing, shortcuts, media keys) instantly, with no
-model at all, and a decision model can judge each of its steps. When something
-is genuinely new, **System 2**, an LLM you choose, takes over. Everything
-dangerous waits for you.
+Most commands never need a model: a built-in grammar handles the everyday
+(opening apps, typing, shortcuts, media keys) instantly. On top of it sit two
+models, both optional and both yours to pick:
+
+- **Judge (System 1):** a small, fast decision model that checks every step.
+- **Reasoner (System 2):** an LLM that takes over when something is new.
+
+Everything dangerous waits for you.
 
 > **Public beta (v0.x).** It works and it's tested, and it's still sharpening.
 > Read [SECURITY.md](SECURITY.md) before letting it drive a machine you care about.
@@ -40,14 +43,17 @@ dangerous waits for you.
   Zero model calls, zero latency.
 - **One model per job, any provider.** Connect TypeSafe, OpenCode Go, OpenAI,
   OpenRouter, Groq, Gemini, xAI, DeepSeek, Liquid AI, Cloudflare, Ollama,
-  LM Studio or any OpenAI-compatible server, then pick a judge and a reasoner.
-  No account required to start.
-- **Looks when it can.** If your judge reads images it sees the screen; if
-  not, your reasoner does; if neither can, s1 uses the accessibility tree.
+  LM Studio or any OpenAI-compatible server, then pick a Judge (System 1) and
+  a Reasoner (System 2). No account required to start.
+- **Looks when it can.** If your Judge reads images it sees the screen; if
+  not, your Reasoner does; if neither can, s1 uses the accessibility tree.
 - **Every step is evidence.** Each run keeps its steps, who decided them, why,
   and screenshots. Browse them in the app's history or `~/.s1/artifacts`.
 - **Careful by design.** A safety gate runs before every action. Passwords,
-  purchases and anything irreversible stop and ask. Judges can only add caution.
+  purchases and anything irreversible stop and ask. The Judge can only add caution.
+- **Great defaults, all of it yours.** Works the moment it opens, and every
+  default is a setting. Models, vision and voices are also a CLI command and a
+  line in `~/.s1/config.json`. See [Configure and extend](#configure-and-extend).
 - **Native and light.** Swift 6, SwiftUI, App Intents, no private APIs.
   Idle uses 0% CPU and no microphone.
 
@@ -89,29 +95,34 @@ brew uninstall --cask s1 --zap       # app + ~/.s1 + Library traces
    required.
 2. **Try it.** Double-tap <kbd>⇧</kbd> and say *“open Notes”*, or type in the window.
 3. **Optionally, give it a brain.** Settings → Models → **Add Provider**. The
-   recommended pair is **TypeSafe** (Jev, the judge) and **OpenCode Go**
-   (the reasoner); Ollama keeps everything on your Mac.
+   recommended pair is **TypeSafe** (Jev, the Judge) and **OpenCode Go**
+   (DeepSeek, the Reasoner); Ollama keeps everything on your Mac.
 
 ## How it works
 
 ```
- you ──▶ voice / text ──▶ System 1 ─────────────────────▶ safety gate ──▶ act ──▶ verify ──▶ log
-                           grammar (no model)                  ▲
-                           + judge (decision model) ── unsure ──▶ System 2 (reasoning LLM)
-                                    ▲                             ▲
-                                    └── screen, if it can see ────┘── else the screen goes here
+ you ─▶ voice / text ─▶ built-in grammar ─▶ Judge (System 1) ─▶ safety gate ─▶ act ─▶ verify ─▶ log
+                        no model, instant   checks each step         ▲
+                                                  │ unsure           │
+                                                  └─▶ Reasoner (System 2) ─┘
+
+ screen ─▶ the Judge if it reads images, else the Reasoner, else nobody (accessibility tree only)
 ```
 
-- **System 1** parses the request into intents and runs the ones it knows,
-  deterministically.
-- **The judge** is System 1's decision model. It answers typed questions
-  (*does this step move toward the goal? is it repeating a failure?*) and can
-  only lower confidence.
-- **System 2** gets the step when confidence is low: the goal, the run so far,
-  the accessibility tree and, if it can read images, a screenshot. It can plan,
-  answer questions, or hand plain sub-goals back to System 1.
+- **The built-in grammar** parses the request into intents and runs the ones it
+  knows, deterministically. No model, no network.
+- **The Judge (System 1)** is a fast decision model. It answers typed questions
+  about each step (*does this move toward the goal? is it repeating a failure?*)
+  and can only lower confidence. No Judge set: the grammar runs alone.
+- **The Reasoner (System 2)** gets the step when the grammar doesn't know it or
+  confidence is low: the goal, the run so far, the accessibility tree and, if it
+  can read images, a screenshot. It can plan, answer questions, or hand plain
+  sub-goals back to the grammar.
 - **The gate** classifies every action (`read`, `reversible`, `irreversible`),
   blocks credentials and payments outright, and stops on secure text fields.
+
+In the app, each step carries a tag: **S1** for the fast path (grammar, checked
+by the Judge when one is set), **S2** for the Reasoner.
 
 ## Models
 
@@ -121,38 +132,38 @@ each job takes one model:
 
 | Role | Job | Unset means |
 |---|---|---|
-| `judge` | System 1's decision model: checks every step before it runs (System One API) | grammar only |
-| `reasoner` | System 2: an LLM that plans what the grammar can't and answers questions | no escalation |
+| `judge` | **Judge (System 1):** a fast decision model that checks every step before it runs (System One API) | grammar only |
+| `reasoner` | **Reasoner (System 2):** an LLM that plans what the grammar can't and answers questions | no escalation |
 | `transcribe` | Cloud speech-to-text for each finished voice turn | on-device Apple speech |
 | `speak` | A cloud voice for replies | Apple voices |
 
 **Seeing the screen** is a capability of the models you pick, not another
-role. If the judge reads images (d1, Clef) it gets a screenshot with each
-step; otherwise the reasoner gets one with every step it takes over (Gemini,
+role. If the Judge reads images (d1, Clef) it gets a screenshot with each
+step; otherwise the Reasoner gets one with every step it takes over (Gemini,
 GPT-5, Claude, Llama 4 Scout, Qwen3-VL…); if neither can, s1 works from the
 accessibility tree alone. One switch, "Let models see the screen", turns it
 off. Settings marks every model that sees.
 
-Connecting a provider fills an empty judge or reasoner with its recommended
+Connecting a provider fills an empty Judge or Reasoner with its recommended
 model. Voices never switch on by themselves: audio leaves your Mac only when
 you choose a cloud model for it.
 
 | Provider | Good for | |
 |---|---|---|
-| TypeSafe | Jev, the recommended judge | key |
-| OpenCode Go | DeepSeek V4.1 Flash, the recommended reasoner | key |
+| TypeSafe | Jev, the recommended Judge | key |
+| OpenCode Go | DeepSeek V4.1 Flash, the recommended Reasoner | key |
 | OpenAI | GPT-5 (sees), transcription, voices | key |
 | OpenRouter | Every major model behind one key, Claude included | key |
 | Groq | Llama 4 Scout (sees), Whisper, Orpheus voices | key |
-| Google Gemini · xAI · DeepSeek | Reasoners | key |
-| Liquid AI · Cloudflare Workers AI | Judges that see the screen | key |
+| Google Gemini · xAI · DeepSeek | Reasoners (System 2) | key |
+| Liquid AI · Cloudflare Workers AI | Judges (System 1) that see the screen | key |
 | Ollama · LM Studio | Open models on your Mac | local |
 | Custom server | vLLM, MLX, Speaches, your own shim | optional key |
 
 In the app it's Settings → Models. From the terminal:
 
 ```bash
-s1 connect opencode                          # prompts for the key, checks it, fills the reasoner
+s1 connect opencode                          # prompts for the key, checks it, fills the Reasoner
 s1 connect ollama
 s1 use judge ollama/clef-flash               # provider/model; the model id may contain slashes
 s1 use reasoner openrouter/anthropic/claude-sonnet-4.5
@@ -182,7 +193,7 @@ For one-off runs and CI: `S1_REASONER=groq/openai/gpt-oss-120b`,
 Speech runs on-device with Apple's SpeechAnalyzer. **Automatic** listens in
 English and your Mac's language at once; 14 languages are supported, with
 English and Indonesian verified end to end. Commands the grammar can't parse go
-to the reasoner, which reads any language.
+to the Reasoner, which reads any language.
 
 - **Interrupt:** talk over s1 while it works or speaks and it stops, then
   listens for what's next (echo-cancelled, so its own voice doesn't trip it).
@@ -202,13 +213,41 @@ to the reasoner, which reads any language.
 | *“save that as a skill called morning setup”* | Replay a sequence by name, every step through the gate |
 | Siri & Shortcuts | “Ask s1 to …”, “Wake s1” |
 
+## Configure and extend
+
+s1 ships with the defaults we'd pick for you, and every one of them can change.
+
+| Default | Change it |
+|---|---|
+| Built-in grammar, no model needed | Settings → Models, `s1 use`, `S1_JUDGE` / `S1_REASONER` |
+| Recommended models filled in when you connect a provider | Any model the provider lists, or `provider/model` by hand |
+| Models that can see get screenshots | "Let models see the screen", `"vision": false`, `S1_VISION=off` |
+| On-device speech and Apple voices | Settings → Voice, `s1 use transcribe` / `s1 use speak` |
+| Talk over s1 to stop it; spoken replies | Settings → Voice |
+| Status pill under the notch, memory on | Settings → General |
+| s1 orange accent | Settings → General → Appearance → Accent color (or follow macOS) |
+
+Ways to extend it today:
+
+- **Any model server.** The Custom provider takes any OpenAI-compatible endpoint
+  (vLLM, MLX, Speaches, your own shim).
+- **Your own brain.** `Policy` and `Reasoner` are small Swift protocols; see
+  [docs/adding-a-brain.md](docs/adding-a-brain.md).
+- **Skills, snippets, Shortcuts.** Save a sequence as a skill by voice, add
+  launcher snippets, or drive s1 from Siri and Shortcuts.
+- **Scripts.** The `s1` CLI runs, inspects and replays everything the app does.
+
+A plugin system for new actions, providers and skills is on the roadmap; the
+provider catalog and role design are built so plugins slot in without changing
+how you configure s1.
+
 ## The command line
 
 The app and the CLI share one config, one history and one brain.
 
 | | |
 |---|---|
-| `s1 run --goal "open Notes"` | Run a command (`--dry-run` touches nothing, `--policy ax` skips the judge) |
+| `s1 run --goal "open Notes"` | Run a command (`--dry-run` touches nothing, `--policy ax` skips the Judge) |
 | `s1 listen` · `s1 serve` | One voice command · the always-on listener (`--install` for launchd) |
 | `s1 providers` · `connect` · `disconnect` | Manage providers |
 | `s1 use` · `s1 models` · `s1 pull` | Assign roles · see choices · download an Ollama model |
@@ -258,9 +297,9 @@ swift test                          # no permissions needed
 ## Honest limits
 
 - Apps without an accessibility tree (some games, remote desktops, a few
-  Electron apps) need a reasoner that sees the screen: slower, and only as
+  Electron apps) need a Reasoner that sees the screen: slower, and only as
   good as the model.
-- Small local GUI models are still young. The grammar plus a hosted reasoner is
+- Small local GUI models are still young. The grammar plus a hosted Reasoner is
   the most reliable setup today.
 - iOS is out of scope: it offers no cross-app accessibility or input APIs.
 

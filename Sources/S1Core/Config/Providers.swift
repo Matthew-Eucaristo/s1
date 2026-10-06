@@ -140,13 +140,13 @@ public enum ProviderCatalog {
     /// order — recommended pair first, then cloud, then local.
     public static let all: [ProviderTemplate] = [
         .init(id: "typesafe", name: "TypeSafe", kind: .cloud,
-              summary: "Jev — the recommended step judge",
+              summary: "Jev, the recommended Judge (System 1)",
               keyURL: "https://typesafe.ai", keyHint: "TypeSafe API key",
               systemOne: "https://api.typesafe.ai",
               models: [.init("jev-latest", name: "Jev", roles: [.judge], recommended: [.judge], vision: false,
                              note: "calibrated yes/no · choice · score")]),
         .init(id: "opencode", name: "OpenCode Go", kind: .cloud,
-              summary: "DeepSeek V4.1 Flash — the recommended reasoner",
+              summary: "DeepSeek V4.1 Flash, the recommended Reasoner (System 2)",
               keyURL: "https://opencode.ai", keyHint: "OpenCode Go subscription key",
               chat: "https://opencode.ai/zen/go/v1",
               models: [
@@ -159,7 +159,7 @@ public enum ProviderCatalog {
               ],
               listsModels: true),
         .init(id: "openai", name: "OpenAI", kind: .cloud,
-              summary: "GPT, Whisper-class transcription, natural voices",
+              summary: "GPT Reasoners, transcription and natural voices",
               keyURL: "https://platform.openai.com/api-keys", keyHint: "sk-…",
               chat: "https://api.openai.com/v1",
               models: [
@@ -170,7 +170,7 @@ public enum ProviderCatalog {
               ],
               listsModels: true),
         .init(id: "openrouter", name: "OpenRouter", kind: .cloud,
-              summary: "Every major model behind one key — Claude included",
+              summary: "Every major model behind one key, Claude included",
               keyURL: "https://openrouter.ai/keys", keyHint: "sk-or-…",
               chat: "https://openrouter.ai/api/v1",
               models: [
@@ -182,7 +182,7 @@ public enum ProviderCatalog {
               ],
               listsModels: true),
         .init(id: "groq", name: "Groq", kind: .cloud,
-              summary: "Very fast open models, Whisper and Orpheus voices",
+              summary: "Fast open Reasoners, Whisper and Orpheus voices",
               keyURL: "https://console.groq.com/keys", keyHint: "gsk_…",
               chat: "https://api.groq.com/openai/v1",
               models: [
@@ -221,7 +221,7 @@ public enum ProviderCatalog {
                              recommended: [.reasoner], vision: false)],
               listsModels: true),
         .init(id: "liquid", name: "Liquid AI", kind: .cloud,
-              summary: "d1 — a step judge that also sees the screen",
+              summary: "d1, a Judge that also sees the screen",
               keyURL: "https://console.liquid.ai", keyHint: "liquid_…",
               systemOne: "https://api.liquid.ai/decisions",
               models: [
@@ -229,7 +229,7 @@ public enum ProviderCatalog {
                 .init("d1", name: "d1", roles: [.judge], vision: true),
               ]),
         .init(id: "cloudflare", name: "Cloudflare Workers AI", kind: .cloud,
-              summary: "Clef judges (open weights) and Llama on Workers AI",
+              summary: "Clef Judges (open weights) and Llama Reasoners",
               keyURL: "https://dash.cloudflare.com/profile/api-tokens", keyHint: "API token",
               chat: "https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1",
               systemOne: "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}",
@@ -241,7 +241,7 @@ public enum ProviderCatalog {
                       recommended: [.reasoner], vision: true),
               ]),
         .init(id: "ollama", name: "Ollama", kind: .local,
-              summary: "Open models on this Mac — private, offline, free",
+              summary: "Open models on this Mac: private, offline, free",
               chat: "http://localhost:11434/v1", systemOne: "http://localhost:11434",
               models: [
                 .init("clef-flash", roles: [.judge], vision: true, size: "9 GB", note: "judge that sees the screen"),
@@ -258,7 +258,7 @@ public enum ProviderCatalog {
               summary: "Any model loaded in LM Studio's local server",
               chat: "http://localhost:1234/v1", listsModels: true, symbol: "macwindow"),
         .init(id: "custom", name: "Custom Server", kind: .custom,
-              summary: "Any OpenAI-compatible endpoint — vLLM, MLX, Speaches, your own",
+              summary: "Any OpenAI-compatible endpoint: vLLM, MLX, Speaches, your own",
               listsModels: true, symbol: "server.rack"),
     ]
 

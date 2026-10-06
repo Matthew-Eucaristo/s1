@@ -126,14 +126,15 @@ struct StepRow: View {
     }
 }
 
+/// "S1" (grammar or Judge) in neutral grey, "S2" (Reasoner) in the accent.
 struct BrainTag: View {
     let text: String
     var body: some View {
         Text(text)
             .font(.system(size: 9, weight: .bold, design: .rounded))
             .padding(.horizontal, 5).padding(.vertical, 2)
-            .foregroundStyle(text == "S2" ? Color.purple : Color.teal)
-            .background((text == "S2" ? Color.purple : Color.teal).opacity(0.15), in: .capsule)
+            .foregroundStyle(text == "S2" ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            .background(text == "S2" ? AnyShapeStyle(.tint.opacity(0.15)) : AnyShapeStyle(.quaternary), in: .capsule)
     }
 }
 
@@ -150,9 +151,10 @@ extension Turn.State {
         }
     }
 
+    @available(macOS 26, *) @MainActor
     var tint: Color {
         switch self {
-        case .running: .accentColor
+        case .running: AppModel.shared.accent
         case .done: .green
         case .needsYou: .orange
         case .failed: .red
@@ -257,4 +259,24 @@ struct FootNote: View {
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+// MARK: - accent
+
+/// The app's accent: s1 orange (the website's colour) by default, or the
+/// accent chosen in System Settings → Appearance.
+enum AccentChoice: String, CaseIterable, Identifiable {
+    case s1, system
+    var id: String { rawValue }
+}
+
+enum Theme {
+    /// Signal orange, a touch deeper in light mode for contrast.
+    static let orange = Color(nsColor: NSColor(name: "s1Orange") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 1.0, green: 0.42, blue: 0.17, alpha: 1)
+            : NSColor(srgbRed: 0.90, green: 0.33, blue: 0.10, alpha: 1)
+    })
+    /// Text on an orange fill — near-black reads better than white on orange.
+    static let ink = Color(red: 0.07, green: 0.07, blue: 0.08)
 }

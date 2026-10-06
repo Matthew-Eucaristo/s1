@@ -19,9 +19,9 @@ struct ModelsSettings: View {
                 RoleRow(store: store, role: .judge) { adding = true }
                 RoleRow(store: store, role: .reasoner) { adding = true }
             } header: {
-                Text("Brains")
+                Text("System 1 and System 2")
             } footer: {
-                FootNote("s1 always tries its built-in grammar first: instant, free and private. The judge can only add caution; the safety gate decides either way.")
+                FootNote("s1 always tries its built-in grammar first: instant, free and private. The Judge can only add caution; the safety gate decides either way.")
             }
 
             Section {
@@ -30,7 +30,7 @@ struct ModelsSettings: View {
                     Text(store.visionSummary)
                 }
             } footer: {
-                FootNote("Screenshots go to the judge when it can read images, and to the reasoner with each step it takes over. Pick models marked “Sees the screen” to use it.")
+                FootNote("Screenshots go to the Judge when it can read images, otherwise to the Reasoner with each step it takes over. Pick models marked “Sees the screen” to use it.")
             }
 
             Section {
@@ -41,7 +41,7 @@ struct ModelsSettings: View {
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("No providers yet")
-                            Text("Connect one to give s1 a judge and a reasoner.")
+                            Text("Connect one to give s1 a Judge and a Reasoner.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -102,7 +102,7 @@ struct RoleRow: View {
                         Label(store.canSee(role) ? "Sees the screen" : "Text only",
                               systemImage: store.canSee(role) ? "eye" : "text.alignleft")
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(store.canSee(role) && store.visionEnabled ? Color.accentColor : .secondary)
+                            .foregroundStyle(store.canSee(role) && store.visionEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     }
                 }
             }
@@ -469,7 +469,7 @@ private struct ProviderDetailSheet: View {
                 Section("Used For") {
                     let roles = Models.roles(of: provider.id, config: store.config)
                     if roles.isEmpty {
-                        Text("Nothing yet — choose one of its models under Brains or Voice.")
+                        Text("Nothing yet. Choose one of its models above or under Voice.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(roles) { r in

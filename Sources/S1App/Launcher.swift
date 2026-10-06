@@ -269,7 +269,7 @@ struct LauncherView: View {
             if selected { Text("↩").foregroundStyle(.secondary) }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(selected ? Color.accentColor.opacity(0.22) : .clear, in: .rect(cornerRadius: 10))
+        .background(selected ? AppModel.shared.accent.opacity(0.22) : .clear, in: .rect(cornerRadius: 10))
         .contentShape(.rect)
     }
 

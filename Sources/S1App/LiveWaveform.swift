@@ -25,7 +25,7 @@ struct LiveWaveform: View {
                     let rect = CGRect(x: x, y: (size.height - h) / 2,
                                       width: barWidth, height: h)
                     ctx.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                             with: .color(.accentColor))
+                             with: .color(AppModel.shared.accent))
                 }
             }
         }

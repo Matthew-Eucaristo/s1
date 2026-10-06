@@ -12,8 +12,10 @@ enum DemoContent {
     @MainActor
     static func sizeWindow() {
         guard let w = NSApp.windows.first(where: { $0.isVisible && $0.title.hasPrefix("s1") }),
-              let screen = w.screen ?? NSScreen.main else { return }
-        let size = NSSize(width: 1320, height: 860)
+              let screen = NSScreen.screens.first(where: { $0.backingScaleFactor >= 2 }) ?? w.screen ?? NSScreen.main
+        else { return }
+        // Prefers a Retina screen, so captures come out at 2x.
+        let size = NSSize(width: 1180, height: 880)
         let f = screen.visibleFrame
         w.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
                           width: size.width, height: size.height), display: true)

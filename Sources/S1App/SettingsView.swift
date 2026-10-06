@@ -17,6 +17,7 @@ struct SettingsView: View {
             Tab("Advanced", systemImage: "gearshape.2", value: "advanced") { AdvancedSettings(model: model) }
         }
         .frame(width: 640, height: 600)
+        .tint(model.accent)
         .onAppear { model.refreshPermissions() }
     }
 }
@@ -37,6 +38,19 @@ private struct GeneralSettings: View {
                 Toggle("Show status under the notch", isOn: $model.notchHUD)
             } footer: {
                 FootNote("The status pill appears only while s1 listens or works, with a stop button.")
+            }
+
+            Section {
+                Picker("Accent color", selection: $model.accentChoice) {
+                    Label { Text("s1 Orange") } icon: { Image(systemName: "circle.fill").foregroundStyle(Theme.orange) }
+                        .tag(AccentChoice.s1)
+                    Label { Text("System Accent") } icon: { Image(systemName: "circle.fill").foregroundStyle(Color(nsColor: .controlAccentColor)) }
+                        .tag(AccentChoice.system)
+                }
+            } header: {
+                Text("Appearance")
+            } footer: {
+                FootNote("System Accent follows System Settings → Appearance.")
             }
 
             Section("Shortcuts") {

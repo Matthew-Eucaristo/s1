@@ -110,6 +110,14 @@ final class AppModel {
     private(set) var languageNeedsRelaunch = false
     private let launchLanguage = AppModel.launchLanguagePref()
 
+    /// s1 orange or the macOS accent — remembered per Mac.
+    var accentChoice = AccentChoice(rawValue: UserDefaults.standard.string(forKey: "accent") ?? "") ?? .s1 {
+        didSet { UserDefaults.standard.set(accentChoice.rawValue, forKey: "accent") }
+    }
+    var accent: Color { accentChoice == .s1 ? Theme.orange : Color(nsColor: .controlAccentColor) }
+    /// Text drawn on an accent fill.
+    var onAccent: Color { accentChoice == .s1 ? Theme.ink : .white }
+
     /// Selected Settings pane — deep links set it before opening.
     var settingsTab = "general"
     @ObservationIgnored var openSettingsAction: (() -> Void)?
@@ -439,7 +447,7 @@ final class AppModel {
             state = .failed
             reply = models.hasReasoner
                 ? String(localized: "I couldn't work out how to do that.")
-                : String(localized: "I don't know how to do that yet — connect a reasoner in Settings → Models.")
+                : String(localized: "I don't know how to do that yet. Connect a Reasoner in Settings → Models.")
         case .maxStepsReached:
             state = .failed
             reply = String(localized: "I gave up after too many steps.")

@@ -28,6 +28,7 @@ struct ContentView: View {
         }
         .navigationTitle("s1")
         .navigationSubtitle(subtitle)
+        .tint(model.accent)
         .toolbar { toolbar }
         .task(id: model.historyRevision) { await loadHistory() }
         .onAppear {
@@ -259,8 +260,8 @@ private struct TurnView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .foregroundStyle(.white)
-                .background(Color.accentColor.gradient, in: .rect(cornerRadius: 18, style: .continuous))
+                .foregroundStyle(model.onAccent)
+                .background(model.accent.gradient, in: .rect(cornerRadius: 18, style: .continuous))
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("You: \(turn.goal)")
@@ -443,8 +444,8 @@ private struct Composer: View {
                                 .contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(canSend ? .white : .secondary)
-                        .glassEffect(.regular.interactive().tint(canSend ? .accentColor : nil), in: .circle)
+                        .foregroundStyle(canSend ? model.onAccent : .secondary)
+                        .glassEffect(.regular.interactive().tint(canSend ? model.accent : nil), in: .circle)
                         .glassEffectID("action", in: glass)
                         .disabled(!canSend)
                         .help("Run (↩)")

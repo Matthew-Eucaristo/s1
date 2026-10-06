@@ -3,6 +3,20 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.1] - 2026-10-06
+
+### Changed
+- **s1 orange accent** across the app (message bubbles, controls, the notch
+  status), with a choice in Settings → General → Appearance to follow the
+  macOS accent instead.
+- **One vocabulary:** the Judge is System 1, the Reasoner is System 2, and the
+  built-in grammar is the model-free fast path. App copy, CLI help, README and
+  website now say it the same way.
+- README: "Configure and extend" covers every default and how to change it,
+  and what you can extend today (custom servers, your own brain, skills,
+  Shortcuts, the CLI). Plugins are on the roadmap.
+- Sharp 2x screenshot for the README and website.
+
 ## [0.3.0] - 2026-10-06
 
 ### Changed: one model per job, vision as a capability (breaking)

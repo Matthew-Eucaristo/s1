@@ -5,7 +5,7 @@ import SwiftUI
 /// Providers + role assignments for the UI — a thin observable layer over
 /// `Models` in S1Core, which the CLI and the agent read from the same
 /// `~/.s1/config.json`. Every edit writes through immediately; `onChange`
-/// lets the agent re-arm with the new brains.
+/// lets the agent re-arm with the new models.
 @available(macOS 26, *)
 @MainActor
 @Observable
@@ -69,8 +69,8 @@ final class ModelStore {
         guard visionEnabled else { return String(localized: "Off. s1 reads the accessibility tree only.") }
         switch (canSee(.judge), canSee(.reasoner)) {
         case (true, true): return String(localized: "The judge and the reasoner both see the screen.")
-        case (true, false): return String(localized: "The judge sees the screen. The reasoner works from the accessibility tree.")
-        case (false, true): return String(localized: "The reasoner sees the screen when a step needs it.")
+        case (true, false): return String(localized: "The Judge sees the screen. The Reasoner works from the accessibility tree.")
+        case (false, true): return String(localized: "The Reasoner sees the screen when a step needs it.")
         case (false, false): return String(localized: "Neither model can read images, so s1 uses the accessibility tree only.")
         }
     }
@@ -239,8 +239,8 @@ extension ModelRole {
 
     var subtitle: LocalizedStringKey {
         switch self {
-        case .judge: "A decision model that checks every step before it runs."
-        case .reasoner: "An LLM that takes over when the grammar can't."
+        case .judge: "Checks every step before it runs. Fast and optional."
+        case .reasoner: "An LLM for anything the built-in grammar can't do."
         case .transcribe: "Re-transcribes each finished turn in the cloud."
         case .speak: "Speaks replies with a cloud voice."
         }

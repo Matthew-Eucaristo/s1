@@ -143,7 +143,7 @@ private struct MenuBarPanel: View {
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
-                .glassEffect(.regular.interactive().tint(on ? .red.opacity(0.55) : .accentColor.opacity(0.35)), in: .circle)
+                .glassEffect(.regular.interactive().tint(on ? .red.opacity(0.55) : model.accent.opacity(0.35)), in: .circle)
                 .help(on ? "Stop listening" : "Listen (⇧⇧)")
                 .accessibilityLabel(on ? "Stop listening" : "Listen")
                 .disabled(!model.companionAvailable)
@@ -227,6 +227,7 @@ private struct MenuBarPanel: View {
         }
         .padding(14)
         .frame(width: 300)
+        .tint(model.accent)
         .onAppear {
             // The panel finishes appearing after onAppear; focusing sooner
             // makes it eat the first keystrokes.

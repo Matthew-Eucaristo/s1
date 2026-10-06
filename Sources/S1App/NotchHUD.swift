@@ -130,6 +130,7 @@ struct NotchHUDView: View {
         .fixedSize()
         .glassEffect(.regular, in: .capsule)
         .padding(4)
+        .tint(AppModel.shared.accent)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("s1, \(title)\(detail.isEmpty ? "" : ", \(detail)")")
     }

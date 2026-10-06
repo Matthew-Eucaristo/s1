@@ -60,7 +60,7 @@
 "This one needs you — %@." = "Yang ini butuh kamu — %@.";
 "This one needs you." = "Yang ini butuh kamu.";
 "I couldn't work out how to do that." = "Aku tidak menemukan cara melakukannya.";
-"I don't know how to do that yet — connect a reasoner in Settings → Models." = "Aku belum tahu cara melakukannya — hubungkan reasoner di Pengaturan → Model.";
+"I don't know how to do that yet. Connect a Reasoner in Settings → Models." = "Aku belum tahu cara melakukannya. Hubungkan Reasoner di Pengaturan → Model.";
 "I gave up after too many steps." = "Aku menyerah setelah terlalu banyak langkah.";
 "I got stuck repeating the same step." = "Aku tersangkut mengulang langkah yang sama.";
 "Stopped." = "Dihentikan.";
@@ -158,7 +158,6 @@
 "Saved skills are kept." = "Skill yang tersimpan tetap ada.";
 
 // ---- Settings: Models ----
-"Brains" = "Otak";
 "Reasoner" = "Reasoner";
 "Transcription" = "Transkripsi";
 "Judge" = "Juri";
@@ -168,7 +167,7 @@
 "On this Mac (private)" = "Di Mac ini (privat)";
 "Off" = "Mati";
 "No providers yet" = "Belum ada penyedia";
-"Connect one to give s1 a judge and a reasoner." = "Hubungkan satu untuk memberi s1 juri dan reasoner.";
+"Connect one to give s1 a Judge and a Reasoner." = "Hubungkan satu untuk memberi s1 Juri dan Reasoner.";
 "Add Provider…" = "Tambah Penyedia…";
 "Providers" = "Penyedia";
 "Keys live in your login Keychain and are never shown again. The same setup drives the `s1` command line." = "Kunci disimpan di Keychain login dan tidak pernah ditampilkan lagi. Pengaturan yang sama dipakai oleh baris perintah `s1`.";
@@ -222,20 +221,29 @@
 
 "Judge (System 1)" = "Juri (System 1)";
 "Reasoner (System 2)" = "Reasoner (System 2)";
-"A decision model that checks every step before it runs." = "Model keputusan yang memeriksa setiap langkah sebelum dijalankan.";
-"An LLM that takes over when the grammar can't." = "LLM yang mengambil alih saat grammar tidak bisa.";
-"s1 always tries its built-in grammar first: instant, free and private. The judge can only add caution; the safety gate decides either way." = "s1 selalu mencoba grammar bawaannya dulu: instan, gratis, dan privat. Juri hanya bisa menambah kehati-hatian; gerbang keamanan tetap yang memutuskan.";
+"s1 always tries its built-in grammar first: instant, free and private. The Judge can only add caution; the safety gate decides either way." = "s1 selalu mencoba grammar bawaannya dulu: instan, gratis, dan privat. Juri hanya bisa menambah kehati-hatian; gerbang keamanan tetap yang memutuskan.";
 "Let models see the screen" = "Izinkan model melihat layar";
-"Screenshots go to the judge when it can read images, and to the reasoner with each step it takes over. Pick models marked “Sees the screen” to use it." = "Tangkapan layar dikirim ke juri bila ia bisa membaca gambar, dan ke reasoner di setiap langkah yang diambil alihnya. Pilih model bertanda “Melihat layar” untuk memakainya.";
+"Screenshots go to the Judge when it can read images, otherwise to the Reasoner with each step it takes over. Pick models marked “Sees the screen” to use it." = "Tangkapan layar dikirim ke Juri bila ia bisa membaca gambar, atau ke Reasoner di setiap langkah yang diambil alihnya. Pilih model bertanda “Melihat layar” untuk memakainya.";
 "Sees the screen" = "Melihat layar";
 "sees the screen" = "melihat layar";
 "Text only" = "Teks saja";
 "Off. s1 reads the accessibility tree only." = "Mati. s1 hanya membaca pohon aksesibilitas.";
 "The judge and the reasoner both see the screen." = "Juri dan reasoner sama-sama melihat layar.";
-"The judge sees the screen. The reasoner works from the accessibility tree." = "Juri melihat layar. Reasoner bekerja dari pohon aksesibilitas.";
-"The reasoner sees the screen when a step needs it." = "Reasoner melihat layar saat sebuah langkah membutuhkannya.";
+"The Judge sees the screen. The Reasoner works from the accessibility tree." = "Juri melihat layar. Reasoner bekerja dari pohon aksesibilitas.";
+"The Reasoner sees the screen when a step needs it." = "Reasoner melihat layar saat sebuah langkah membutuhkannya.";
 "Neither model can read images, so s1 uses the accessibility tree only." = "Tidak ada model yang bisa membaca gambar, jadi s1 hanya memakai pohon aksesibilitas.";
-"Nothing yet. Choose one of its models under Brains or Voice." = "Belum ada. Pilih salah satu modelnya di Otak atau Suara.";
+
+"System 1 and System 2" = "System 1 dan System 2";
+"Checks every step before it runs. Fast and optional." = "Memeriksa setiap langkah sebelum dijalankan. Cepat dan opsional.";
+"An LLM for anything the built-in grammar can't do." = "LLM untuk apa pun yang tidak bisa dilakukan grammar bawaan.";
+"Nothing yet. Choose one of its models above or under Voice." = "Belum ada. Pilih salah satu modelnya di atas atau di Suara.";
+"Pick your models" = "Pilih modelmu";
+"Optional. The built-in grammar needs no model. Add a Judge (System 1) to check each step and a Reasoner (System 2) for everything else." = "Opsional. Grammar bawaan tidak butuh model. Tambahkan Juri (System 1) untuk memeriksa tiap langkah dan Reasoner (System 2) untuk hal lainnya.";
+"Accent color" = "Warna aksen";
+"s1 Orange" = "Oranye s1";
+"System Accent" = "Aksen Sistem";
+"Appearance" = "Tampilan";
+"System Accent follows System Settings → Appearance." = "Aksen Sistem mengikuti Pengaturan Sistem → Tampilan.";
 
 // ---- Settings: Voice ----
 "Automatic" = "Otomatis";
@@ -321,8 +329,6 @@
 "The ⇧⇧ shortcut." = "Pintasan ⇧⇧.";
 "Voice commands." = "Perintah suara.";
 "Checking work with screenshots." = "Memeriksa hasil dengan tangkapan layar.";
-"Give s1 a brain" = "Beri s1 otak";
-"Optional. s1's grammar handles everyday commands with no model. Connect a judge and a reasoner for everything else." = "Opsional. Grammar s1 menangani perintah sehari-hari tanpa model. Hubungkan juri dan reasoner untuk hal lainnya.";
 "Use a different provider…" = "Pakai penyedia lain…";
 "Work in the background" = "Bekerja di latar belakang";
 "Cua Driver lets s1 type and press keys without taking over your cursor or focus. Installed with CUA's official installer." = "Cua Driver membuat s1 bisa mengetik dan menekan tombol tanpa mengambil alih kursor atau fokusmu. Diinstal dengan installer resmi CUA.";

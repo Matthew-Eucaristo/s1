@@ -41,7 +41,7 @@ struct RunCmd: AsyncParsableCommand {
     var goal: String?
     @Option(help: "Task library name — reads tasks/<name>.txt (cwd) or ~/.s1/tasks/<name>.txt as the goal.")
     var task: String?
-    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only) | scripted | dummy (default auto; --plan implies scripted)")
+    @Option(help: "Policy: auto (grammar + your Judge, System 1) | ax (grammar only) | scripted | dummy (default auto; --plan implies scripted)")
     var policy: String?
     @Option(help: "JSON plan file for the scripted policy.")
     var plan: String?
@@ -57,7 +57,7 @@ struct RunCmd: AsyncParsableCommand {
     var allowIrreversible = false
     @Option(help: "Kill-switch file path (abort if it appears). Default: the shared s1-stop file `s1 stop` writes.")
     var killSwitch: String = NSTemporaryDirectory() + "s1-stop"
-    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned Reasoner (System 2).")
     var s2 = true
 
     func run() async throws {
@@ -225,7 +225,7 @@ struct ListenCmd: AsyncParsableCommand {
     var file: String?
     @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
-    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only).")
+    @Option(help: "Policy: auto (grammar + your Judge, System 1) | ax (grammar only).")
     var policy: String = "auto"
     @Option(help: "Artifacts root directory.")
     var artifacts: String = S1Home.path + "/artifacts"
@@ -236,7 +236,7 @@ struct ListenCmd: AsyncParsableCommand {
     var maxSteps: Int = 25
     @Flag(help: "Log everything, execute nothing.")
     var dryRun = false
-    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned Reasoner (System 2).")
     var s2 = true
     @Option(help: "Comma-separated words the recognizer should bias toward.")
     var vocabulary: String?
@@ -388,9 +388,9 @@ struct ServeCmd: AsyncParsableCommand {
         abstract: "Always-on companion: hotkey toggles continuous listening (double-tap Shift or ⌃⌥Space).")
     @Option(help: "STT/TTS locale (default: config locale, else auto-detect).")
     var locale: String?
-    @Option(help: "Policy: auto (grammar + your judge) | ax (grammar only).")
+    @Option(help: "Policy: auto (grammar + your Judge, System 1) | ax (grammar only).")
     var policy: String = "auto"
-    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned reasoner (S2).")
+    @Flag(inversion: .prefixedNo, help: "Escalate hard steps to the assigned Reasoner (System 2).")
     var s2 = true
     @Flag(inversion: .prefixedNo,
           help: "Speak results with TTS (default: config speak, else off).")
@@ -948,7 +948,7 @@ struct ReplayCmd: AsyncParsableCommand {
 
 struct DecideCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "decide",
-        abstract: "Ask the S1 decision model one typed question (System One API: Ollama, Jev, Clef).")
+        abstract: "Ask the Judge (System 1) one typed question (System One API: Jev, d1, Clef, Ollama).")
     @Argument(help: "State text to judge.") var state: String
     @Argument(help: "The question, e.g. \"Is this urgent?\"") var question: String
     @Option(help: "Comma-separated options → a Choice question (default: yes/no Noul).") var options: String?
