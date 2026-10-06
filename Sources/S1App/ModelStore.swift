@@ -64,6 +64,25 @@ final class ModelStore {
 
     func canSee(_ role: ModelRole) -> Bool { Models.canSee(role, config: config, env: [:]) }
 
+    /// The Reasoner may search the web when its provider or model can.
+    var webSearchEnabled: Bool { config.webSearch != false }
+
+    func setWebSearch(_ on: Bool) { write { $0.webSearch = on ? nil : false } }
+
+    /// How the current Reasoner searches, in one line.
+    var webSearchSummary: String {
+        guard webSearchEnabled else { return String(localized: "Off. The Reasoner answers from what it knows and says when it may be out of date.") }
+        guard let e = Models.endpoint(.reasoner, config: config, env: [:]) else {
+            return String(localized: "Connect a Reasoner to search the web.")
+        }
+        switch WebSearch.kind(e) {
+        case .native: return String(localized: "Your Reasoner searches the web by itself.")
+        case .openAI: return String(localized: "Uses OpenAI's web search (billed per search).")
+        case .openRouter: return String(localized: "Uses OpenRouter's web search (billed per search).")
+        case .none: return String(localized: "Your Reasoner's provider has no web search, so answers about recent events may be out of date.")
+        }
+    }
+
     /// Who sees the screen right now, in one line for the Models pane.
     var visionSummary: String {
         guard visionEnabled else { return String(localized: "Off. s1 reads the accessibility tree only.") }

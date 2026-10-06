@@ -799,7 +799,8 @@ final class AppModel {
             return
         }
         if let t = currentTurn {
-            hud.show(.working(t.steps.last.map(StepPresentation.init)?.title ?? t.phase ?? t.goal))
+            // The live phase ("Searching the web…") wins over the last finished step.
+            hud.show(.working(t.phase ?? t.steps.last.map(StepPresentation.init)?.title ?? t.goal))
             return
         }
         // Speaking: the answer stays up for as long as the voice plays.

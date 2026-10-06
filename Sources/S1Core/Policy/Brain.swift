@@ -29,7 +29,9 @@ public enum Brain {
                                 env: [String: String] = ProcessInfo.processInfo.environment) -> String {
         func tag(_ r: ModelRole) -> String { Models.seesScreen(r, config: config, env: env) ? " (sees screen)" : "" }
         let judge = Models.endpoint(.judge, config: config, env: env).map { " + judge \($0.model)\(tag(.judge))" } ?? ""
-        let s2 = Models.endpoint(.reasoner, config: config, env: env).map { "\($0.model)\(tag(.reasoner))" } ?? "off"
+        let s2 = Models.endpoint(.reasoner, config: config, env: env).map {
+            "\($0.model)\(tag(.reasoner))" + (WebSearch.kind($0) != .none && WebSearch.enabled(config, env: env) ? " (searches the web)" : "")
+        } ?? "off"
         return "S1 grammar\(judge) · S2 \(s2)"
     }
 }

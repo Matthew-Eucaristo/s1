@@ -343,7 +343,17 @@ public struct AgentLoop {
 
         switch verdict {
         case .allow:
-            if case .wait(let s) = action {
+            if case .webSearch(let q) = action {
+                // Searching is the Reasoner's provider's job, not the screen's.
+                if let s2, s2.canSearchWeb, !(actuator is DryRunActuator) {
+                    onPhase?("Searching the web for “\(q.prefix(60))”…")
+                    do { outcome = "web results: " + (try await s2.searchWeb(q)) }
+                    catch { outcome = "error: web search failed: \(error.localizedDescription)" }
+                } else {
+                    outcome = actuator is DryRunActuator ? "[dry-run] web search"
+                        : "error: web search isn't available — answer from what you know and say it may be out of date"
+                }
+            } else if case .wait(let s) = action {
                 // Wait in the loop, not the actuator: a 60s `wait` must hear
                 // the kill switch within ~0.5s, not when it finally ends.
                 // Clamp too — a model saying "wait an hour" shouldn't park a

@@ -365,3 +365,12 @@
 "That didn't work: %@." = "Itu tidak berhasil: %@.";
 "Delete “%@”" = "Hapus “%@”";
 "Replace “%@” with “%@”" = "Ganti “%@” dengan “%@”";
+"Search the web for “%@”" = "Cari di web: “%@”";
+"Search the web when needed" = "Cari di web bila perlu";
+"Off. The Reasoner answers from what it knows and says when it may be out of date." = "Mati. Reasoner menjawab dari pengetahuannya dan memberi tahu bila mungkin sudah usang.";
+"Connect a Reasoner to search the web." = "Hubungkan Reasoner untuk mencari di web.";
+"Your Reasoner searches the web by itself." = "Reasoner-mu bisa mencari di web sendiri.";
+"Uses OpenAI's web search (billed per search)." = "Memakai pencarian web OpenAI (ditagih per pencarian).";
+"Uses OpenRouter's web search (billed per search)." = "Memakai pencarian web OpenRouter (ditagih per pencarian).";
+"Your Reasoner's provider has no web search, so answers about recent events may be out of date." = "Provider Reasoner-mu tidak punya pencarian web, jadi jawaban soal kejadian terbaru mungkin sudah usang.";
+"For news, prices, weather and anything recent. Each search shows as a step. Models that search by themselves are used as they are; OpenAI and OpenRouter add their own search tool." = "Untuk berita, harga, cuaca, dan hal terbaru. Setiap pencarian tampil sebagai langkah. Model yang bisa mencari sendiri dipakai apa adanya; OpenAI dan OpenRouter memakai alat pencarian mereka.";

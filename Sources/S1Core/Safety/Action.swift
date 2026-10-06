@@ -17,6 +17,9 @@ public enum Action: Codable, Sendable, Equatable {
     case captureScreenshot(reason: String)
     case verify(expectation: String)
     case done(summary: String)
+    /// Look something up on the web (the Reasoner's provider runs the
+    /// search); the results become this step's outcome.
+    case webSearch(query: String)
     // reversible
     case moveMouse(x: Double, y: Double)
     case click(x: Double, y: Double)
@@ -49,7 +52,7 @@ public enum Action: Codable, Sendable, Equatable {
 
     public var actionClass: ActionClass {
         switch self {
-        case .captureScreenshot, .verify, .done:
+        case .captureScreenshot, .verify, .done, .webSearch:
             return .read
         case .shell, .custom:
             return .irreversible
@@ -64,6 +67,7 @@ public enum Action: Codable, Sendable, Equatable {
         case .typeText(let t): return [t]
         case .editText(let f, let r): return [f, r]
         case .openURL(let u): return [u]
+        case .webSearch(let q): return [q]
         case .axSetValue(_, let v): return [v]
         case .keyCombo(let k): return k
         case .shell(let c): return [c]

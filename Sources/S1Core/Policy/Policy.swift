@@ -55,11 +55,19 @@ public protocol Reasoner: Sendable {
     var name: String { get }
     /// Escalations should carry a screenshot (a vision-capable model).
     var wantsScreenshot: Bool { get }
+    /// The provider can search the web for this model.
+    var canSearchWeb: Bool { get }
     func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision
+    /// A short, sourced answer from the web; only when `canSearchWeb`.
+    func searchWeb(_ query: String) async throws -> String
 }
 
 public extension Reasoner {
     var wantsScreenshot: Bool { false }
+    var canSearchWeb: Bool { false }
+    func searchWeb(_ query: String) async throws -> String {
+        throw S1Error.aborted("web search isn't available with this Reasoner")
+    }
 }
 
 /// Placeholder policy that always abstains — drives escalation paths in tests.

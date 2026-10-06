@@ -26,6 +26,9 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
   /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first
   and the Reasoner prompt includes `MacSkills.guide`. `openURL` only opens settings panes and folders.
+- Web search: `WebSearch.kind(endpoint)` picks native model search → OpenAI Responses `web_search` →
+  `openrouter:web_search` → none (Reasoner prompt says "no web access, may be out of date"). It runs as
+  a visible `.webSearch` step executed by the loop through the Reasoner. Switch: `webSearch` / `S1_WEB`.
 - `Models.resolve/endpoint` is the only resolution path; `Brain.policy()/reasoner()` the only place roles
   become a brain — app, `s1 run`, `s1 serve` all use it. Never add per-role endpoint config again.
 - Connecting a provider auto-fills only *empty* `judge`/`reasoner`; speech is always opt-in.

@@ -34,6 +34,15 @@ struct ModelsSettings: View {
             }
 
             Section {
+                Toggle(isOn: Binding(get: { store.webSearchEnabled }, set: { store.setWebSearch($0) })) {
+                    Text("Search the web when needed")
+                    Text(store.webSearchSummary)
+                }
+            } footer: {
+                FootNote("For news, prices, weather and anything recent. Each search shows as a step. Models that search by themselves are used as they are; OpenAI and OpenRouter add their own search tool.")
+            }
+
+            Section {
                 if store.providers.isEmpty {
                     HStack(spacing: 12) {
                         Image(systemName: "cpu")

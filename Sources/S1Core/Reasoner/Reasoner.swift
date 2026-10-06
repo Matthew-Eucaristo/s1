@@ -70,7 +70,8 @@ public struct ChatClient: Sendable {
     }
 
     static func requestBody(endpoint: Endpoint, messages: [ChatMessage], maxTokens: Int,
-                            temperature: Double, extras: Bool = true) -> [String: Any] {
+                            temperature: Double, extras: Bool = true,
+                            tools: [[String: Any]] = []) -> [String: Any] {
         // Messages go out in order: stable system prompt first, volatile
         // screen/state last — the prefix providers cache automatically.
         let wire: [[String: Any]] = messages.map { m in
@@ -88,6 +89,7 @@ public struct ChatClient: Sendable {
             "temperature": temperature,
             "stream": false,
         ]
+        if !tools.isEmpty { body["tools"] = tools }
         if endpoint.isLocal {
             // Ollama knobs: skip reasoning traces for fast decisions and
             // pin the KV window — strict remote specs reject these keys.
@@ -115,6 +117,15 @@ public struct ChatClient: Sendable {
         let msg = ((obj["choices"] as? [[String: Any]])?.first?["message"]) as? [String: Any]
         var text = msg?["content"] as? String ?? ""
         if text.isEmpty, let r = msg?["reasoning_content"] as? String { text = r }
+        // Web search citations (OpenRouter `url_citation`): keep the sources.
+        let urls = ((msg?["annotations"] as? [[String: Any]]) ?? []).compactMap {
+            ($0["url_citation"] as? [String: Any])?["url"] as? String
+        }
+        var seen = Set<String>()
+        let sources = urls.filter { seen.insert($0).inserted }.prefix(5)
+        if !sources.isEmpty, !sources.allSatisfy({ text.contains($0) }) {
+            text += "\nSources: " + sources.joined(separator: " · ")
+        }
         return (text, obj["model"] as? String, UsageLog.counts(fromUsage: obj["usage"] as? [String: Any]))
     }
 
@@ -122,7 +133,7 @@ public struct ChatClient: Sendable {
     /// set on a message it is sent as an OpenAI vision `image_url` part.
     /// Every call is metered to the usage log (numbers only, no content).
     public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
-                     temperature: Double = 0.0) async throws -> String {
+                     temperature: Double = 0.0, tools: [[String: Any]] = []) async throws -> String {
         guard let url = URL(string: "\(endpoint.baseURL)/chat/completions") else {
             throw S1Error.aborted("invalid endpoint base URL '\(endpoint.baseURL)' — check config")
         }
@@ -148,7 +159,7 @@ public struct ChatClient: Sendable {
         var attempt = 0
         while true {
             let body = Self.requestBody(endpoint: endpoint, messages: messages, maxTokens: maxTokens,
-                                        temperature: temperature, extras: attempt == 0)
+                                        temperature: temperature, extras: attempt == 0, tools: tools)
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             let data: Data, resp: URLResponse
             let sent = Date()
@@ -193,4 +204,94 @@ public struct ChatClient: Sendable {
         config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config)
     }()
+}
+
+
+/// Web search, the cheapest correct way for the Reasoner in use:
+/// - a model that searches by itself (Groq Compound, OpenAI `-search` models,
+///   OpenRouter `:online`, Perplexity Sonar) is simply asked;
+/// - OpenAI models use OpenAI's built-in `web_search` tool (Responses API);
+/// - any OpenRouter model uses the `openrouter:web_search` server tool;
+/// - everything else has no web access, and the Reasoner is told so.
+/// OpenAI and OpenRouter bill searches; `webSearch: false` turns them off.
+public enum WebSearch {
+    public enum Kind: Equatable, Sendable { case none, native, openAI, openRouter }
+
+    public static func kind(_ e: Endpoint) -> Kind {
+        let host = URL(string: e.baseURL)?.host ?? ""
+        let m = e.model.lowercased()
+        if m.contains("compound") || m.contains("-search") || m.hasSuffix(":online") || m.contains("sonar") {
+            return .native
+        }
+        if host.hasSuffix("openrouter.ai") { return .openRouter }
+        if host == "api.openai.com" { return .openAI }
+        return .none
+    }
+
+    /// The switch: Settings → Models, `webSearch` in config, `S1_WEB=off`.
+    public static func enabled(_ cfg: S1Config = .load(),
+                               env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        if let e = env["S1_WEB"]?.lowercased() { return !["0", "off", "false", "no"].contains(e) }
+        return cfg.webSearch != false
+    }
+
+    public static func available(_ e: Endpoint) -> Bool { kind(e) != .none && enabled() }
+
+    static let instructions = "Search the web and answer in at most 5 short sentences with the key facts and dates. Keep the source links."
+
+    /// A short answer with sources, sized to fit back into the Reasoner's history.
+    public static func run(_ query: String, endpoint: Endpoint) async throws -> String {
+        let client = ChatClient(endpoint: endpoint, role: "search")
+        let messages = [ChatMessage(role: "system", content: instructions),
+                        ChatMessage(role: "user", content: query)]
+        let text: String
+        switch kind(endpoint) {
+        case .none: throw S1Error.aborted("web search isn't available with this Reasoner")
+        case .native: text = try await client.chat(messages, maxTokens: 700)
+        case .openRouter: text = try await client.chat(messages, maxTokens: 700,
+                                                       tools: [["type": "openrouter:web_search"]])
+        case .openAI: text = try await openAIResponses(query, endpoint: endpoint)
+        }
+        return String(text.prefix(1800))
+    }
+
+    /// OpenAI's Responses API with the hosted `web_search` tool.
+    static func openAIResponses(_ query: String, endpoint: Endpoint) async throws -> String {
+        guard let url = URL(string: "\(endpoint.baseURL)/responses") else { throw S1Error.aborted("bad OpenAI URL") }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 90
+        for (k, v) in ChatClient.headers(for: endpoint) { req.setValue(v, forHTTPHeaderField: k) }
+        if let key = endpoint.apiKey, !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": endpoint.model, "instructions": instructions, "input": query,
+            "tools": [["type": "web_search"]], "max_output_tokens": 900,
+        ] as [String: Any])
+        let (data, resp) = try await ChatClient.session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            throw S1Error.aborted("web search HTTP \(code): \(String(decoding: data.prefix(200), as: UTF8.self))")
+        }
+        return try parseResponses(data)
+    }
+
+    /// Text plus cited URLs from a Responses API reply.
+    static func parseResponses(_ data: Data) throws -> String {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let output = obj["output"] as? [[String: Any]] else { throw S1Error.aborted("web search reply not understood") }
+        var text = "", urls: [String] = []
+        for item in output where item["type"] as? String == "message" {
+            for part in item["content"] as? [[String: Any]] ?? [] {
+                text += part["text"] as? String ?? ""
+                urls += (part["annotations"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }
+            }
+        }
+        var seen = Set<String>()
+        let sources = urls.filter { seen.insert($0).inserted }.prefix(5)
+        if !sources.isEmpty, !sources.allSatisfy({ text.contains($0) }) {
+            text += "\nSources: " + sources.joined(separator: " · ")
+        }
+        guard !text.isEmpty else { throw S1Error.aborted("web search returned nothing") }
+        return text
+    }
 }

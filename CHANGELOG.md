@@ -3,6 +3,25 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.19] - 2026-10-07
+
+### Added: web search, the provider's own way
+- The Reasoner can search the web with a new `webSearch` step, shown in the
+  conversation ("Search the web for …") and in the notch pill ("Searching the
+  web…"); results come back with their sources.
+- The route follows the Reasoner: models that search by themselves (Groq
+  Compound, OpenAI `-search` models, OpenRouter `:online`, Perplexity Sonar)
+  are just asked; OpenAI models use OpenAI's `web_search` tool (Responses
+  API); any OpenRouter model uses `openrouter:web_search`. OpenAI and
+  OpenRouter bill per search.
+- Providers without search (OpenCode, DeepSeek, Ollama, LM Studio, …): the
+  Reasoner is told it has no web access and says when an answer may be out
+  of date.
+- Settings → Models → "Search the web when needed" shows which route is in
+  use; config `webSearch`, `S1_WEB=off`. `s1 config` marks a Reasoner that
+  searches.
+- The notch pill shows the live phase over the last finished step.
+
 ## [0.3.18] - 2026-10-07
 
 ### Fixed

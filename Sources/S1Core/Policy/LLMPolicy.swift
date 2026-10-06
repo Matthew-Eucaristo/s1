@@ -44,6 +44,7 @@ enum LLMDecisionCodec {
         switch a {
         case .openApp(let n): return "openApp(\(n))"
         case .openURL(let u): return "open(\(u.prefix(40)))"
+        case .webSearch(let q): return "webSearch(\(q.prefix(40)))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
         case .axPress(let r): return "axPress(\(r))"
@@ -71,7 +72,7 @@ enum LLMDecisionCodec {
         Reply with ONLY one JSON object — no prose, no fences, no examples:
         {"action":{"type":"<TYPE>","<FIELD>":"<VALUE>"},"confidence":<0.0 to 1.0>,"rationale":"<why this action, in this screen>"}
         - The goal may list several steps separated by commas — do them left to right; a "done" step means the task is finished.
-        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, editText, done. Never write more than one.
+        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, editText, webSearch, done. Never write more than one.
         - Fields by type: click/rightClick/doubleClick/moveMouse take "x","y"; drag takes "x","y" (start) and "toX","toY" (end); axPress/axSetValue/axAction/axSetAttribute take "ref"; axSetValue also "value"; axAction also "name" (AXShowMenu, AXIncrement, AXDecrement, AXConfirm, AXCancel, AXPick, AXRaise, AXOpen); axSetAttribute also "attr" (AXSelected, AXFocused, AXExpanded, AXMain, AXMinimized) and "value" ("true"/"false"); typeText takes "text"; openApp takes "app" (the app name); keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
         - Use "ref" (an AX element id like e3) whenever the target is in the AX tree — prefer axPress over click.
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
@@ -194,6 +195,7 @@ enum LLMDecisionCodec {
         case "axSetValue": a = field("ref").map { .axSetValue(ref: $0, value: field("value") ?? field("text") ?? "") }
         case "typeText":  a = field("text").map { .typeText($0) }
         case "editText":  a = field("text").map { .editText(find: $0, replace: field("value") ?? "") }
+        case "webSearch": a = field("text").map { .webSearch(query: $0) }
         case "openApp":   a = (field("app") ?? field("name") ?? field("text")).map { .openApp(name: $0) }
         // Coordinate families: a missing coord means the reply truncated
         // mid-object — defaulting to 0 would act on the top-left pixel
@@ -259,6 +261,8 @@ enum LLMDecisionCodec {
                           return .axSetValue(ref: ref, value: a.value ?? a.text ?? "")
         case "typeText":  guard let t = a.text, !t.isEmpty else { return nil }
                           return .typeText(t)
+        case "webSearch": guard let q = a.text ?? a.expect, !q.isEmpty else { return nil }
+                          return .webSearch(query: q)
         case "editText":  guard let f = a.text, !f.isEmpty else { return nil }
                           return .editText(find: f, replace: a.value ?? "")
         case "keyCombo":  guard !a.keys.isEmpty else { return nil }
@@ -320,6 +324,26 @@ public struct LLMReasoner: Reasoner {
     public let vision: Bool
     var endpointIsLocal: Bool { client.endpoint.isLocal }
     public var wantsScreenshot: Bool { vision }
+    public var canSearchWeb: Bool { WebSearch.available(client.endpoint) }
+
+    public func searchWeb(_ query: String) async throws -> String {
+        try await WebSearch.run(query, endpoint: client.endpoint)
+    }
+
+    static let webOn = """
+
+        Web: for current facts (news, prices, weather, scores, releases, anything \
+        after your training) search first: \
+        {"action":{"type":"webSearch","text":"<query>"},"confidence":0.9,"rationale":"..."} \
+        The results come back as that step's outcome; then answer with type "done" \
+        and name the source briefly. Search at most twice per goal.
+        """
+    static let webOff = """
+
+        Web: you have NO web access and your knowledge stops at your training \
+        cutoff. For current facts (news, prices, weather, scores, latest versions) \
+        answer from what you know and say it may be out of date.
+        """
 
     public init(endpoint: Endpoint, vision: Bool = false) {
         self.name = "llm:\(endpoint.model)"
@@ -418,7 +442,7 @@ public struct LLMReasoner: Reasoner {
         let image = vision ? observation.screenshotPath.flatMap { ScreenImage.downscaledJPEG(path: $0) } : nil
         if image != nil { prompt += "\n\n" + Self.screenshotNote(ScreenImage.mainDisplaySize) }
         let reply = try await client.chat([
-            ChatMessage(role: "system", content: Self.systemPrompt),
+            ChatMessage(role: "system", content: Self.systemPrompt + (canSearchWeb ? Self.webOn : Self.webOff)),
             ChatMessage(role: "user", content: prompt, imageBase64: image),
         ], maxTokens: endpointIsLocal ? 1024 : 2048)
         var d = LLMDecisionCodec.parse(reply)

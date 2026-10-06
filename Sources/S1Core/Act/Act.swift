@@ -271,7 +271,7 @@ public struct CGEventActuator: Actuator {
 
         case .captureScreenshot(let r):
             return "captured screenshot (\(r))"
-        case .verify, .done:
+        case .verify, .done, .webSearch:
             return "no-op (handled by loop)"
 
         case .shell(let cmd):

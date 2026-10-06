@@ -28,6 +28,8 @@ public struct S1Config: Codable, Sendable {
     public var cloudVoice: String?
     /// Let models that can read images see the screen (nil = on).
     public var vision: Bool?
+    /// Let the Reasoner search the web when its provider or model can (nil = on).
+    public var webSearch: Bool?
 
     public var locale: String?
     public var speak: Bool?

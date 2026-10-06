@@ -162,6 +162,14 @@ GPT-5, Claude, Llama 4 Scout, Qwen3-VL…); if neither can, s1 works from the
 accessibility tree alone. One switch, "Let models see the screen", turns it
 off. Settings marks every model that sees.
 
+**Searching the web** also follows the Reasoner you pick: a model that searches
+by itself (Groq Compound, OpenAI `-search` models, OpenRouter `:online`,
+Perplexity Sonar) just does; OpenAI models use OpenAI's `web_search` tool and
+any OpenRouter model uses OpenRouter's (both billed per search); other
+providers have no web access, and the Reasoner says when an answer may be out
+of date. Each search shows as a step. "Search the web when needed" (config
+`webSearch`, `S1_WEB=off`) turns it off.
+
 Connecting a provider fills an empty Judge or Reasoner with its recommended
 model. Voices never switch on by themselves: audio leaves your Mac only when
 you choose a cloud model for it.

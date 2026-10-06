@@ -2767,3 +2767,50 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(MetaCommand.parse("what time is it?")?.kind == "recall")
     #expect(MacSkills.guide.contains("wi-fi"))
 }
+
+@Test func webSearchUsesTheCheapestCorrectRoute() {
+    func k(_ base: String, _ model: String) -> WebSearch.Kind {
+        WebSearch.kind(Endpoint(baseURL: base, model: model))
+    }
+    #expect(k("https://api.groq.com/openai/v1", "groq/compound") == .native)
+    #expect(k("https://api.openai.com/v1", "gpt-5-search-api") == .native)
+    #expect(k("https://openrouter.ai/api/v1", "perplexity/sonar") == .native)
+    #expect(k("https://openrouter.ai/api/v1", "google/gemini-2.5-flash:online") == .native)
+    #expect(k("https://openrouter.ai/api/v1", "google/gemini-2.5-flash") == .openRouter)
+    #expect(k("https://api.openai.com/v1", "gpt-5-mini") == .openAI)
+    #expect(k("https://opencode.ai/zen/go/v1", "deepseek-v4.1-flash") == .none)
+    #expect(!WebSearch.enabled(S1Config(), env: ["S1_WEB": "off"]))
+}
+
+@Test func webResultsKeepTheirSources() throws {
+    let chat = #"{"choices":[{"message":{"content":"It rained.","annotations":[{"type":"url_citation","url_citation":{"url":"https://a.example/x"}}]}}]}"#
+    #expect(try ChatClient.parse(Data(chat.utf8)).text == "It rained.\nSources: https://a.example/x")
+    let resp = #"{"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"Sunny.","annotations":[{"type":"url_citation","url":"https://b.example"}]}]}]}"#
+    #expect(try WebSearch.parseResponses(Data(resp.utf8)) == "Sunny.\nSources: https://b.example")
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"webSearch","text":"weather Jakarta"},"confidence":0.9}"#)?.action
+            == .webSearch(query: "weather Jakarta"))
+}
+
+@Test func webSearchIsAVisibleStep() async throws {
+    struct Searcher: Reasoner {
+        var web: Bool
+        var name: String { "s" }
+        var canSearchWeb: Bool { web }
+        func searchWeb(_ q: String) async throws -> String { "Sunny, 31°C. Sources: https://w.example" }
+        func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+            if history.contains(where: { $0.outcome?.contains("web") == true }) {
+                return Decision(action: .done(summary: "ok"), confidence: 0.9, rationale: "")
+            }
+            return Decision(action: .webSearch(query: "weather Jakarta"), confidence: 0.9, rationale: "")
+        }
+    }
+    for web in [true, false] {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+        let logger = try RunLogger(goal: "test", root: dir, config: [:])
+        let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(), actuator: CGEventActuator(),
+                             gate: SafetyGate(), s2: Searcher(web: web))
+        _ = try await loop.run(goal: "cuaca jakarta hari ini?", policy: DummyPolicy(), logger: logger)
+        let lines = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+        #expect(lines.contains(web ? "web results: Sunny" : "web search isn't available"))
+    }
+}
