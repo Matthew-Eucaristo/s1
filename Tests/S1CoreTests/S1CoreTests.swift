@@ -950,7 +950,8 @@ func serveRunUsesConfiguredPolicy() async throws {
         hotkeyPatterns: nil
     ) { _ in }
     serve.wake()
-    for _ in 0 ..< 100 where serve.state != .idle {
+    // Two failed runs take ~3 s; allow 9 s so a busy machine doesn't flake.
+    for _ in 0 ..< 300 where serve.state != .idle {
         try await Task.sleep(nanoseconds: 30_000_000)
     }
     #expect(serve.state == .idle)
@@ -2106,7 +2107,8 @@ private struct DelegatingReasoner: Reasoner {
 @Test func liquidAndClefFlashEndpoints() {
     #expect(SystemOneClient.url(for: "https://api.liquid.ai/decisions")?.absoluteString
             == "https://api.liquid.ai/decisions/v1/systemone")
-    #expect(SystemOneClient.acceptsImages(model: "d1:free"))
+    #expect(!SystemOneClient.acceptsImages(model: "d1:free"))   // Liquid: "does not accept images"
+    #expect(SystemOneClient.acceptsImages(model: "d1"))
     #expect(SystemOneClient.acceptsImages(model: "clef-flash"))
     #expect(!SystemOneClient.acceptsImages(model: "jev-latest"))
     #expect(!SystemOneClient.acceptsImages(model: "d10x"))

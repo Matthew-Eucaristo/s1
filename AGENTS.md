@@ -52,7 +52,7 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 ## Verify
 - SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides
   whether macOS applies the Liquid Glass design; check with `vtool -show-build` (must say sdk 26+).
-- `swift build && swift test` (one known-flaky test under load: `serveRunErrorsAutoSleep`).
+- `swift build && swift test`.
 - App UI: build a bundle with a separate bundle id (don't clobber the installed S1), back up
   `~/.s1/config.json` first; the app writes it. `scripts/make-app.sh` builds `dist/S1.app`.
 - Marketing screenshots: launch with `S1_DEMO=1` (sample turns + history, no hotkeys, 1180x880 window,

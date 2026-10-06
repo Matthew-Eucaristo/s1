@@ -124,6 +124,8 @@ public struct SystemOneClient: DecisionJudge {
     /// Clef / Clef Flash (Cloudflare) and Liquid d1 accept `images`.
     public static func acceptsImages(model: String) -> Bool {
         let m = model.lowercased()
+        // d1's free tier is text-only ("does not accept images").
+        if m.hasSuffix(":free") { return false }
         return m.contains("clef") || m == "d1" || m.hasPrefix("d1:") || m.hasPrefix("d1-")
     }
 
@@ -183,6 +185,17 @@ public struct SystemOneClient: DecisionJudge {
 
     public func evaluate(state: JSONValue, questions: [String: DecisionQuestion],
                          images: [String]) async throws -> DecisionResult {
+        do {
+            return try await send(state: state, questions: questions, images: images)
+        } catch let e as S1Error where !images.isEmpty && acceptsImages
+                    && "\(e)".lowercased().contains("accept images") {
+            // The model turned out to be text-only: answer from the AX state.
+            return try await send(state: state, questions: questions, images: [])
+        }
+    }
+
+    private func send(state: JSONValue, questions: [String: DecisionQuestion],
+                      images: [String]) async throws -> DecisionResult {
         guard let url = Self.url(for: endpoint.baseURL) else {
             throw S1Error.aborted("bad decision endpoint URL")
         }

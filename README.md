@@ -145,7 +145,7 @@ each job takes one model:
 | `speak` | A cloud voice for replies | Apple voices |
 
 **Seeing the screen** is a capability of the models you pick, not another
-role. If the Judge reads images (d1, Clef) it gets a screenshot with each
+role. If the Judge reads images (d1 paid tier, Clef) it gets a screenshot with each
 step; otherwise the Reasoner gets one with every step it takes over (Gemini,
 GPT-5, Claude, Llama 4 Scout, Qwen3-VL…); if neither can, s1 works from the
 accessibility tree alone. One switch, "Let models see the screen", turns it

@@ -221,11 +221,11 @@ public enum ProviderCatalog {
                              recommended: [.reasoner], vision: false)],
               listsModels: true),
         .init(id: "liquid", name: "Liquid AI", kind: .cloud,
-              summary: "d1, a Judge that also sees the screen",
+              summary: "d1, a Judge that also sees the screen (paid tier)",
               keyURL: "https://console.liquid.ai", keyHint: "liquid_…",
               systemOne: "https://api.liquid.ai/decisions",
               models: [
-                .init("d1:free", name: "d1 (free tier)", roles: [.judge], recommended: [.judge], vision: true),
+                .init("d1:free", name: "d1 (free tier, text only)", roles: [.judge], recommended: [.judge], vision: false),
                 .init("d1", name: "d1", roles: [.judge], vision: true),
               ]),
         .init(id: "cloudflare", name: "Cloudflare Workers AI", kind: .cloud,

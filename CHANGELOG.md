@@ -3,6 +3,15 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.9] - 2026-10-06
+
+### Fixed
+- `d1:free` is text-only (Liquid: "does not accept images"); the catalog and
+  the name heuristic no longer mark it as seeing. Paid `d1` still sees.
+- A Judge that refuses images is asked again without them, so a wrong
+  vision flag costs one retry instead of the Judge's answer.
+- A timing-sensitive test got real headroom; the suite is stable under load.
+
 ## [0.3.8] - 2026-10-06
 
 ### Fixed
