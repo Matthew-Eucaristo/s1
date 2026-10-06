@@ -192,7 +192,7 @@ public struct AXPolicy: Policy {
         "zoom", "select", "pilih", "stop", "berhenti", "delete", "hapus",
         "double", "dobel", "right",
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
-        "ubah", "rename", "ganti",
+        "ubah", "rename", "ganti", "remove", "buang", "replace", "change",
     ]
 
     /// Drop a dangling conjunction at the end of a part ("buka notes lalu"
@@ -674,12 +674,20 @@ public struct AXPolicy: Policy {
             }
             return Decision(action: .keyCombo(keys: ["cmd", "r"]), confidence: 0.9,
                             rationale: "reload")
-        case "delete", "hapus":
-            guard intent.arg.isEmpty else {
-                return Decision(action: nil, confidence: 0.2, rationale: "delete what? — needs S2")
+        case "delete", "hapus", "remove", "buang", "replace", "ganti", "ubah", "change":
+            // Bare "delete" is the key; with words it's voice editing of the
+            // focused text: "hapus kata ayam", "replace cat with dog".
+            if intent.arg.isEmpty, ["delete", "hapus"].contains(intent.verb) {
+                return Decision(action: .keyCombo(keys: ["delete"]), confidence: 0.9,
+                                rationale: "delete key")
             }
-            return Decision(action: .keyCombo(keys: ["delete"]), confidence: 0.9,
-                            rationale: "delete key")
+            guard let edit = VoiceEdit.parse(verb: intent.verb, arg: intent.arg) else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "'\(intent.verb) \(intent.arg)' isn't a text edit — needs S2")
+            }
+            return Decision(action: .editText(find: edit.find, replace: edit.replace), confidence: 0.9,
+                            rationale: edit.replace.isEmpty ? "delete “\(edit.find)” in the focused text"
+                                                            : "replace “\(edit.find)” with “\(edit.replace)”")
         case "switch":
             switch intent.arg.lowercased() {
             case "", "app", "aplikasi", "apps":

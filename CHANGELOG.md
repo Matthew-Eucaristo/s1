@@ -3,6 +3,16 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.13] - 2026-10-06
+
+### Added
+- **Voice editing.** Say "hapus kata ayam", "delete the word chicken",
+  "ganti ayam jadi bebek" or "replace cat with dog" and s1 edits the text in
+  the focused field: it finds the last whole-word match, selects it, then
+  deletes it or types over it, so the app's own Undo works. Password fields are
+  refused; a word that isn't there fails with a clear message. The Reasoner can
+  use the same `editText` action for edits the grammar doesn't parse.
+
 ## [0.3.12] - 2026-10-06
 
 ### Fixed

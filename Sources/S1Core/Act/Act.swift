@@ -135,6 +135,10 @@ public struct CGEventActuator: Actuator {
             try postKeyCombo(keys)
             return "keyCombo \(keys.joined(separator: "+"))"
 
+        case .editText(let find, let replace):
+            try actTimeChecks(payload: replace.isEmpty ? nil : replace)
+            return try editFocusedText(find: find, replace: replace)
+
         case .scroll(let dx, let dy):
             // Convention: positive dy scrolls content DOWN (like a browser's
             // scrollY), documented in the decision prompt. CGEvent wheel1 is
@@ -322,6 +326,42 @@ public struct CGEventActuator: Actuator {
            case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
             throw S1Error.axFailed("keystrokes refused: \(r)")
         }
+    }
+
+    /// Voice editing: select `find` inside the focused field, then delete it
+    /// or type over it. Going through the field's own selection and keys
+    /// (not a whole-value write) keeps the app's Undo and works in more apps.
+    func editFocusedText(find: String, replace: String) throws -> String {
+        let sys = AXUIElementCreateSystemWide()
+        AXReader.bindTimeout(sys)
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+              let ref = v, CFGetTypeID(ref) == AXUIElementGetTypeID() else {
+            throw S1Error.axFailed("no text field is focused")
+        }
+        let el = ref as! AXUIElement
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String else {
+            throw S1Error.axFailed("the focused element has no editable text")
+        }
+        guard let r = VoiceEdit.range(of: find, in: text, deleting: replace.isEmpty) else {
+            throw S1Error.axFailed("“\(find)” isn't in the focused text")
+        }
+        var cf = CFRange(location: r.location, length: r.length)
+        guard let sel = AXValueCreate(.cfRange, &cf),
+              AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, sel) == .success else {
+            throw S1Error.axFailed("this field doesn't let s1 select text")
+        }
+        usleep(40_000)
+        if replace.isEmpty { try postKeyCombo(["delete"]) } else { try postUnicode(replace) }
+        usleep(80_000)
+        var after: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &after) == .success,
+           (after as? String) == text {
+            throw S1Error.axFailed("the text didn't change")
+        }
+        return replace.isEmpty ? "deleted “\(find)”" : "replaced “\(find)” with “\(replace)”"
     }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).

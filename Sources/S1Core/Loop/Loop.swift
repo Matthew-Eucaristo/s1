@@ -309,6 +309,9 @@ public struct AgentLoop {
         }
         // Paste (Cmd+V) lands in a password box without a keystroke —
         // keyCombo gets the same guard.
+        if case .editText = action, obs.secureTextFocused {
+            verdict = .needsHuman(reason: "focused field is a secure text field")
+        }
         if case .keyCombo = action, obs.secureTextFocused {
             verdict = .needsHuman(reason: "focused field is a secure text field")
         }

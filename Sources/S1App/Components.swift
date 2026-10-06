@@ -29,6 +29,10 @@ struct StepPresentation {
         switch action {
         case .openApp(let n): return ("app.badge", String(localized: "Open \(n)"))
         case .typeText(let t): return ("keyboard", String(localized: "Type “\(t)”"))
+        case .editText(let f, let r):
+            return r.isEmpty
+                ? ("delete.left", String(localized: "Delete “\(f)”"))
+                : ("pencil.line", String(localized: "Replace “\(f)” with “\(r)”"))
         case .keyCombo(let k): return ("command", String(localized: "Press \(keyLabel(k))"))
         case .click(let x, let y): return ("cursorarrow.click", String(localized: "Click at \(Int(x)), \(Int(y))"))
         case .rightClick(let x, let y): return ("contextualmenu.and.cursorarrow", String(localized: "Right-click at \(Int(x)), \(Int(y))"))

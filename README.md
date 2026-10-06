@@ -206,6 +206,8 @@ to the Reasoner, which reads any language.
   listens for what's next (echo-cancelled, so its own voice doesn't trip it).
 - **Custom words:** add names it misspells; it already learns your installed
   apps, skill names and remembered names.
+- **Edit by voice:** *“hapus kata ayam”*, *“replace cat with dog”* edit the focused
+  text in place (last whole-word match; Undo works).
 - **Dictate anywhere:** hold <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd>, speak, release;
   the text lands where you were typing.
 

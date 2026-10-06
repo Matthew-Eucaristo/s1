@@ -44,6 +44,7 @@ enum LLMDecisionCodec {
         switch a {
         case .openApp(let n): return "openApp(\(n))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
+        case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
         case .axPress(let r): return "axPress(\(r))"
         case .axSetValue(let r, let v): return "axSet(\(r),\(v.prefix(15)))"
         case .click(let x, let y): return "click(\(Int(x)),\(Int(y)))"
@@ -69,7 +70,7 @@ enum LLMDecisionCodec {
         Reply with ONLY one JSON object — no prose, no fences, no examples:
         {"action":{"type":"<TYPE>","<FIELD>":"<VALUE>"},"confidence":<0.0 to 1.0>,"rationale":"<why this action, in this screen>"}
         - The goal may list several steps separated by commas — do them left to right; a "done" step means the task is finished.
-        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, done. Never write more than one.
+        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, wait, verify, captureScreenshot, editText, done. Never write more than one.
         - Fields by type: click/rightClick/doubleClick/moveMouse take "x","y"; drag takes "x","y" (start) and "toX","toY" (end); axPress/axSetValue/axAction/axSetAttribute take "ref"; axSetValue also "value"; axAction also "name" (AXShowMenu, AXIncrement, AXDecrement, AXConfirm, AXCancel, AXPick, AXRaise, AXOpen); axSetAttribute also "attr" (AXSelected, AXFocused, AXExpanded, AXMain, AXMinimized) and "value" ("true"/"false"); typeText takes "text"; openApp takes "app" (the app name); keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
         - Use "ref" (an AX element id like e3) whenever the target is in the AX tree — prefer axPress over click.
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
@@ -191,6 +192,7 @@ enum LLMDecisionCodec {
         case "axPress":   a = field("ref").map { .axPress(ref: $0) }
         case "axSetValue": a = field("ref").map { .axSetValue(ref: $0, value: field("value") ?? field("text") ?? "") }
         case "typeText":  a = field("text").map { .typeText($0) }
+        case "editText":  a = field("text").map { .editText(find: $0, replace: field("value") ?? "") }
         case "openApp":   a = (field("app") ?? field("name") ?? field("text")).map { .openApp(name: $0) }
         // Coordinate families: a missing coord means the reply truncated
         // mid-object — defaulting to 0 would act on the top-left pixel
@@ -256,6 +258,8 @@ enum LLMDecisionCodec {
                           return .axSetValue(ref: ref, value: a.value ?? a.text ?? "")
         case "typeText":  guard let t = a.text, !t.isEmpty else { return nil }
                           return .typeText(t)
+        case "editText":  guard let f = a.text, !f.isEmpty else { return nil }
+                          return .editText(find: f, replace: a.value ?? "")
         case "keyCombo":  guard !a.keys.isEmpty else { return nil }
                           return .keyCombo(keys: a.keys.map { $0.lowercased() })
         case "scroll":    return .scroll(dx: a.dx ?? 0, dy: a.dy ?? 0)
@@ -345,6 +349,11 @@ public struct LLMReasoner: Reasoner {
         never click the same field again. To send a chat message, keyCombo \
         "return" after typing. Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, \
         select all cmd+a, undo cmd+z.
+
+        Editing what's already written ("delete the word X", "hapus kata X", \
+        "replace X with Y"): {"type":"editText","text":"X","value":"Y"} edits \
+        the focused field in place (value "" deletes X). Prefer it over \
+        retyping the whole field.
 
         Failures: read each step's outcome in the history. Never repeat an \
         action that failed. When an app is "not found", try at most ONE other \

@@ -2656,3 +2656,29 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(report.escalations >= 1)
     #expect(report.summary == "That app isn't installed.")
 }
+
+@Test func voiceEditFindsTheWordAndItsSpace() {
+    let text = "aku mau makan ayam goreng"
+    let r = VoiceEdit.range(of: "ayam", in: text, deleting: true)!
+    #expect((text as NSString).replacingCharacters(in: r, with: "") == "aku mau makan goreng")
+    // Whole words only, case-insensitive, last occurrence.
+    #expect(VoiceEdit.range(of: "ayam", in: "ayamku", deleting: true) == nil)
+    let t2 = "Ayam dan ayam"
+    #expect(VoiceEdit.range(of: "AYAM", in: t2, deleting: false)! == NSRange(location: 9, length: 4))
+    // UTF-16 ranges survive emoji before the word.
+    let t3 = "🍗 ayam"
+    let r3 = VoiceEdit.range(of: "ayam", in: t3, deleting: false)!
+    #expect((t3 as NSString).substring(with: r3) == "ayam")
+}
+
+@Test func spokenEditsBecomeEditText() async throws {
+    let obs = NullPerceiver().observation
+    func action(_ goal: String) async throws -> Action? {
+        try await AXPolicy().decide(observation: obs, goal: goal, history: []).action
+    }
+    #expect(try await action("tolong hapus kata \"ayam\"") == .editText(find: "ayam", replace: ""))
+    #expect(try await action("delete the word chicken") == .editText(find: "chicken", replace: ""))
+    #expect(try await action("ganti ayam jadi bebek") == .editText(find: "ayam", replace: "bebek"))
+    #expect(try await action("replace cat with dog") == .editText(find: "cat", replace: "dog"))
+    #expect(try await action("delete") == .keyCombo(keys: ["delete"]))
+}

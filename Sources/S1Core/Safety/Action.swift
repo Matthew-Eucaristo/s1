@@ -24,6 +24,9 @@ public enum Action: Codable, Sendable, Equatable {
     case doubleClick(x: Double, y: Double)
     case drag(fromX: Double, fromY: Double, toX: Double, toY: Double)
     case typeText(String)
+    /// Voice editing in the focused text field: delete (`replace` empty) or
+    /// replace the last whole-word occurrence of `find`.
+    case editText(find: String, replace: String)
     case keyCombo(keys: [String])
     case scroll(dx: Double, dy: Double)
     case axPress(ref: String)
@@ -56,6 +59,7 @@ public enum Action: Codable, Sendable, Equatable {
     var textPayloads: [String] {
         switch self {
         case .typeText(let t): return [t]
+        case .editText(let f, let r): return [f, r]
         case .axSetValue(_, let v): return [v]
         case .keyCombo(let k): return k
         case .shell(let c): return [c]
