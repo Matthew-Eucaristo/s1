@@ -13,3 +13,6 @@
 s1-*-macos.tar.gz
 S1-*-app.zip
 dist/
+
+# release artifacts (built and uploaded by CI / publish-tap.sh)
+S1-*-app.zip*
