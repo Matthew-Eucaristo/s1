@@ -475,12 +475,18 @@ final class AppModel {
                     }
                 }
             }
-        case .maxStepsReached:
+        case .maxStepsReached, .stuckLoop:
             state = .failed
-            reply = String(localized: "I gave up after too many steps.")
-        case .stuckLoop:
-            state = .failed
-            reply = String(localized: "I got stuck repeating the same step.")
+            let steps = runDir.flatMap { try? RunReader.steps(in: URL(fileURLWithPath: $0)) } ?? []
+            if let failed = steps.last(where: { $0.outcome?.hasPrefix("error:") == true })?.outcome {
+                let why = failed.replacingOccurrences(of: "error: ", with: "")
+                    .replacingOccurrences(of: "aborted: ", with: "")
+                reply = String(localized: "That didn't work: \(why).")
+            } else if status == .stuckLoop {
+                reply = String(localized: "I got stuck repeating the same step.")
+            } else {
+                reply = String(localized: "I gave up after too many steps.")
+            }
         case .aborted:
             state = .stopped
             reply = String(localized: "Stopped.")

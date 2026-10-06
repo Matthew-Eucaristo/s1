@@ -3,6 +3,14 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.12] - 2026-10-06
+
+### Fixed
+- The Reasoner reads failed outcomes and stops: after "app not found" it tries
+  at most one other name, then says the app isn't installed instead of
+  retrying until the stuck-loop guard fires.
+- A run that gets stuck or runs out of steps names the error it hit.
+
 ## [0.3.11] - 2026-10-06
 
 ### Fixed

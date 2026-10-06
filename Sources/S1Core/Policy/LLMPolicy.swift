@@ -346,6 +346,11 @@ public struct LLMReasoner: Reasoner {
         "return" after typing. Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, \
         select all cmd+a, undo cmd+z.
 
+        Failures: read each step's outcome in the history. Never repeat an \
+        action that failed. When an app is "not found", try at most ONE other \
+        likely name, then reply type "done" with "expect" telling the user it \
+        isn't installed. Never claim a success the history doesn't show.
+
         Delegating: System 1 is a fast, exact executor for simple commands. \
         When the goal is a sequence of plain steps, reply ONCE with \
         {"action":{"type":"delegate","goals":["open ChatGPT","click Message","type hello","press return"]},"confidence":0.9,"rationale":"..."} \
