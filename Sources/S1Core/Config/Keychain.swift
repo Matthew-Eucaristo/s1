@@ -3,8 +3,18 @@ import Security
 
 /// API keys live in the login Keychain, never in `~/.s1/config.json`.
 /// One generic-password item per connected provider, under one service name.
+///
+/// macOS asks before an app reads an item's *secret*; asking only whether an
+/// item exists never prompts. So `has` reads attributes only, and `get` reads
+/// each secret at most once per process (cached until `set`/`delete`). With
+/// a stable code signature, "Always Allow" on that one prompt sticks across
+/// updates.
 public enum SecretStore {
     public static let defaultService = "com.matthew.s1.api-keys"
+
+    nonisolated(unsafe) private static var cache: [String: String] = [:]
+    private static let lock = NSLock()
+    private static func key(_ service: String, _ account: String) -> String { service + "/" + account }
 
     public static func set(_ secret: String, account: String,
                            service: String = defaultService) throws {
@@ -24,9 +34,11 @@ public enum SecretStore {
         guard status == errSecSuccess else {
             throw S1Error.aborted("keychain write failed (\(status))")
         }
+        lock.withLock { cache[key(service, account)] = secret }
     }
 
     public static func get(account: String, service: String = defaultService) -> String? {
+        if let hit = lock.withLock({ cache[key(service, account)] }) { return hit }
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: account,
@@ -36,11 +48,18 @@ public enum SecretStore {
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
               let data = out as? Data, let s = String(data: data, encoding: .utf8),
               !s.isEmpty else { return nil }
+        lock.withLock { cache[key(service, account)] = s }
         return s
     }
 
+    /// Whether a key is stored, without reading it (never prompts).
     public static func has(account: String, service: String = defaultService) -> Bool {
-        get(account: account, service: service) != nil
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecAttrAccount as String: account,
+                                kSecReturnAttributes as String: true,
+                                kSecMatchLimit as String: kSecMatchLimitOne]
+        return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
     }
 
     @discardableResult
@@ -49,6 +68,7 @@ public enum SecretStore {
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: account]
         let status = SecItemDelete(q as CFDictionary)
+        lock.withLock { _ = cache.removeValue(forKey: key(service, account)) }
         return status == errSecSuccess || status == errSecItemNotFound
     }
 }

@@ -15,6 +15,7 @@ struct S1App: App {
         }
         .defaultSize(width: DemoContent.enabled ? 1320 : 1000, height: DemoContent.enabled ? 860 : 680)
         .windowToolbarStyle(.unified)
+        .defaultLaunchBehavior(.presented)
         .commands { S1Commands(model: model) }
 
         Window("Set Up s1", id: "onboarding") {

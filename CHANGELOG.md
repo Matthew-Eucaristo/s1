@@ -3,6 +3,21 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.2] - 2026-10-06
+
+### Fixed
+- **The real macOS 26 look.** The app was built against the macOS 15 SDK
+  (`Package.swift` platform), so macOS ran it in compatibility mode: a flush
+  sidebar, a hairline under the toolbar, a misplaced sidebar button. It now
+  targets macOS 26 and gets the floating Liquid Glass sidebar, the system
+  sidebar toggle and edge-to-edge toolbar. The main window opens at launch
+  explicitly (`defaultLaunchBehavior(.presented)`).
+- **Far fewer Keychain prompts.** Checking whether a provider has a key no
+  longer reads the key, and each key is read at most once per launch. Choose
+  "Always Allow" once and updates keep that access (they're signed with the
+  same identity).
+- The empty-state hint uses the accent color instead of link blue.
+
 ## [0.3.1] - 2026-10-06
 
 ### Changed

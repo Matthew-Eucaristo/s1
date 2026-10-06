@@ -34,12 +34,17 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 ## Invariants
 - The safety gate runs before every action; judges can only lower confidence.
 - Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save).
+- Keychain: `SecretStore.has` reads attributes only (never prompts); `get` caches per process. Never read a
+  secret just to test presence. Data-protection keychain needs a provisioning profile (AMFI kills the
+  binary without one), so s1 stays on the login keychain with a stable signing identity.
 - UI: glass only on chrome/controls (toolbar, composer, pills, banners); content uses plain fills.
 - Accent: `AppModel.accent` (s1 orange `Theme.orange` by default, or the macOS accent via
   Settings → Appearance, UserDefaults `accent`). Use it, never hard-coded colors; `onAccent` for text on it.
 - Every user-facing string is localizable; keep `Sources/S1App/id.lproj/Localizable.strings` in sync.
 
 ## Verify
+- SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides
+  whether macOS applies the Liquid Glass design; check with `vtool -show-build` (must say sdk 26+).
 - `swift build && swift test` (one known-flaky test under load: `serveRunErrorsAutoSleep`).
 - App UI: build a bundle with a separate bundle id (don't clobber the installed S1), back up
   `~/.s1/config.json` first; the app writes it. `scripts/make-app.sh` builds `dist/S1.app`.

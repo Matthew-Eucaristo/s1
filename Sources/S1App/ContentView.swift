@@ -507,7 +507,8 @@ private struct EmptyConversation: View {
                     Label("Only the built-in grammar is on. Connect a model to handle anything else.",
                           systemImage: "sparkles")
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.plain)
+                .foregroundStyle(model.accent)
                 .font(.callout)
                 .padding(.top, 4)
             }
