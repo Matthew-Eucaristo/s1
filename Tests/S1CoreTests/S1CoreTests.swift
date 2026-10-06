@@ -2515,3 +2515,10 @@ private struct NoScreenPerceiver: Perceiver {
     let lines = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
     #expect(lines.contains("declined"))
 }
+
+@Test func dictatedPeriodIsNotPartOfTheAppName() async throws {
+    let obs = Snapshot(timestamp: Date(), frontmostApp: nil, frontmostPID: nil,
+                       windows: [], axTree: nil, screenshotPath: nil)
+    let d = try await AXPolicy().decide(observation: obs, goal: "Open Notepad.", history: [])
+    if case .openApp(let name)? = d.action { #expect(name == "Notepad") } else { Issue.record("expected openApp") }
+}

@@ -308,8 +308,10 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs an app name")
             }
-            return Decision(action: .openApp(name: intent.arg), confidence: 0.9,
-                            rationale: "open \(intent.arg)")
+            // Dictation ends sentences with a period: "Open Notepad." names "Notepad".
+            let app = intent.arg.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            return Decision(action: .openApp(name: app), confidence: 0.9,
+                            rationale: "open \(app)")
         case _ where Self.typeVerbs.contains(intent.verb):
             // A bare "enter" after typing is the Return key, not text.
             if intent.arg.isEmpty, intent.verb == "enter" {

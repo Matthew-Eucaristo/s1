@@ -226,8 +226,9 @@ public struct CGEventActuator: Actuator {
             return "\(attr)=\(value) \(ref)"
 
         case .openApp(let name):
-            try await openApp(named: name)
-            return "opened \(name)"
+            // Report what actually opened: fuzzy resolution can map
+            // "Notepad" to Notes, and the log must say so.
+            return "opened \(try await openApp(named: name))"
 
         case .wait(let s):
             // Model output is untrusted: .seconds(NaN) traps. The loop and
@@ -432,7 +433,8 @@ public struct CGEventActuator: Actuator {
         ev(false)?.post(tap: .cghidEventTap)
     }
 
-    func openApp(named name: String) async throws {
+    @discardableResult
+    func openApp(named name: String) async throws -> String {
         let ws = NSWorkspace.shared
         guard let url = AppResolver.resolve(name) else {
             throw S1Error.aborted("app not found: \(name)")
@@ -449,10 +451,13 @@ public struct CGEventActuator: Actuator {
         // keystrokes into it (or miss a terminal's command scan). Wait,
         // bounded, until the opened app actually owns the keyboard.
         let wanted = url.standardizedFileURL
+        let opened = FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "")
         for _ in 0..<40 {   // ~2s max
-            if ws.frontmostApplication?.bundleURL?.standardizedFileURL == wanted { return }
+            if ws.frontmostApplication?.bundleURL?.standardizedFileURL == wanted { return opened }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+        return opened
     }
 }
 

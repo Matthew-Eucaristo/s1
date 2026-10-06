@@ -3,6 +3,14 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.5] - 2026-10-06
+
+### Fixed
+- Dictated commands end with a period: "Open Notepad." no longer looks for
+  an app named "Notepad.".
+- An opened app is logged by its real name. Fuzzy matching can open Notes
+  for "Notepad"; the step now says "opened Notes", not "opened Notepad".
+
 ## [0.3.4] - 2026-10-06
 
 ### Fixed
