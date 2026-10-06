@@ -3,6 +3,17 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.18] - 2026-10-07
+
+### Fixed
+- **The notch pill stays while s1 talks.** It used to hide 2.4 s after a run
+  even when the spoken reply was longer, then pop back as "Listening". Now the
+  reply stays on screen for as long as the voice plays and turns straight into
+  the listening pill when it ends, or the moment you talk over it, so you can
+  keep the conversation going without it flickering away.
+- Talking over a reply no longer shows "voice interrupt" as if you'd said it
+  (new `interrupted` and `speaking` listener events).
+
 ## [0.3.17] - 2026-10-07
 
 ### Added: Mac skills

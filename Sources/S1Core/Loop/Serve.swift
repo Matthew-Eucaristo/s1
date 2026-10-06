@@ -4,6 +4,10 @@ import Foundation
 public struct ServeEvent: Sendable {
     public enum Kind: String, Sendable {
         case armed, idle, listening, partial, heard, runStart, phase, step, runDone, error, sleeping, stopped
+        /// The reply is being spoken (text = the reply); the next `.listening` ends it.
+        case speaking
+        /// The user talked over the run or the reply; listening resumes next.
+        case interrupted
     }
     public var kind: Kind
     public var text: String
@@ -364,6 +368,7 @@ public final class Serve: @unchecked Sendable {
                     default: SpokenLanguage.reply(.stopped, languageCode: code)
                     }
                 }
+                emit(.speaking, reply)
                 await speaker.say(reply, language: lang, voice: config.voice)
             }
         } catch {
@@ -385,7 +390,7 @@ public final class Serve: @unchecked Sendable {
     private func interrupted() {
         try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
         speaker.stop()
-        emit(.heard, "voice interrupt")
+        emit(.interrupted)
     }
 
     /// True when the utterance is a "go to sleep" phrase (case/locale-insensitive,

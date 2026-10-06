@@ -66,6 +66,9 @@ final class AppModel {
     // MARK: companion
 
     private(set) var serveState: Serve.State = .idle { didSet { syncHUD() } }
+    /// A reply is being spoken: the pill keeps it on screen until the voice
+    /// ends or you talk over it, then turns into the listening pill.
+    private(set) var speaking = false { didSet { syncHUD() } }
     /// False when a CLI `s1 serve` owns the listener slot.
     private(set) var companionAvailable = true
     var launchAtLogin = false
@@ -359,9 +362,17 @@ final class AppModel {
     private func handle(_ ev: ServeEvent) {
         switch ev.kind {
         case .armed: break
-        case .listening: serveState = .listening
+        case .listening:
+            speaking = false
+            serveState = .listening
         case .partial: transcript = ev.text
         case .heard: transcript = ev.text
+        case .speaking: speaking = true
+        case .interrupted:
+            // You're talking again: go straight to the listening pill.
+            transcript = ""
+            serveState = .listening
+            speaking = false
         case .runStart:
             serveState = .running
             transcript = ""
@@ -375,6 +386,7 @@ final class AppModel {
             let status = RunStatus(rawValue: ev.text) ?? .aborted
             finishCurrent(status: status, answer: summary?.summary, why: nil, runDir: ev.dir)
         case .sleeping, .stopped, .idle:
+            speaking = false
             serveState = .idle
             transcript = ""
         case .error:
@@ -567,7 +579,9 @@ final class AppModel {
                     default: SpokenLanguage.reply(.stopped, languageCode: code)
                     }
                 }
+                speaking = true
                 await speaker.say(spoken, language: lang, voice: ttsVoice.isEmpty ? nil : ttsVoice)
+                speaking = false
             }
         } catch {
             var why = error.localizedDescription
@@ -595,6 +609,7 @@ final class AppModel {
         listenTask = nil
         listening = false
         speaker.stop()
+        speaking = false
     }
 
     // MARK: - mic
@@ -785,6 +800,11 @@ final class AppModel {
         }
         if let t = currentTurn {
             hud.show(.working(t.steps.last.map(StepPresentation.init)?.title ?? t.phase ?? t.goal))
+            return
+        }
+        // Speaking: the answer stays up for as long as the voice plays.
+        if speaking, let last = turns.last {
+            hud.show(.finished(last.state, last.reply ?? ""))
             return
         }
         if let last = turns.last, let f = last.finished, (0..<1).contains(Date().timeIntervalSince(f)) {
