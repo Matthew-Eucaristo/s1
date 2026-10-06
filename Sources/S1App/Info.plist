@@ -2,42 +2,42 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>S1</string>
 	<key>CFBundleExecutable</key>
 	<string>S1</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.mattheweuc.s1</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.utilities</string>
-	<key>CFBundleName</key>
-	<string>S1</string>
-	<key>CFBundleDisplayName</key>
-	<string>S1</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
 		<string>id</string>
 	</array>
+	<key>CFBundleName</key>
+	<string>S1</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.6</string>
+	<string>0.3.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
-	<key>NSSupportsAutomaticGraphicsSwitching</key>
-	<true/>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>S1 listens for your spoken commands so it can operate your Mac.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>S1 needs the microphone to hear your spoken commands.</string>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>S1 reads the accessibility tree and sends input events to carry out your commands.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>S1 needs the microphone to hear your spoken commands.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>S1 captures the screen only when a model decision requires visual input; the reason is logged per step.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>S1 listens for your spoken commands so it can operate your Mac.</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
 </dict>
 </plist>
