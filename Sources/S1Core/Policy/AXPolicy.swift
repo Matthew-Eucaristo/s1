@@ -330,17 +330,18 @@ public struct AXPolicy: Policy {
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         let intents = AXPolicy.intents(of: goal)
-        guard history.count < intents.count else {
-            return Decision(action: .done(summary: "goal completed"), confidence: 0.95,
-                            rationale: "all \(intents.count) intents consumed")
-        }
         // A failed step stops the chain instead of cascading — "buka X lalu
-        // ketik Y" must not type into a random app when the open failed.
+        // ketik Y" must not type into a random app when the open failed —
+        // and is never "done", even when it was the last intent.
         // "blocked:" counts too (denylist/gate stop), same as VLM's cursor.
         if let last = history.last,
            last.outcome?.hasPrefix("error:") == true || last.outcome?.hasPrefix("blocked:") == true {
             return Decision(action: nil, confidence: 0.15,
                             rationale: "previous step failed — abstaining instead of cascading")
+        }
+        guard history.count < intents.count else {
+            return Decision(action: .done(summary: "goal completed"), confidence: 0.95,
+                            rationale: "all \(intents.count) intents consumed")
         }
         let intent = intents[history.count]
         switch intent.verb {

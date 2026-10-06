@@ -448,7 +448,11 @@ final class AppModel {
         case .escalatedToS2:
             state = .failed
             let steps = runDir.flatMap { try? RunReader.steps(in: URL(fileURLWithPath: $0)) } ?? []
-            if !models.hasReasoner {
+            if !models.hasReasoner, let failed = steps.last(where: { $0.outcome?.hasPrefix("error:") == true })?.outcome {
+                let why = failed.replacingOccurrences(of: "error: ", with: "")
+                    .replacingOccurrences(of: "aborted: ", with: "")
+                reply = String(localized: "That didn't work: \(why).")
+            } else if !models.hasReasoner {
                 reply = String(localized: "I don't know how to do that yet. Connect a Reasoner in Settings → Models.")
             } else {
                 switch ReasonerFailure.last(in: steps) {
@@ -461,7 +465,14 @@ final class AppModel {
                 case .other(let message)?:
                     reply = String(localized: "Your Reasoner failed: \(message)")
                 case nil:
-                    reply = String(localized: "I couldn't work out how to do that.")
+                    // Name the step that failed rather than a generic shrug.
+                    if let failed = steps.last(where: { $0.outcome?.hasPrefix("error:") == true })?.outcome {
+                        let why = failed.replacingOccurrences(of: "error: ", with: "")
+                            .replacingOccurrences(of: "aborted: ", with: "")
+                        reply = String(localized: "That didn't work: \(why).")
+                    } else {
+                        reply = String(localized: "I couldn't work out how to do that.")
+                    }
                 }
             }
         case .maxStepsReached:

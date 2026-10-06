@@ -171,11 +171,13 @@ enum LLMDecisionCodec {
     /// a conservative action with low confidence instead of giving up.
     static func salvage(_ text: String) -> Decision? {
         func field(_ name: String) -> String? {
-            let pat = "\"" + name + "\"\\s*:\\s*\"([^\"]+)\""
-            guard let r = text.range(of: pat, options: .regularExpression) else { return nil }
-            var v = text[r].dropFirst(name.count + 2)          // drop `"name"`
-            v = v.drop(while: { $0 == ":" || $0 == " " || $0 == "\"" }).dropLast()
-            return String(v)
+            // A JSON string value, escapes included: `\"` must not end it.
+            let pat = "\"" + NSRegularExpression.escapedPattern(for: name) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\""
+            guard let re = try? NSRegularExpression(pattern: pat),
+                  let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  let r = Range(m.range(at: 1), in: text), !r.isEmpty else { return nil }
+            let raw = String(text[r])
+            return (try? JSONDecoder().decode(String.self, from: Data(("\"" + raw + "\"").utf8))) ?? raw
         }
         func num(_ name: String) -> Double? {
             let pat = "\"" + name + "\"\\s*:\\s*([0-9.]+)"

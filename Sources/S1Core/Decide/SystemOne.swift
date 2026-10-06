@@ -342,12 +342,16 @@ public struct JudgedPolicy: Policy {
             yes: "Every part of the goal is done", no: "Some part of the goal is still undone"),
     ]
 
-    /// Steps whose result depends on the screen (not a launch or a key).
+    /// Runs whose "done" deserves a second look: a step whose result depends
+    /// on the screen (not a launch or a key), or one that failed or didn't
+    /// verify. The Judge reads every step's outcome in `history`.
     static func touchedUI(_ history: [StepRecord]) -> Bool {
         history.contains { r in
+            if r.verified == false { return true }
+            if let o = r.outcome, o.hasPrefix("error:") || o.hasPrefix("blocked:") { return true }
             switch r.action {
-            case .click?, .doubleClick?, .rightClick?, .drag?, .axPress?, .axSetValue?, .typeText?: true
-            default: false
+            case .click?, .doubleClick?, .rightClick?, .drag?, .axPress?, .axSetValue?, .typeText?: return true
+            default: return false
             }
         }
     }

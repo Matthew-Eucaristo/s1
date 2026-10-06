@@ -2609,3 +2609,24 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(SystemOneClient.wire(["AAAA"], for: liquid) == ["data:image/jpeg;base64,AAAA"])
     #expect(SystemOneClient.wire(["AAAA"], for: URL(string: "http://localhost:11434/v1/systemone")!) == ["AAAA"])
 }
+
+@Test func failedLastStepIsNeverDone() async throws {
+    // "Open Minecraft." with no Minecraft: the open fails and the run must not say Done.
+    let obs = NullPerceiver().observation
+    let failed = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.9,
+                            rationale: "", modelReply: nil, action: .openApp(name: "Minecraft"),
+                            gate: "allow", outcome: "error: aborted: app not found: Minecraft",
+                            verified: nil, escalation: nil)
+    let d = try await AXPolicy().decide(observation: obs, goal: "Open Minecraft.", history: [failed])
+    #expect(d.action == nil)
+    #expect(d.confidence < 0.5)                      // → the Reasoner, or an honest failure
+}
+
+@Test func salvagedAnswersKeepEscapedQuotes() {
+    // A real reply whose JSON closed early; the answer quotes what was typed.
+    let reply = #"{"action":{"type":"done"},"confidence":0.95,"rationale":"answer"},"expect":"I typed \"hello from s1\" into it. Then I stopped."}"#
+    let d = LLMDecisionCodec.parse(reply)
+    if case .done(let summary)? = d?.action {
+        #expect(summary == #"I typed "hello from s1" into it. Then I stopped."#)
+    } else { Issue.record("expected done, got \(String(describing: d?.action))") }
+}

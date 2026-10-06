@@ -3,6 +3,19 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.10] - 2026-10-06
+
+### Fixed
+- **A failed step is never "Done."** "Open Minecraft." without Minecraft
+  failed its only step and still finished as Done: the grammar checked "all
+  steps used" before "did the last one fail". A failure now goes to the
+  Reasoner, or ends saying what failed ("That didn't work: app not found:
+  Minecraft.").
+- The Judge's done-check also runs after a failed or unverified step; it reads
+  every step's outcome, so it can tell finished from "needs another go".
+- Reasoner answers with quotes in them ("typed \"hello\"") are no longer cut
+  off when its JSON comes back slightly malformed.
+
 ## [0.3.9] - 2026-10-06
 
 ### Fixed
