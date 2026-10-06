@@ -3,6 +3,22 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.17] - 2026-10-07
+
+### Added: Mac skills
+- **Every System Settings pane by name**, in English and Indonesian ("buka
+  pengaturan Wi-Fi", "open battery settings", "privacy settings"), using the
+  pane IDs macOS ships.
+- **Standard folders**: "open Downloads", "buka folder dokumen", "open music
+  folder" ("open Music" is still the app).
+- **System actions**: Mission Control, App Exposé, show desktop, Spotlight,
+  emoji picker, Force Quit, screenshot of an area, screenshot toolbar / screen
+  recording, display and keyboard brightness, next input source, show hidden
+  files, Go to Folder, reopen closed tab.
+- **Quick answers** without a model: the time, the date, the battery.
+- The Reasoner's prompt lists these skills so it delegates them to System 1.
+- New `openURL` action, limited to settings panes and folders.
+
 ## [0.3.16] - 2026-10-07
 
 ### Added: System 1 is a full keyboard and mouse

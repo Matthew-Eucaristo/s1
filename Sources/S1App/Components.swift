@@ -28,6 +28,10 @@ struct StepPresentation {
         guard let action else { return ("questionmark.circle", String(localized: "No action")) }
         switch action {
         case .openApp(let n): return ("app.badge", String(localized: "Open \(n)"))
+        case .openURL(let u):
+            return u.hasPrefix("file:")
+                ? ("folder", String(localized: "Open \(URL(string: u)?.lastPathComponent ?? u)"))
+                : ("gearshape", String(localized: "Open Settings"))
         case .typeText(let t): return ("keyboard", String(localized: "Type “\(t)”"))
         case .editText(let f, let r):
             return r.isEmpty

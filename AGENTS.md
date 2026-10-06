@@ -23,6 +23,9 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   several controls match, a score when the grammar is unsure (< 0.9), and a done-check after UI steps.
   Exact grammar steps are never judged. A Judge that sees captures the screen on demand
   (`JudgedPolicy.capture`), never every step.
+- Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
+  /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first
+  and the Reasoner prompt includes `MacSkills.guide`. `openURL` only opens settings panes and folders.
 - `Models.resolve/endpoint` is the only resolution path; `Brain.policy()/reasoner()` the only place roles
   become a brain — app, `s1 run`, `s1 serve` all use it. Never add per-role endpoint config again.
 - Connecting a provider auto-fills only *empty* `judge`/`reasoner`; speech is always opt-in.

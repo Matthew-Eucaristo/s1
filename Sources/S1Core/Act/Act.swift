@@ -242,6 +242,18 @@ public struct CGEventActuator: Actuator {
             }
             return "\(attr)=\(value) \(ref)"
 
+        case .openURL(let raw):
+            // Settings panes and folders only — never an app, script or file
+            // a URL could launch.
+            guard let url = URL(string: raw) else { throw S1Error.aborted("bad URL: \(raw)") }
+            var isDir: ObjCBool = false
+            let ok = url.scheme == "x-apple.systempreferences"
+                || (url.isFileURL && FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+                    && url.pathExtension != "app")
+            guard ok else { throw S1Error.aborted("s1 only opens settings panes and folders this way") }
+            guard NSWorkspace.shared.open(url) else { throw S1Error.aborted("couldn't open \(raw)") }
+            return url.isFileURL ? "opened \(url.lastPathComponent)" : "opened settings"
+
         case .openApp(let name):
             // Report what actually opened: fuzzy resolution can map
             // "Notepad" to Notes, and the log must say so.
@@ -498,6 +510,7 @@ public struct CGEventActuator: Actuator {
         "volumeup": 0, "volumedown": 1, "mute": 7,
         "playpause": 16, "play": 16, "pause": 16,
         "nexttrack": 17, "prevtrack": 18, "previoustrack": 18,
+        "brightnessup": 2, "brightnessdown": 3, "illuminationup": 21, "illuminationdown": 22,
     ]
 
     /// Post one media-key press as a system-defined HID event — the

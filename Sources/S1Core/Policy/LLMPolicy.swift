@@ -43,6 +43,7 @@ enum LLMDecisionCodec {
         guard let a else { return "none" }
         switch a {
         case .openApp(let n): return "openApp(\(n))"
+        case .openURL(let u): return "open(\(u.prefix(40)))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
         case .axPress(let r): return "axPress(\(r))"
@@ -359,6 +360,8 @@ public struct LLMReasoner: Reasoner {
         action that failed. When an app is "not found", try at most ONE other \
         likely name, then reply type "done" with "expect" telling the user it \
         isn't installed. Never claim a success the history doesn't show.
+
+        \(MacSkills.guide)
 
         Delegating: System 1 is a fast, exact executor for simple commands. \
         When the goal is a sequence of plain steps, reply ONCE with \

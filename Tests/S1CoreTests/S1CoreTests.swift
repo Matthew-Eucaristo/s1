@@ -2744,3 +2744,26 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(Memory.recall("apa kopi favoritku?", facts: facts)?.contains("flat white") == true)
     #expect(Memory.recall("what's the weather?", facts: facts) == nil)
 }
+
+@Test func macSkillsByName() async throws {
+    func m(_ s: String) -> Action? { MacSkills.match(s)?.action }
+    #expect(m("buka pengaturan wifi") == .openURL("x-apple.systempreferences:com.apple.wifi-settings-extension"))
+    #expect(m("open battery settings") == .openURL("x-apple.systempreferences:com.apple.Battery-Settings.extension"))
+    #expect(m("open settings") == .openApp(name: "System Settings"))
+    #expect(m("mission control") == .keyCombo(keys: ["ctrl", "up"]))
+    #expect(m("show desktop") == .keyCombo(keys: ["f11"]))
+    #expect(m("turunkan kecerahan") == .keyCombo(keys: ["brightnessdown"]))
+    if case .openURL(let u)? = m("open downloads") { #expect(u.hasSuffix("/Downloads/") || u.hasSuffix("/Downloads")) } else { Issue.record("downloads") }
+    #expect(m("open Music") == nil)                      // the app, not the folder
+    #expect(m("open music folder") != nil)
+    #expect(m("open Notes") == nil)
+    // Through the grammar, inside a sequence.
+    let d = try await AXPolicy().decide(observation: NullPerceiver().observation,
+                                        goal: "tolong buka pengaturan bluetooth", history: [])
+    #expect(d.action == .openURL("x-apple.systempreferences:com.apple.BluetoothSettings"))
+    // Quick answers.
+    #expect(MacSkills.answer("jam berapa?") != nil)
+    #expect(MacSkills.answer("what's the weather") == nil)
+    #expect(MetaCommand.parse("what time is it?")?.kind == "recall")
+    #expect(MacSkills.guide.contains("wi-fi"))
+}

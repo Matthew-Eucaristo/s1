@@ -46,6 +46,13 @@ Everything dangerous waits for you.
   `scroll to top`), picks from dropdowns (`pilih Large dari Size`), edits text
   (`hapus kata ayam`), copies and pastes, and drives tabs, windows and media
   keys. Zero model calls, zero latency; the Reasoner is only for thinking.
+- **Knows the Mac.** Built-in Mac skills open every System Settings pane by
+  name (*“buka pengaturan Wi-Fi”*, *“open battery settings”*), the standard
+  folders (*“open Downloads”*), and the system actions (Mission Control, show
+  desktop, Spotlight, emoji picker, Force Quit, screenshot an area, screen
+  recording, brightness, keyboard language). *“What time is it?”* and
+  *“baterai berapa?”* are answered on the spot. The Reasoner knows the same
+  list and hands these to System 1.
 - **One model per job, any provider.** Connect TypeSafe, OpenCode Go, OpenAI,
   OpenRouter, Groq, Gemini, xAI, DeepSeek, Liquid AI, Cloudflare, Ollama,
   LM Studio or any OpenAI-compatible server, then pick a Judge (System 1) and

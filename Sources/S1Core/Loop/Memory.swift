@@ -357,7 +357,7 @@ public enum MetaCommand: Equatable, Sendable {
             .ignoresCase().wholeMatch(in: g) {
             return .saveSkill(String(m.1).trimmingCharacters(in: CharacterSet(charactersIn: "\"'“” ")))
         }
-        if let answer = Memory.recall(g) { return .recall(answer) }
+        if let answer = MacSkills.answer(g) ?? Memory.recall(g) { return .recall(answer) }
         if let m = try? /^(?:please\s+)?(?:remember|ingat(?:lah)?)\s+(?:that\s+|bahwa\s+)?(.+)$/
             .ignoresCase().wholeMatch(in: g) {
             return .remember(String(m.1))

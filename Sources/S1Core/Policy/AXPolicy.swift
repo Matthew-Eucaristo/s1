@@ -394,6 +394,10 @@ public struct AXPolicy: Policy {
                             rationale: "all \(intents.count) intents consumed")
         }
         let intent = intents[history.count]
+        // Mac skills: settings panes, folders, system shortcuts by name.
+        if let skill = MacSkills.match(intent.verb + " " + intent.arg) {
+            return Decision(action: skill.action, confidence: 0.95, rationale: "Mac skill: \(skill.label)")
+        }
         switch intent.verb {
         case "open", "buka", "launch":
             guard !intent.arg.isEmpty else {

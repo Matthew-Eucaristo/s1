@@ -39,6 +39,9 @@ public enum Action: Codable, Sendable, Equatable {
     /// AXExpanded (disclosures), AXMain/AXMinimized (windows).
     case axSetAttribute(ref: String, attr: String, value: Bool)
     case openApp(name: String)
+    /// A System Settings pane (`x-apple.systempreferences:`) or a folder
+    /// (`file://`, directories only) — what Mac skills open.
+    case openURL(String)
     case wait(seconds: Double)
     // irreversible
     case shell(command: String)
@@ -60,6 +63,7 @@ public enum Action: Codable, Sendable, Equatable {
         switch self {
         case .typeText(let t): return [t]
         case .editText(let f, let r): return [f, r]
+        case .openURL(let u): return [u]
         case .axSetValue(_, let v): return [v]
         case .keyCombo(let k): return k
         case .shell(let c): return [c]
