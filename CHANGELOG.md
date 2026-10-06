@@ -3,6 +3,13 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.15] - 2026-10-07
+
+### Fixed
+- **"New window, then type" no longer types into the old window.** ⌘N, ⇧⌘N,
+  ⌘T, ⇧⌘T and ⌘O open their window a beat later; s1 now waits (up to ~0.6 s)
+  for focus to move before the next step.
+
 ## [0.3.14] - 2026-10-06
 
 ### Fixed

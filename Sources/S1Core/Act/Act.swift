@@ -132,7 +132,19 @@ public struct CGEventActuator: Actuator {
 
         case .keyCombo(let keys):
             try actTimeChecks(payload: nil)
+            let opens = Self.opensWindow(keys)
+            let before = opens ? focusedWindow(pid: frontmostPID) : nil
             try postKeyCombo(keys)
+            // ⌘N/⌘T open their window a beat later; typing right away lands
+            // in the old one. Wait (bounded) until focus actually moves.
+            if opens {
+                for _ in 0..<12 {
+                    usleep(50_000)
+                    if let now = focusedWindow(pid: frontmostPID), before.map({ !CFEqual($0, now) }) ?? true {
+                        usleep(60_000); break
+                    }
+                }
+            }
             return "keyCombo \(keys.joined(separator: "+"))"
 
         case .editText(let find, let replace):
@@ -375,6 +387,24 @@ public struct CGEventActuator: Actuator {
             throw S1Error.axFailed("the text didn't change")
         }
         return replace.isEmpty ? "deleted “\(find)”" : "replaced “\(find)” with “\(replace)”"
+    }
+
+    /// Shortcuts that open a new window or tab: ⌘N, ⇧⌘N, ⌘T, ⇧⌘T, ⌘O.
+    static func opensWindow(_ keys: [String]) -> Bool {
+        let k = Set(keys.map { $0.lowercased() })
+        guard k.contains("cmd") || k.contains("command") else { return false }
+        return !k.isDisjoint(with: ["n", "t", "o"]) && k.isDisjoint(with: ["opt", "option", "alt", "ctrl", "control"])
+    }
+
+    /// The frontmost app's focused window, to notice a new one arriving.
+    func focusedWindow(pid: pid_t?) -> AXUIElement? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? pid else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXReader.bindTimeout(app)
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &v) == .success,
+              let w = v, CFGetTypeID(w) == AXUIElementGetTypeID() else { return nil }
+        return (w as! AXUIElement)
     }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).

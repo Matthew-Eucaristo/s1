@@ -2695,3 +2695,10 @@ private struct ChoosingJudge: DecisionJudge {
     let d = try await AXPolicy().decide(observation: obs, goal: "type hi, hapus kata hi", history: [s1, s2])
     #expect(d.action == nil)
 }
+
+@Test func newWindowShortcutsWaitForTheirWindow() {
+    #expect(CGEventActuator.opensWindow(["cmd", "n"]))
+    #expect(CGEventActuator.opensWindow(["cmd", "shift", "t"]))
+    #expect(!CGEventActuator.opensWindow(["cmd", "s"]))
+    #expect(!CGEventActuator.opensWindow(["ctrl", "cmd", "n"]))
+}
