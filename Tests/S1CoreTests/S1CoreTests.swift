@@ -2682,3 +2682,16 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(try await action("replace cat with dog") == .editText(find: "cat", replace: "dog"))
     #expect(try await action("delete") == .keyCombo(keys: ["delete"]))
 }
+
+@Test func grammarLeavesARunTheReasonerTookOver() async throws {
+    // After S2 acted, the grammar's sentence count can't declare "done".
+    let obs = NullPerceiver().observation
+    let s1 = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.9,
+                        rationale: "", modelReply: nil, action: .typeText("hi"),
+                        gate: "allow", outcome: "typed 2 chars", verified: nil, escalation: nil)
+    let s2 = StepRecord(index: 1, time: Date(), observation: "x", decidedBy: "s2:llm:x", confidence: 0.8,
+                        rationale: "", modelReply: nil, action: .axSetValue(ref: "e6", value: "hi"),
+                        gate: "allow", outcome: "AXSetValue", verified: nil, escalation: nil)
+    let d = try await AXPolicy().decide(observation: obs, goal: "type hi, hapus kata hi", history: [s1, s2])
+    #expect(d.action == nil)
+}

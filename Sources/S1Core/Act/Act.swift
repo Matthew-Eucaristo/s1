@@ -137,7 +137,8 @@ public struct CGEventActuator: Actuator {
 
         case .editText(let find, let replace):
             try actTimeChecks(payload: replace.isEmpty ? nil : replace)
-            return try editFocusedText(find: find, replace: replace)
+            return try editFocusedText(find: find, replace: replace,
+                                       pid: NSWorkspace.shared.frontmostApplication?.processIdentifier ?? frontmostPID)
 
         case .scroll(let dx, let dy):
             // Convention: positive dy scrolls content DOWN (like a browser's
@@ -331,22 +332,34 @@ public struct CGEventActuator: Actuator {
     /// Voice editing: select `find` inside the focused field, then delete it
     /// or type over it. Going through the field's own selection and keys
     /// (not a whole-value write) keeps the app's Undo and works in more apps.
-    func editFocusedText(find: String, replace: String) throws -> String {
-        let sys = AXUIElementCreateSystemWide()
-        AXReader.bindTimeout(sys)
-        var v: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
-              let ref = v, CFGetTypeID(ref) == AXUIElementGetTypeID() else {
-            throw S1Error.axFailed("no text field is focused")
+    func editFocusedText(find: String, replace: String, pid: pid_t?) throws -> String {
+        // Ask the frontmost app what it has focused (as the perceiver does);
+        // the system-wide focus can point at a different process.
+        let owner: AXUIElement = pid.map(AXUIElementCreateApplication) ?? AXUIElementCreateSystemWide()
+        AXReader.bindTimeout(owner)
+        func focused() -> (AXUIElement, String?, String)? {
+            var v: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+                  let ref = v, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+            let el = ref as! AXUIElement
+            var value: CFTypeRef?, role: CFTypeRef?
+            AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
+            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
+            return (el, value as? String, (role as? String) ?? "?")
         }
-        let el = ref as! AXUIElement
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
-              let text = value as? String else {
-            throw S1Error.axFailed("the focused element has no editable text")
+        guard var f = focused() else { throw S1Error.axFailed("no text field is focused") }
+        if f.2 == "AXSecureTextField" { throw S1Error.axFailed("refusing to edit a password field") }
+        // Text typed a moment ago can lag in the AX value; look once more.
+        if f.1.map({ VoiceEdit.range(of: find, in: $0, deleting: false) == nil }) ?? true {
+            usleep(250_000)
+            f = focused() ?? f
+        }
+        let (el, current, role) = f
+        guard let text = current else {
+            throw S1Error.axFailed("the focused element (\(role)) has no editable text")
         }
         guard let r = VoiceEdit.range(of: find, in: text, deleting: replace.isEmpty) else {
-            throw S1Error.axFailed("“\(find)” isn't in the focused text")
+            throw S1Error.axFailed("“\(find)” isn't in the focused text (\(role), \(text.count) chars)")
         }
         var cf = CFRange(location: r.location, length: r.length)
         guard let sel = AXValueCreate(.cfRange, &cf),

@@ -339,6 +339,12 @@ public struct AXPolicy: Policy {
             return Decision(action: nil, confidence: 0.15,
                             rationale: "previous step failed — abstaining instead of cascading")
         }
+        // Once the Reasoner has acted, it owns the run: the grammar's intent
+        // count no longer matches what happened, so it can't claim "done".
+        if history.contains(where: { $0.decidedBy.hasPrefix("s2:") && $0.action != nil }) {
+            return Decision(action: nil, confidence: 0.1,
+                            rationale: "the Reasoner took over this run — it decides what's next")
+        }
         guard history.count < intents.count else {
             return Decision(action: .done(summary: "goal completed"), confidence: 0.95,
                             rationale: "all \(intents.count) intents consumed")

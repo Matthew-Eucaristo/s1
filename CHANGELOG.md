@@ -3,6 +3,15 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.14] - 2026-10-06
+
+### Fixed
+- Voice editing reads the focused field from the frontmost app (not the
+  system-wide focus), looks again if freshly typed text hasn't landed in the
+  AX value yet, and says what was focused when the word isn't found.
+- Once the Reasoner has acted in a run it owns it: the grammar no longer
+  declares "done" by counting its own sentences.
+
 ## [0.3.13] - 2026-10-06
 
 ### Added
