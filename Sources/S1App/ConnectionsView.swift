@@ -12,14 +12,25 @@ struct ConnectionsView: View {
     var body: some View {
         Form {
                 decisionStatus
+                let fams = Providers.families()
+                let mine = fams.filter(isMine)
+                if !mine.isEmpty {
+                    Section {
+                        ForEach(mine, id: \.id) { fam in ProviderRow(model: model, fam: fam) }
+                    } header: {
+                        Text("Your providers")
+                    } footer: {
+                        Text("“In use” marks the roles s1 is sending to that provider right now. Pick a model to switch a role over — the saved key comes along, no re-entry.")
+                    }
+                }
                 Section {
-                    ForEach(Providers.families(), id: \.id) { fam in
+                    ForEach(fams.filter { !isMine($0) }, id: \.id) { fam in
                         ProviderRow(model: model, fam: fam)
                     }
                 } header: {
-                    Text("Providers")
+                    Text("Add a provider")
                 } footer: {
-                    Text("Connect applies the provider's models to every role it covers (S1 = decision judge, S2 = reasoning, STT/TTS = speech). One API key unlocks the whole card — paste it once. Any OpenAI-compatible endpoint works, including every model on OpenRouter.")
+                    Text("Paste a provider's API key once — it's saved to the Keychain and the card moves up. S1 = decision judge, S2 = reasoning, STT/TTS = speech. Any OpenAI-compatible endpoint works, including every model on OpenRouter.")
                 }
                 Section {
                     presetMenu(role: .decision) { model.decisionBase = $0; model.decisionModel = $1 }
@@ -86,6 +97,11 @@ struct ConnectionsView: View {
         }
     }
 
+    /// A provider is "yours" once its key is saved or a role points at it.
+    private func isMine(_ fam: ProviderFamily) -> Bool {
+        model.familyHasKey(fam) || !model.rolesInUse(by: fam).isEmpty
+    }
+
     /// Pill labels per role id.
     static func roleTag(_ role: String) -> String {
         switch role {
@@ -119,14 +135,16 @@ struct ConnectionsView: View {
     }
 }
 
-/// One provider: capability pills, connect state, a single key field for
-/// every role it covers, per-role model pickers, and an auto-test that
-/// runs whenever a covered role is configured — on appear and on change.
+/// One provider card. State is the provider's own, never the role's:
+/// "connected" = its key is saved; "in use" = a role is pointed at it.
+/// Roles pointed elsewhere show "not in use" and pick a model to switch
+/// over; only in-use roles are tested, so each result is this provider's.
 @available(macOS 26, *)
 struct ProviderRow: View {
     @Bindable var model: AppModel
     let fam: ProviderFamily
     @State private var draft = ""
+    @State private var editingKey = false
     @State private var results: [ModelRole: String] = [:]
     @State private var testing = Set<ModelRole>()
 
@@ -134,94 +152,131 @@ struct ProviderRow: View {
     /// Local-only providers (e.g. an Ollama preset family) never need a
     /// key — the card skips the field instead of demanding credentials.
     private var needsKey: Bool { !fam.presets.allSatisfy { Endpoints.isLocal($0.base) } }
-    private var connected: Bool { model.familyHasKey(fam) || !needsKey }
+    private var hasKey: Bool { model.familyHasKey(fam) }
+    private var inUse: Set<ModelRole> { Set(model.rolesInUse(by: fam)) }
+    /// Model pickers appear once the provider is usable — a key on file,
+    /// or no key needed.
+    private var usable: Bool { hasKey || !needsKey }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(fam.name)
-                ForEach(fam.roles, id: \.self) { r in
-                    Text(ConnectionsView.roleTag(r))
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.quaternary, in: Capsule())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if connected {
-                    Label("connected", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                        .labelStyle(.titleAndIcon)
-                        .symbolEffect(.bounce, value: connected)
-                }
-                Button("Connect") {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if needsKey && (!hasKey || editingKey) { keyField }
+            if usable {
+                ForEach(roles, id: \.self) { r in roleRow(r) }
+            }
+        }
+        .padding(.vertical, 4)
+        .animation(.smooth, value: hasKey)
+        .animation(.smooth, value: editingKey)
+        .task(id: inUse) { autoTest() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(fam.name).font(.body.weight(.medium))
+            ForEach(fam.roles, id: \.self) { r in
+                let on = ModelRole(rawValue: r).map(inUse.contains) ?? false
+                Text(ConnectionsView.roleTag(r))
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(on ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.quaternary),
+                                in: Capsule())
+                    .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+            Spacer()
+            if hasKey {
+                Label("connected", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: hasKey)
+            } else if !needsKey {
+                Label("on this Mac", systemImage: "desktopcomputer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if usable && inUse.count < roles.count {
+                Button(inUse.isEmpty ? "Use" : "Use for all") {
                     model.connect(fam)
-                    autoTest()
                 }
                 .controlSize(.small)
             }
-            if needsKey {
-                HStack {
-                    SecureField(connected ? "key saved in Keychain — paste to replace" : "API key",
-                                text: $draft)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
-                    Button("Save") {
-                        model.saveKey(draft, forFamily: fam); draft = ""
-                        autoTest()
-                    }
-                    .controlSize(.small)
-                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            if hasKey && needsKey {
+                Menu {
+                    Button("Replace key…") { editingKey = true }
+                    Button("Remove key", role: .destructive) { model.removeKey(forFamily: fam) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .accessibilityLabel("Key options for \(fam.name)")
                 }
-            }
-            // Per-role model pick — presets this provider ships for that
-            // role; picking one rewires the role and re-tests it.
-            ForEach(roles, id: \.self) { r in
-                HStack(spacing: 8) {
-                    Text(ConnectionsView.roleTag(r.rawValue))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, alignment: .leading)
-                    Menu(currentModel(r)) {
-                        ForEach(fam.presets.filter { $0.role == r.rawValue }, id: \.id) { p in
-                            Button(p.model) { model.apply(p); autoTest(r) }
-                        }
-                    }
-                    .controlSize(.small)
-                    .font(.caption)
-                    if testing.contains(r) {
-                        ProgressView().controlSize(.mini)
-                    } else if let res = results[r] {
-                        Text(res).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer()
-                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
         }
-        .padding(.vertical, 2)
-        .task { autoTest() }
     }
 
-    private func currentModel(_ r: ModelRole) -> String {
-        let m = switch r {
-        case .decision: model.decisionModel
-        case .s2: model.s2Model
-        case .vlm: model.vlmModel
-        case .grounder: model.grounderModel
-        case .stt: model.sttModel
-        case .tts: model.ttsModel
+    private var keyField: some View {
+        HStack {
+            SecureField("API key", text: $draft, prompt: Text(fam.note ?? "API key"))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+            Button("Save", action: save)
+                .buttonStyle(.borderedProminent)
+                .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            if editingKey {
+                Button("Cancel") { editingKey = false; draft = "" }
+            }
         }
-        return m.isEmpty ? "pick a model" : m
+        .controlSize(.small)
     }
 
-    /// First-open and post-change probe — only roles that are configured
-    /// AND credentialed (or local) fire a request.
+    private func save() {
+        guard !draft.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        model.saveKey(draft, forFamily: fam)
+        draft = ""; editingKey = false
+        autoTest()
+    }
+
+    private func roleRow(_ r: ModelRole) -> some View {
+        let active = inUse.contains(r)
+        return HStack(spacing: 8) {
+            Text(ConnectionsView.roleTag(r.rawValue))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, alignment: .leading)
+            Menu {
+                ForEach(fam.presets.filter { $0.role == r.rawValue }, id: \.id) { p in
+                    Button(p.model) { model.apply(p); autoTest(r) }
+                }
+            } label: {
+                Text(active ? model.roleModel(r) : String(localized: "not in use"))
+            }
+            .controlSize(.small)
+            .fixedSize()
+            if active {
+                if testing.contains(r) {
+                    ProgressView().controlSize(.mini)
+                } else if let res = results[r] {
+                    Text(res).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        .help(res)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    /// Probe only roles pointed at THIS provider — results belong to it.
     private func autoTest(_ only: ModelRole? = nil) {
         for r in roles where only == nil || r == only {
             guard model.roleReady(r), !testing.contains(r) else { continue }
-            testing.insert(r)
             Task {
+                // apply() is synchronous, but wait a beat so the role's
+                // live base reflects a just-picked preset before matching.
+                await Task.yield()
+                guard inUse.contains(r), !testing.contains(r) else { return }
+                testing.insert(r)
                 results[r] = await model.testConnection(r)
                 testing.remove(r)
             }

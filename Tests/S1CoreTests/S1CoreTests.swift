@@ -2702,6 +2702,29 @@ struct DoneEachSubgoal: Policy {
     #expect(fams.map(\.id).first == "typesafe")
 }
 
+@Test func providerOwnershipIsPerProviderNotPerRole() {
+    let byID = Dictionary(uniqueKeysWithValues: Providers.families().map { ($0.id, $0) })
+    let jev = Endpoints.defaultDecisionBase
+    // A decision role on TypeSafe is TypeSafe's — not Liquid's/Cloudflare's/Local's.
+    #expect(byID["typesafe"]?.owns(role: "decision", base: jev) == true)
+    #expect(byID["liquid"]?.owns(role: "decision", base: jev) == false)
+    #expect(byID["cloudflare"]?.owns(role: "decision", base: jev) == false)
+    #expect(byID["ollama"]?.owns(role: "decision", base: jev) == false)
+    // S2 on OpenCode belongs only to OpenCode.
+    let s2 = Endpoints.defaultS2Base
+    #expect(byID["opencode"]?.owns(role: "s2", base: s2) == true)
+    #expect(byID["deepseek"]?.owns(role: "s2", base: s2) == false)
+    // Same host, different port = different local provider.
+    #expect(byID["ollama"]?.owns(role: "s2", base: "http://localhost:11434/v1") == true)
+    #expect(byID["local"]?.owns(role: "stt", base: "http://localhost:11434/v1") == false)
+    // Role must match too, and an unset role belongs to nobody.
+    #expect(byID["groq"]?.owns(role: "stt", base: "https://api.groq.com/openai/v1") == true)
+    #expect(byID["groq"]?.owns(role: "decision", base: "https://api.groq.com/openai/v1") == false)
+    #expect(byID["groq"]?.owns(role: "stt", base: "") == false)
+    // Each provider gets its own Keychain account.
+    #expect(byID["liquid"]?.keyAccount != byID["typesafe"]?.keyAccount)
+}
+
 // MARK: - S1 grammar: window/media verbs + click flavors
 
 @Test func axPolicyWindowAndMediaVerbs() async throws {

@@ -334,6 +334,7 @@ final class AppModel {
         if let v = cfg.voice { ttsVoice = v }
         sandboxSrt = cfg.sandbox == "srt"
         needsOnboarding = cfg.onboarded != true
+        migrateProviderKeys()
 
         // Status providers read the live fields (typed-but-unsaved edits
         // count immediately) — wired post-init since they capture self.
@@ -604,22 +605,92 @@ final class AppModel {
             if let v = p.voice { ttsCloudVoice = v }
         default: break
         }
+        // Wiring a role to a provider carries that provider's key along.
+        if let fam = Providers.families().first(where: { $0.presets.contains(p) }),
+           let r = ModelRole(rawValue: p.role),
+           let k = SecretStore.get(account: fam.keyAccount),
+           SecretStore.get(account: r.rawValue) != k {
+            try? SecretStore.set(k, account: r.rawValue)
+            keyRevision += 1
+        }
         // connect() applies several presets at once — debounce so the
         // companion restarts once, not per role.
         scheduleRearm()
     }
 
-    /// Provider-card key: one paste covers every role the family ships —
-    /// same credential, stored once per role's Keychain account.
+    /// Provider-card key: stored under the provider's own account, and
+    /// copied to every role currently pointed at this provider (the
+    /// runtime reads per-role accounts). Roles wired later pick it up in
+    /// `apply`.
     func saveKey(_ key: String, forFamily fam: ProviderFamily) {
-        for r in fam.roles.compactMap(ModelRole.init(rawValue:)) { saveKey(key, for: r) }
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty else { return }
+        do {
+            try SecretStore.set(k, account: fam.keyAccount)
+            status = "\(fam.name) key saved to Keychain"
+        } catch {
+            status = "keychain: \(error.localizedDescription)"
+        }
+        for r in rolesInUse(by: fam) { saveKey(k, for: r) }
+        keyRevision += 1
     }
 
-    /// "Connected" on the card = a saved key under at least one covered
-    /// role (keys store per role; one provider key unlocks all of them).
+    /// Forget a provider's key — and the role copies of it, for roles
+    /// still pointed at this provider.
+    func removeKey(forFamily fam: ProviderFamily) {
+        SecretStore.delete(account: fam.keyAccount)
+        for r in rolesInUse(by: fam) { removeKey(for: r) }
+        status = "\(fam.name) key removed"
+        keyRevision += 1
+    }
+
+    /// "Connected" = this provider's own key is in the Keychain.
     func familyHasKey(_ fam: ProviderFamily) -> Bool {
         _ = keyRevision
-        return fam.roles.compactMap(ModelRole.init(rawValue:)).contains { hasKey($0) }
+        return SecretStore.has(account: fam.keyAccount)
+    }
+
+    /// Live endpoint base per role — what "in use" is matched against.
+    func roleBase(_ r: ModelRole) -> String {
+        switch r {
+        case .decision: decisionModel.isEmpty ? "" : decisionBase
+        case .s2: s2Base
+        case .vlm: vlmModel.isEmpty ? "" : vlmBase
+        case .grounder: grounderModel.isEmpty ? "" : vlmBase
+        case .stt: sttModel.isEmpty ? "" : sttBase
+        case .tts: ttsModel.isEmpty ? "" : ttsBase
+        }
+    }
+
+    func roleModel(_ r: ModelRole) -> String {
+        switch r {
+        case .decision: decisionModel
+        case .s2: s2Model
+        case .vlm: vlmModel
+        case .grounder: grounderModel
+        case .stt: sttModel
+        case .tts: ttsModel
+        }
+    }
+
+    /// Roles whose live endpoint belongs to this provider.
+    func rolesInUse(by fam: ProviderFamily) -> [ModelRole] {
+        fam.roles.compactMap(ModelRole.init(rawValue:))
+            .filter { fam.owns(role: $0.rawValue, base: roleBase($0)) }
+    }
+
+    /// One-time move to per-provider keys: a role key already saved is
+    /// credited to the provider that role points at — never to every
+    /// provider sharing the role.
+    private func migrateProviderKeys() {
+        for fam in Providers.families() where !SecretStore.has(account: fam.keyAccount) {
+            for r in rolesInUse(by: fam) {
+                if let k = SecretStore.get(account: r.rawValue) {
+                    try? SecretStore.set(k, account: fam.keyAccount)
+                    break
+                }
+            }
+        }
     }
 
     /// Auto-test gate: a role is worth probing when a model is set and it

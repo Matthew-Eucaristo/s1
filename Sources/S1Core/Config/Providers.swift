@@ -52,6 +52,24 @@ public struct ProviderFamily: Sendable, Equatable {
         let have = Set(presets.map(\.role))
         return order.filter { have.contains($0) }
     }
+
+    /// Keychain account for this provider's own key — distinct from the
+    /// per-role accounts the runtime reads, so one provider's key never
+    /// makes another provider look connected.
+    public var keyAccount: String { "provider.\(id)" }
+
+    /// Does `base` (a role's live endpoint) belong to this provider for
+    /// that role? Host + port match against the family's presets, so a
+    /// role pointed at TypeSafe never shows up as "in use" on Liquid's card.
+    public func owns(role: String, base: String) -> Bool {
+        guard let mine = Self.hostPort(base) else { return false }
+        return presets.contains { $0.role == role && Self.hostPort($0.base) == mine }
+    }
+
+    static func hostPort(_ s: String) -> String? {
+        guard let u = URL(string: s), let h = u.host?.lowercased(), !h.isEmpty else { return nil }
+        return u.port.map { "\(h):\($0)" } ?? h
+    }
 }
 
 /// The provider catalog as DATA — `~/.s1/providers.json` is a plain JSON

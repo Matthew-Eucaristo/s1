@@ -146,6 +146,18 @@
 "S2 · Reasoning LLM" = "S2 · LLM penalar";
 "connected" = "terhubung";
 "Connect" = "Hubungkan";
+"Your providers" = "Provider kamu";
+"Add a provider" = "Tambah provider";
+"“In use” marks the roles s1 is sending to that provider right now. Pick a model to switch a role over — the saved key comes along, no re-entry." = "Peran yang disorot sedang dikirim s1 ke provider itu. Pilih model untuk memindahkan peran — kunci tersimpan ikut terbawa, tak perlu diisi ulang.";
+"Paste a provider's API key once — it's saved to the Keychain and the card moves up. S1 = decision judge, S2 = reasoning, STT/TTS = speech. Any OpenAI-compatible endpoint works, including every model on OpenRouter." = "Tempel kunci API provider sekali — tersimpan di Keychain dan kartunya pindah ke atas. S1 = juri keputusan, S2 = penalar, STT/TTS = suara. Endpoint apa pun yang kompatibel-OpenAI bisa, termasuk semua model di OpenRouter.";
+"not in use" = "tidak dipakai";
+"Use" = "Pakai";
+"Use for all" = "Pakai untuk semua";
+"on this Mac" = "di Mac ini";
+"Replace key…" = "Ganti kunci…";
+"Remove key" = "Hapus kunci";
+"Cancel" = "Batal";
+"Key options for %@" = "Opsi kunci untuk %@";
 "pick a model" = "pilih model";
 "key saved in Keychain — paste to replace" = "kunci tersimpan di Keychain — tempel untuk ganti";
 "paste API key" = "tempel kunci API";
