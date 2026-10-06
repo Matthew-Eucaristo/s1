@@ -159,7 +159,7 @@ struct OnboardingView: View {
         VStack(spacing: 22) {
             Spacer()
             header("sparkles", model.accent, "Pick your models",
-                   "Optional. The built-in grammar needs no model. Add a Judge (System 1) to check each step and a Reasoner (System 2) for everything else.")
+                   "Optional. The built-in grammar needs no model. Add a Judge (System 1) to pick targets and check results, and a Reasoner (System 2) to plan everything else.")
             VStack(spacing: 10) {
                 QuickConnect(model: model, id: "typesafe", role: .judge)
                 QuickConnect(model: model, id: "opencode", role: .reasoner)

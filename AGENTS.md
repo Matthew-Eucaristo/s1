@@ -18,6 +18,11 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - **Vision is a capability, not a role:** `Models.seesScreen` sends screenshots to the judge if it reads
   images, else to the reasoner on escalation, else nobody (AX tree only). Catalog `ModelOption.vision`,
   name heuristic `Models.looksVisual`, global switch `config.vision` / `S1_VISION`.
+- **S2 plans, S1 executes.** The Reasoner turns new tasks into plain `delegate` steps; the grammar runs
+  them. The Judge (`JudgedPolicy`) answers typed questions only: `choice` among `Decision.options` when
+  several controls match, a score when the grammar is unsure (< 0.9), and a done-check after UI steps.
+  Exact grammar steps are never judged. A Judge that sees captures the screen on demand
+  (`JudgedPolicy.capture`), never every step.
 - `Models.resolve/endpoint` is the only resolution path; `Brain.policy()/reasoner()` the only place roles
   become a brain — app, `s1 run`, `s1 serve` all use it. Never add per-role endpoint config again.
 - Connecting a provider auto-fills only *empty* `judge`/`reasoner`; speech is always opt-in.

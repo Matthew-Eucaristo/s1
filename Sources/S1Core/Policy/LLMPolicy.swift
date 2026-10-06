@@ -279,6 +279,10 @@ public enum ScreenImage {
         let url = URL(fileURLWithPath: path)
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        return downscaledJPEG(img, maxWidth: maxWidth)
+    }
+
+    public static func downscaledJPEG(_ img: CGImage, maxWidth: Int = 1024) -> String? {
         let scale = min(1.0, Double(maxWidth) / Double(img.width))
         let w = Int(Double(img.width) * scale), h = Int(Double(img.height) * scale)
         guard let ctx = CGContext(data: nil, width: w, height: h,

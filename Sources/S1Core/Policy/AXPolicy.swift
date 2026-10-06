@@ -257,6 +257,14 @@ public struct AXPolicy: Policy {
         return [s]
     }
 
+    /// How a Judge sees one candidate control: role, label, and where it is.
+    static func label(_ n: AXNode) -> String {
+        let role = n.role.replacingOccurrences(of: "AX", with: "")
+        let name = n.title ?? n.desc ?? n.help ?? n.value ?? n.ref
+        let at = n.frame.map { " at (\(Int($0.x)), \(Int($0.y)))" } ?? ""
+        return "\(role) \"\(name.prefix(60))\"\(at)"
+    }
+
     /// Element match quality 0...1: exact title 1.0, prefix 0.8, contains 0.6.
     static func matchScore(_ needle: String, _ node: AXNode) -> Double {
         let n = needle.lowercased()
@@ -471,35 +479,39 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.25,
                                 rationale: "no AX element matches '\(needle)'")
             }
-            let isPressable = AXPolicy.pressableRoles.contains(node.role)
-            let action: Action
-            if let setValue {
-                action = .axSetValue(ref: node.ref, value: setValue)
-            } else if intent.verb == "dclick" || intent.verb == "rclick" {
-                // AXPress is single-click semantics — flavor clicks go pixel
-                // at the element's center instead.
-                guard let f = node.frame else {
-                    return Decision(action: nil, confidence: 0.2,
-                                    rationale: "matched \(node.ref) but it has no frame to click")
+            // The action that targets one matched element, or nil (no frame).
+            func target(_ n: AXNode) -> Action? {
+                if let setValue { return .axSetValue(ref: n.ref, value: setValue) }
+                if intent.verb == "dclick" || intent.verb == "rclick" {
+                    // AXPress is single-click semantics — flavor clicks go
+                    // pixel at the element's center instead.
+                    guard let f = n.frame else { return nil }
+                    return intent.verb == "dclick"
+                        ? .doubleClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
+                        : .rightClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
                 }
-                action = intent.verb == "dclick"
-                    ? .doubleClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
-                    : .rightClick(x: f.x + f.w / 2, y: f.y + f.h / 2)
-            } else if isPressable {
-                action = .axPress(ref: node.ref)
-            } else {
+                if AXPolicy.pressableRoles.contains(n.role) { return .axPress(ref: n.ref) }
                 // No frame → clicking (0,0) would hit the menu bar corner.
-                guard let f = node.frame else {
-                    return Decision(action: nil, confidence: 0.2,
-                                    rationale: "matched \(node.ref) but it has no frame to click")
-                }
-                action = .click(x: f.x + f.w / 2, y: f.y + f.h / 2)
+                guard let f = n.frame else { return nil }
+                return .click(x: f.x + f.w / 2, y: f.y + f.h / 2)
             }
-            // Ambiguity penalty: second-place close behind → less sure.
+            guard let action = target(node) else {
+                return Decision(action: nil, confidence: 0.2,
+                                rationale: "matched \(node.ref) but it has no frame to click")
+            }
+            // Ambiguity penalty: second-place close behind → less sure, and
+            // the close calls go along so a Judge can pick the right one.
             let runnerUp = candidates.dropFirst().first?.1 ?? 0
-            let confidence = min(0.95, score * (runnerUp > score - 0.15 ? 0.75 : 1.0))
+            let ambiguous = runnerUp > score - 0.15
+            let confidence = min(0.95, score * (ambiguous ? 0.75 : 1.0))
+            let options: [Decision.Option]? = ambiguous
+                ? candidates.prefix(5).filter { $0.1 > score - 0.15 }.compactMap { c in
+                    target(c.0).map { Decision.Option(label: Self.label(c.0), action: $0) }
+                  }
+                : nil
             return Decision(action: action, confidence: confidence,
-                            rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? node.desc ?? node.help ?? "")\" score=\(score)")
+                            rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? node.desc ?? node.help ?? "")\" score=\(score)",
+                            options: (options?.count ?? 0) > 1 ? options : nil)
         case _ where Self.editVerbs.contains(intent.verb),
              "select", "pilih":
             // Standard edit shortcuts on whatever is focused/selected. A real

@@ -10,10 +10,20 @@ public struct Decision: Codable, Sendable {
     public var rawReply: String?
     /// S2 only: hand these plain-language subgoals to System 1, in order.
     public var delegate: [String]?
+    /// Close alternatives to `action` (best first), when the brain isn't sure
+    /// which on-screen control was meant. A Judge picks among them.
+    public var options: [Option]?
+
+    public struct Option: Codable, Sendable, Equatable {
+        public var label: String
+        public var action: Action
+        public init(label: String, action: Action) { self.label = label; self.action = action }
+    }
 
     public init(action: Action?, confidence: Double, rationale: String, rawReply: String? = nil,
-                delegate: [String]? = nil) {
+                delegate: [String]? = nil, options: [Option]? = nil) {
         self.delegate = delegate
+        self.options = options
         self.action = action
         self.confidence = confidence
         self.rationale = rationale

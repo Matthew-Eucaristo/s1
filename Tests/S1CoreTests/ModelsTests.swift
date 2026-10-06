@@ -202,14 +202,15 @@ private let allKeys: Models.Secret = { _ in "k" }
     Models.assign(.reasoner, ModelRef("ollama/qwen3-vl:8b"), in: &cfg)
     #expect(Models.seesScreen(.reasoner, config: cfg, env: [:]))
     #expect(Brain.reasoner(config: cfg, env: [:])?.wantsScreenshot == true)
-    // A judge that sees gets screenshots too.
+    // A judge that sees gets the screen when it looks — not a capture every step.
     Models.assign(.judge, ModelRef("ollama/clef-flash"), in: &cfg)
-    #expect(Brain.policy(config: cfg, env: [:]).wantsScreenshot)
+    #expect((Brain.policy(config: cfg, env: [:]) as? JudgedPolicy)?.judge.acceptsImages == true)
+    #expect(!Brain.policy(config: cfg, env: [:]).wantsScreenshot)
     #expect(Brain.describe(config: cfg, env: [:]).contains("(sees screen)"))
     // One switch turns screen sharing off for both.
     cfg.vision = false
     #expect(!Models.seesScreen(.judge, config: cfg, env: [:]) && !Models.seesScreen(.reasoner, config: cfg, env: [:]))
-    #expect(!Brain.policy(config: cfg, env: [:]).wantsScreenshot)
+    #expect((Brain.policy(config: cfg, env: [:]) as? JudgedPolicy)?.judge.acceptsImages == false)
     #expect(Brain.reasoner(config: cfg, env: [:])?.wantsScreenshot == false)
     cfg.vision = nil
     #expect(!Models.seesScreen(.reasoner, config: cfg, env: ["S1_VISION": "off"]))

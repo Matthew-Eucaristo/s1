@@ -25,7 +25,8 @@ Most commands never need a model: a built-in grammar handles the everyday
 (opening apps, typing, shortcuts, media keys) instantly. On top of it sit two
 models, both optional and both yours to pick:
 
-- **Judge (System 1):** a small, fast decision model that checks every step.
+- **Judge (System 1):** a small, fast decision model that picks the right control
+  when the grammar isn't sure, and checks the goal really happened.
 - **Reasoner (System 2):** an LLM that takes over when something is new.
 
 Everything dangerous waits for you.
@@ -102,7 +103,7 @@ brew uninstall --cask s1 --zap       # app + ~/.s1 + Library traces
 
 ```
  you ─▶ voice / text ─▶ built-in grammar ─▶ Judge (System 1) ─▶ safety gate ─▶ act ─▶ verify ─▶ log
-                        no model, instant   checks each step         ▲
+                        no model, instant   picks + checks           ▲
                                                   │ unsure           │
                                                   └─▶ Reasoner (System 2) ─┘
 
@@ -111,13 +112,19 @@ brew uninstall --cask s1 --zap       # app + ~/.s1 + Library traces
 
 - **The built-in grammar** parses the request into intents and runs the ones it
   knows, deterministically. No model, no network.
-- **The Judge (System 1)** is a fast decision model. It answers typed questions
-  about each step (*does this move toward the goal? is it repeating a failure?*)
-  and can only lower confidence. No Judge set: the grammar runs alone.
+- **The Judge (System 1)** is a fast decision model that answers typed questions
+  about the screen; it never writes plans. It steps in where it adds something:
+  when several controls match ("click Send" with two Send buttons) it picks
+  one, when the grammar's match is fuzzy it scores the step, and after typing
+  or clicking it checks the goal really happened. If it reads images, it looks
+  at the screen for those questions only. It can only lower confidence; exact
+  steps (open an app, press a key) stay instant. No Judge set: the grammar
+  runs alone.
 - **The Reasoner (System 2)** gets the step when the grammar doesn't know it or
   confidence is low: the goal, the run so far, the accessibility tree and, if it
-  can read images, a screenshot. It can plan, answer questions, or hand plain
-  sub-goals back to the grammar.
+  can read images, a screenshot. It plans: new tasks come back as plain steps
+  ("open Mail", "click Send", "type …") that System 1 runs fast, with the Judge
+  picking targets. It can also answer questions directly.
 - **The gate** classifies every action (`read`, `reversible`, `irreversible`),
   blocks credentials and payments outright, and stops on secure text fields.
 
@@ -132,7 +139,7 @@ each job takes one model:
 
 | Role | Job | Unset means |
 |---|---|---|
-| `judge` | **Judge (System 1):** a fast decision model that checks every step before it runs (System One API) | grammar only |
+| `judge` | **Judge (System 1):** a fast decision model that picks the right control when the grammar isn't sure and checks the goal is done (System One API) | grammar only |
 | `reasoner` | **Reasoner (System 2):** an LLM that plans what the grammar can't and answers questions | no escalation |
 | `transcribe` | Cloud speech-to-text for each finished voice turn | on-device Apple speech |
 | `speak` | A cloud voice for replies | Apple voices |

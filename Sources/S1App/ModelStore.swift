@@ -239,7 +239,7 @@ extension ModelRole {
 
     var subtitle: LocalizedStringKey {
         switch self {
-        case .judge: "Checks every step before it runs. Fast and optional."
+        case .judge: "Picks the right control when unsure and checks the job is done. Fast and optional."
         case .reasoner: "An LLM for anything the built-in grammar can't do."
         case .transcribe: "Re-transcribes each finished turn in the cloud."
         case .speak: "Speaks replies with a cloud voice."

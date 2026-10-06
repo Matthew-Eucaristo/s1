@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Any JSON value — the System One `state` and structured instructions.
@@ -272,25 +273,39 @@ public enum DecisionContext {
     }
 }
 
-/// S1 decision judge in front of any policy: the policy proposes, a
-/// System One model scores the proposal against the goal, the screen, and
-/// the run so far. A low score lowers the step's confidence, which the
-/// loop already routes to S2 (or suppresses). It can only make a step MORE
-/// cautious — the safety gate still runs after it, unchanged.
+/// The Judge (System 1's model) in front of the grammar. The grammar proposes;
+/// the Judge looks where it adds something and stays out of the way where
+/// the grammar is exact:
+/// - several controls could be meant → it picks one (`choice`), seeing the
+///   screen when it reads images;
+/// - the grammar is unsure (fuzzy match) → it scores the step;
+/// - the run says it's done after touching the UI → it checks the goal
+///   really happened.
+/// It can only make a step MORE cautious: a low score lowers confidence,
+/// which the loop routes to the Reasoner. The safety gate runs after it.
 public struct JudgedPolicy: Policy {
     public var inner: any Policy
     public var judge: any DecisionJudge
     /// Probability under which the judge overrides the policy's confidence.
     public var vetoBelow: Double
+    /// The screen for a judge that reads images, taken only when it looks.
+    public var capture: @Sendable () async -> String?
 
-    public init(inner: any Policy, judge: any DecisionJudge, vetoBelow: Double = 0.3) {
+    /// Grammar decisions at or above this are exact; the judge skips them.
+    static let sureAbove = 0.9
+
+    public init(inner: any Policy, judge: any DecisionJudge, vetoBelow: Double = 0.3,
+                capture: @escaping @Sendable () async -> String? = {
+                    (try? await SystemPerceiver.captureScreen()).flatMap { ScreenImage.downscaledJPEG($0) }
+                }) {
         self.inner = inner
         self.judge = judge
         self.vetoBelow = vetoBelow
+        self.capture = capture
     }
 
     public var name: String { inner.name }
-    public var wantsScreenshot: Bool { inner.wantsScreenshot || judge.acceptsImages }
+    public var wantsScreenshot: Bool { inner.wantsScreenshot }
     public var judgeable: Bool { inner.judgeable }
 
     static let questions: [String: DecisionQuestion] = [
@@ -307,34 +322,74 @@ public struct JudgedPolicy: Policy {
             yes: "Every part of the goal is done", no: "Some part of the goal is still undone"),
     ]
 
+    /// Steps whose result depends on the screen (not a launch or a key).
+    static func touchedUI(_ history: [StepRecord]) -> Bool {
+        history.contains { r in
+            switch r.action {
+            case .click?, .doubleClick?, .rightClick?, .drag?, .axPress?, .axSetValue?, .typeText?: true
+            default: false
+            }
+        }
+    }
+
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         var d = try await inner.decide(observation: observation, goal: goal, history: history)
-        guard inner.judgeable, let action = d.action else { return d }
+        guard let action = d.action else { return d }
         let isDone: Bool = { if case .done = action { return true }; return false }()
-        let state = DecisionContext.state(goal: goal, observation: observation,
-                                          history: history, proposed: action)
+        let options = (d.options?.count ?? 0) > 1 ? d.options : nil
+        guard inner.judgeable || options != nil || d.confidence < Self.sureAbove
+                || (isDone && Self.touchedUI(history)) else { return d }
+
+        var images: [String] = []
+        if judge.acceptsImages {
+            if let path = observation.screenshotPath, let jpeg = ScreenImage.downscaledJPEG(path: path) {
+                images = [jpeg]
+            } else if let jpeg = await capture() {
+                images = [jpeg]
+            }
+        }
         do {
-            // Vision judges see the same downscaled frame the VLM would.
-            let images = judge.acceptsImages
-                ? observation.screenshotPath.flatMap { ScreenImage.downscaledJPEG(path: $0) }.map { [$0] } ?? []
-                : []
-            let r = try await judge.evaluate(state: state,
-                                             questions: isDone ? Self.doneQuestions : Self.questions,
-                                             images: images)
-            var p = r.answers["advances"]?.noul ?? 1
-            if let rep = r.answers["repeats_failure"]?.noul, rep > 0.7 { p = min(p, 1 - rep) }
-            let tag = String(format: "judge %@ p=%.2f", judge.model, p)
-            if p < vetoBelow {
-                d.confidence = min(d.confidence, p)
-                d.rationale += " · \(tag) → low"
+            if let options {
+                try await pick(options, for: &d, goal: goal, observation: observation,
+                               history: history, images: images)
             } else {
-                d.rationale += " · \(tag)"
+                let state = DecisionContext.state(goal: goal, observation: observation,
+                                                  history: history, proposed: action)
+                let r = try await judge.evaluate(state: state,
+                                                 questions: isDone ? Self.doneQuestions : Self.questions,
+                                                 images: images)
+                var p = r.answers["advances"]?.noul ?? 1
+                if let rep = r.answers["repeats_failure"]?.noul, rep > 0.7 { p = min(p, 1 - rep) }
+                let tag = String(format: "judge %@ p=%.2f", judge.model, p)
+                if p < vetoBelow {
+                    d.confidence = min(d.confidence, p)
+                    d.rationale += " · \(tag) → low"
+                } else {
+                    d.rationale += " · \(tag)"
+                }
             }
         } catch {
             // Judge down = no extra signal; the policy's own decision stands.
             d.rationale += " · judge unavailable"
         }
         return d
+    }
+
+    /// Several controls fit: the Judge chooses which one the goal means.
+    private func pick(_ options: [Decision.Option], for d: inout Decision, goal: String,
+                      observation: Snapshot, history: [StepRecord], images: [String]) async throws {
+        let keys = options.enumerated().map { "\($0.offset + 1). \($0.element.label)" }
+        let q: [String: DecisionQuestion] = ["target": .choice(
+            "Which of these controls on the `current` screen should be used next for `goal`?",
+            options: Dictionary(uniqueKeysWithValues: keys.map { ($0, String?.none) }))]
+        let state = DecisionContext.state(goal: goal, observation: observation, history: history)
+        let r = try await judge.evaluate(state: state, questions: q, images: images)
+        guard let ans = r.answers["target"], let chosen = ans.choice,
+              let i = keys.firstIndex(of: chosen) else { return }
+        let p = ans.probabilities?[chosen] ?? ans.confidence ?? 1
+        d.action = options[i].action
+        d.rationale += String(format: " · judge %@ picked %d/%d p=%.2f", judge.model, i + 1, options.count, p)
+        if p < vetoBelow { d.confidence = min(d.confidence, p) }
     }
 }
 

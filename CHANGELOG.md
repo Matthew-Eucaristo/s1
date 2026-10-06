@@ -3,6 +3,25 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.7] - 2026-10-06
+
+### Changed: the Judge does real work (System 1 got stronger)
+- **The Judge never ran.** The grammar marked itself un-judgeable, so the
+  Judge skipped every step while a seeing Judge still forced a screenshot
+  before each one. Now it steps in where it adds something:
+  - **Picks the target.** When several controls match ("click Send" with two
+    Send buttons), the grammar hands over the close calls and the Judge
+    chooses (`choice`), looking at the screen if it can.
+  - **Scores fuzzy steps.** Grammar matches under 0.9 confidence are checked.
+  - **Checks the result.** After typing or clicking, it confirms the goal
+    really happened; if not, the Reasoner takes over.
+  - Exact steps (open an app, press a key) stay instant and unjudged.
+- **Screenshots on demand.** A Judge that sees captures the screen only for
+  the questions it answers, not before every step.
+- **S2 plans, S1 executes.** The Reasoner turns new tasks into plain steps
+  ("open Mail", "click Send", "type …"); System 1 runs them, with the Judge
+  picking targets. App, README, site and llms.txt describe the Judge this way.
+
 ## [0.3.6] - 2026-10-06
 
 ### Fixed

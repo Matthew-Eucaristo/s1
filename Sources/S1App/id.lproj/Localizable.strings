@@ -238,11 +238,11 @@
 "Neither model can read images, so s1 uses the accessibility tree only." = "Tidak ada model yang bisa membaca gambar, jadi s1 hanya memakai pohon aksesibilitas.";
 
 "System 1 and System 2" = "System 1 dan System 2";
-"Checks every step before it runs. Fast and optional." = "Memeriksa setiap langkah sebelum dijalankan. Cepat dan opsional.";
+"Picks the right control when unsure and checks the job is done. Fast and optional." = "Memilih kontrol yang tepat saat ragu dan memastikan tugasnya selesai. Cepat dan opsional.";
 "An LLM for anything the built-in grammar can't do." = "LLM untuk apa pun yang tidak bisa dilakukan grammar bawaan.";
 "Nothing yet. Choose one of its models above or under Voice." = "Belum ada. Pilih salah satu modelnya di atas atau di Suara.";
 "Pick your models" = "Pilih modelmu";
-"Optional. The built-in grammar needs no model. Add a Judge (System 1) to check each step and a Reasoner (System 2) for everything else." = "Opsional. Grammar bawaan tidak butuh model. Tambahkan Juri (System 1) untuk memeriksa tiap langkah dan Reasoner (System 2) untuk hal lainnya.";
+"Optional. The built-in grammar needs no model. Add a Judge (System 1) to pick targets and check results, and a Reasoner (System 2) to plan everything else." = "Opsional. Grammar bawaan tidak butuh model. Tambahkan Juri (System 1) untuk memilih target dan memeriksa hasil, dan Reasoner (System 2) untuk merencanakan sisanya.";
 "Accent color" = "Warna aksen";
 "s1 Orange" = "Oranye s1";
 "System Accent" = "Aksen Sistem";

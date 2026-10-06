@@ -2548,3 +2548,56 @@ private struct NoScreenPerceiver: Perceiver {
     #expect(ReasonerFailure(rationale: "s2 error: The request timed out.") == .unreachable)
     #expect(ReasonerFailure(rationale: "s1 abstained") == nil)
 }
+
+/// Answers `choice` with a fixed option index and `noul` with a fixed p.
+private struct ChoosingJudge: DecisionJudge {
+    var pick: Int
+    var p: Double = 0.9
+    var model: String { "chooser" }
+    func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult {
+        if questions["target"] != nil {
+            let keys = Self.keys(questions["target"]!).sorted()
+            let k = keys.first { $0.hasPrefix("\(pick).") }!
+            return DecisionResult(answers: ["target": DecisionAnswer(type: "choice", choice: k,
+                                                                    probabilities: [k: 0.8])])
+        }
+        return DecisionResult(answers: ["advances": DecisionAnswer(type: "noul", noul: p)])
+    }
+    static func keys(_ q: DecisionQuestion) -> [String] {
+        let data = try! JSONEncoder().encode(q)
+        let obj = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        return Array((obj["criteria"] as! [String: Any]).keys)
+    }
+}
+
+@Test func judgePicksBetweenMatchingControls() async throws {
+    let a = AXNode(ref: "e1", role: "AXButton", title: "Send", desc: nil, value: nil, frame: nil, children: [])
+    let b = AXNode(ref: "e2", role: "AXButton", title: "Send", desc: nil, value: nil, frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXWindow", title: "Mail", desc: nil, value: nil, frame: nil, children: [a, b])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "Mail", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    let plain = try await AXPolicy().decide(observation: obs, goal: "click Send", history: [])
+    #expect(plain.options?.count == 2)
+    let judged = try await JudgedPolicy(inner: AXPolicy(), judge: ChoosingJudge(pick: 2), capture: { nil })
+        .decide(observation: obs, goal: "click Send", history: [])
+    #expect(judged.action == .axPress(ref: "e2"))
+    #expect(judged.confidence <= plain.confidence)   // picking never raises confidence
+    #expect(judged.rationale.contains("picked 2/2"))
+}
+
+@Test func judgeChecksDoneOnlyAfterTouchingTheUI() async throws {
+    let obs = NullPerceiver().observation
+    let typed = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.95,
+                           rationale: "", modelReply: nil, action: .typeText("hello"),
+                           gate: "allow", outcome: "typed", verified: nil, escalation: nil)
+    let notDone = try await JudgedPolicy(inner: AXPolicy(), judge: ChoosingJudge(pick: 1, p: 0.05), capture: { nil })
+        .decide(observation: obs, goal: "type hello", history: [typed])
+    #expect(notDone.action == .done(summary: "goal completed"))
+    #expect(notDone.confidence == 0.05)              // → the Reasoner takes over
+    let opened = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.9,
+                            rationale: "", modelReply: nil, action: .openApp(name: "Notes"),
+                            gate: "allow", outcome: "opened Notes", verified: nil, escalation: nil)
+    let launch = try await JudgedPolicy(inner: AXPolicy(), judge: ChoosingJudge(pick: 1, p: 0.05), capture: { nil })
+        .decide(observation: obs, goal: "open Notes", history: [opened])
+    #expect(launch.confidence > 0.5)                 // a launch is exact: no check
+}
