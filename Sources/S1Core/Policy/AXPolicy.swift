@@ -120,8 +120,51 @@ public struct AXPolicy: Policy {
                 if ["find", "cari"].contains(verb), !arg.isEmpty {
                     return [Intent(verb: "key", arg: "cmd f"), Intent(verb: "type", arg: arg)]
                 }
-                return [Intent(verb: verb, arg: arg)]
+                return Self.expand(Intent(verb: verb, arg: arg))
             }
+    }
+
+    /// One spoken intent → the steps it really means:
+    /// - "pilih Large dari Size" / "select X from Y" → click Y, click X (open
+    ///   the dropdown, pick the item — the item exists once the menu is open);
+    /// - "select X" (not "select all") → click X;
+    /// - "press tab 3 times" / "tekan panah bawah 5 kali" → the step, N times;
+    /// - "press 1 2 3" → three key presses (a sequence, not a chord).
+    static func expand(_ intent: Intent) -> [Intent] {
+        var verb = intent.verb, arg = intent.arg
+        if ["select", "pilih", "choose"].contains(verb) {
+            for sep in [" from ", " dari ", " in ", " di "] {
+                if let r = arg.range(of: sep, options: .caseInsensitive) {
+                    let item = String(arg[..<r.lowerBound]), menu = String(arg[r.upperBound...])
+                    if !item.isEmpty, !menu.isEmpty {
+                        return [Intent(verb: "click", arg: menu), Intent(verb: "click", arg: item)]
+                    }
+                }
+            }
+            let all = ["all", "everything", "semua", "semuanya", "all text"]
+            if !arg.isEmpty, !all.contains(arg.lowercased()) { verb = "click" }
+        }
+        guard !typeVerbs.contains(verb) else { return [Intent(verb: verb, arg: arg)] }
+        var times = 1
+        let words = ["once": 1, "twice": 2, "thrice": 3, "sekali": 1, "dua kali": 2, "tiga kali": 3]
+        if let m = arg.firstMatch(of: /(?i)\s*(\d{1,2})\s*(?:times|time|kali|x)$/), let n = Int(m.1) {
+            times = n; arg = String(arg[..<m.range.lowerBound])
+        } else if let (w, n) = words.first(where: { arg.lowercased().hasSuffix(" " + $0.key) || arg.lowercased() == $0.key }) {
+            times = n; arg = String(arg.dropLast(w.count)).trimmingCharacters(in: .whitespaces)
+        }
+        times = min(max(times, 1), 50)
+        var steps = [Intent(verb: verb, arg: arg)]
+        if ["press", "tekan", "key", "keys"].contains(verb), let keys = keyNames(arg),
+           keys.count > 1, keys.allSatisfy({ !keyModifiers.contains($0) }) {
+            steps = keys.map { Intent(verb: "key", arg: $0) }
+        }
+        return Array(repeating: steps, count: times).flatMap { $0 }
+    }
+
+    /// Best-matching on-screen element for a spoken label.
+    static func best(_ needle: String, in tree: AXNode) -> AXNode? {
+        tree.flattened.map { ($0, matchScore(needle, $0)) }
+            .filter { $0.1 > 0 }.max { $0.1 < $1.1 }?.0
     }
 
     /// Every verb the grammar (and the model hints) understands — used to
@@ -193,6 +236,7 @@ public struct AXPolicy: Policy {
         "double", "dobel", "right",
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
         "ubah", "rename", "ganti", "remove", "buang", "replace", "change",
+        "choose", "hover", "arahkan",
     ]
 
     /// Drop a dangling conjunction at the end of a part ("buka notes lalu"
@@ -357,9 +401,11 @@ public struct AXPolicy: Policy {
                                 rationale: "'\(intent.verb)' needs an app name")
             }
             // Dictation ends sentences with a period: "Open Notepad." names "Notepad".
-            let app = intent.arg.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
-            return Decision(action: .openApp(name: app), confidence: 0.9,
-                            rationale: "open \(app)")
+            var app = intent.arg.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            // "open my editor" → the app memory says ("my editor is Zed").
+            var why = "open \(app)"
+            if let named = Memory.resolve(app) { why = "open \(app) → \(named) (memory)"; app = named }
+            return Decision(action: .openApp(name: app), confidence: 0.9, rationale: why)
         case _ where Self.typeVerbs.contains(intent.verb):
             // A bare "enter" after typing is the Return key, not text.
             if intent.arg.isEmpty, intent.verb == "enter" {
@@ -414,15 +460,44 @@ public struct AXPolicy: Policy {
                             rationale: "screenshot requested")
         case "scroll", "gulir", "geser":
             // Voice says directions, pixels come out (wheel1 = vertical).
-            let d: (Double, Double)
-            switch intent.arg.lowercased() {
-            case "up", "atas":              d = (0, -300)
-            case "left", "kiri":           d = (-300, 0)
-            case "right", "kanan":         d = (300, 0)
-            default:                       d = (0, 300)   // "down"/"bawah" + bare "scroll"
+            let a = intent.arg.lowercased()
+            if ["top", "paling atas", "awal", "ke atas sekali"].contains(where: a.contains) {
+                return Decision(action: .keyCombo(keys: ["cmd", "up"]), confidence: 0.9, rationale: "scroll to top")
             }
-            return Decision(action: .scroll(dx: d.0, dy: d.1), confidence: 0.9,
-                            rationale: "scroll \(intent.arg.isEmpty ? "down" : intent.arg)")
+            if ["bottom", "paling bawah", "akhir"].contains(where: a.contains) {
+                return Decision(action: .keyCombo(keys: ["cmd", "down"]), confidence: 0.9, rationale: "scroll to bottom")
+            }
+            var d: (Double, Double) = (0, 300)          // "down"/"bawah" + bare "scroll"
+            if a.contains("up") || a.contains("atas") { d = (0, -300) }
+            else if a.contains("left") || a.contains("kiri") { d = (-300, 0) }
+            else if a.contains("right") || a.contains("kanan") { d = (300, 0) }
+            let k = ["a lot", "banyak", "jauh", "far"].contains(where: a.contains) ? 3.0
+                : ["a little", "a bit", "sedikit", "dikit"].contains(where: a.contains) ? 0.35 : 1.0
+            return Decision(action: .scroll(dx: d.0 * k, dy: d.1 * k), confidence: 0.9,
+                            rationale: "scroll \(a.isEmpty ? "down" : a)")
+        case "drag", "seret":
+            // "drag report.pdf to Trash" / "seret X ke Y": element to element.
+            let parts = intent.arg.components(separatedBy: " to ").count == 2
+                ? intent.arg.components(separatedBy: " to ")
+                : intent.arg.components(separatedBy: " ke ")
+            guard parts.count == 2, let tree = observation.axTree,
+                  let from = Self.best(parts[0].trimmingCharacters(in: .whitespaces), in: tree)?.frame,
+                  let to = Self.best(parts[1].trimmingCharacters(in: .whitespaces), in: tree)?.frame else {
+                return Decision(action: nil, confidence: 0.2, rationale: "drag what to where? — needs S2")
+            }
+            return Decision(action: .drag(fromX: from.x + from.w / 2, fromY: from.y + from.h / 2,
+                                          toX: to.x + to.w / 2, toY: to.y + to.h / 2),
+                            confidence: 0.8, rationale: "drag \(parts[0]) → \(parts[1])")
+        case "hover", "arahkan":
+            var needle = intent.arg
+            for lead in ["over ", "on ", "ke ", "di "] where needle.lowercased().hasPrefix(lead) {
+                needle = String(needle.dropFirst(lead.count)); break
+            }
+            guard let tree = observation.axTree, let f = Self.best(needle, in: tree)?.frame else {
+                return Decision(action: nil, confidence: 0.2, rationale: "hover over what? — needs S2")
+            }
+            return Decision(action: .moveMouse(x: f.x + f.w / 2, y: f.y + f.h / 2), confidence: 0.85,
+                            rationale: "hover \(needle)")
         case "verify", "cek", "check", "pastikan":
             guard !intent.arg.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,

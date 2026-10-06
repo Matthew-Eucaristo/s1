@@ -2702,3 +2702,45 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(!CGEventActuator.opensWindow(["cmd", "s"]))
     #expect(!CGEventActuator.opensWindow(["ctrl", "cmd", "n"]))
 }
+
+@Test func fullKeyboardAndMouseByVoice() async throws {
+    let v = { (g: String) in AXPolicy.intents(of: g).map { "\($0.verb) \($0.arg)" } }
+    // Repeats and key sequences.
+    #expect(v("press tab 3 times") == ["press tab", "press tab", "press tab"])
+    #expect(v("tekan panah bawah 2 kali") == ["tekan panah bawah", "tekan panah bawah"])
+    #expect(v("press 1 2 3") == ["key 1", "key 2", "key 3"])
+    #expect(v("press cmd s") == ["press cmd s"])                 // a chord stays one step
+    #expect(v("type see you 2 times") == ["type see you 2 times"]) // text is literal
+    // Dropdowns: open the menu, then pick.
+    #expect(v("pilih Large dari Size") == ["click Size", "click Large"])
+    #expect(v("select PDF from Format") == ["click Format", "click PDF"])
+    #expect(v("select all") == ["select all"])
+    // Scroll amounts and ends; function keys.
+    let obs = NullPerceiver().observation
+    func act(_ g: String) async throws -> Action? { try await AXPolicy().decide(observation: obs, goal: g, history: []).action }
+    #expect(try await act("scroll to top") == .keyCombo(keys: ["cmd", "up"]))
+    #expect(try await act("scroll down a lot") == .scroll(dx: 0, dy: 900))
+    #expect(try await act("press f5") == .keyCombo(keys: ["f5"]))
+}
+
+@Test func dragAndHoverByLabel() async throws {
+    let file = AXNode(ref: "e1", role: "AXImage", title: "report.pdf", desc: nil, value: nil,
+                      frame: CGRectCodable(CGRect(x: 100, y: 100, width: 40, height: 40)), children: [])
+    let trash = AXNode(ref: "e2", role: "AXButton", title: "Trash", desc: nil, value: nil,
+                       frame: CGRectCodable(CGRect(x: 500, y: 700, width: 60, height: 60)), children: [])
+    let tree = AXNode(ref: "e0", role: "AXWindow", title: "Desk", desc: nil, value: nil, frame: nil, children: [file, trash])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "Finder", frontmostPID: 1, windows: [], axTree: tree, screenshotPath: nil)
+    let d = try await AXPolicy().decide(observation: obs, goal: "drag report.pdf to Trash", history: [])
+    #expect(d.action == .drag(fromX: 120, fromY: 120, toX: 530, toY: 730))
+    let h = try await AXPolicy().decide(observation: obs, goal: "hover over Trash", history: [])
+    #expect(h.action == .moveMouse(x: 530, y: 730))
+}
+
+@Test func memoryAnswersAndResolvesPersonalNames() {
+    let facts = ["my editor is Zed *(added 2026-10-01)*", "my favourite browser is Arc", "kopi favoritku adalah flat white"]
+    #expect(Memory.resolve("my editor", facts: facts) == "Zed")
+    #expect(Memory.resolve("editor", facts: facts) == nil)           // not personal → not memory
+    #expect(Memory.recall("What's my editor?", facts: facts) == "My editor: Zed.")
+    #expect(Memory.recall("apa kopi favoritku?", facts: facts)?.contains("flat white") == true)
+    #expect(Memory.recall("what's the weather?", facts: facts) == nil)
+}

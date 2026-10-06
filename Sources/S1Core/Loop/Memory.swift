@@ -46,6 +46,65 @@ public enum Memory {
         return out
     }
 
+    /// A remembered fact without its "*(added …)*" stamp, case kept.
+    static func plain(_ f: String) -> String {
+        f.replacing(stampRe, with: "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "my editor" → "Zed" when memory says "my editor is Zed" (also
+    /// "editorku adalah Zed"). Lets the grammar act on personal names without
+    /// asking a model.
+    public static func resolve(_ phrase: String, facts: [String]? = nil) -> String? {
+        var subject = phrase.lowercased().trimmingCharacters(in: .whitespaces)
+        var personal = false
+        for lead in ["my ", "the "] where subject.hasPrefix(lead) {
+            subject = String(subject.dropFirst(lead.count)); personal = personal || lead == "my "
+        }
+        for tail in ["ku", " saya", " aku"] where subject.hasSuffix(tail) && subject.count > tail.count + 2 {
+            subject = String(subject.dropLast(tail.count)); personal = true
+        }
+        guard personal, subject.count >= 2, enabled() else { return nil }
+        let pattern = "(?i)^(?:my\\s+)?" + NSRegularExpression.escapedPattern(for: subject)
+            + "(?:ku)?\\s+(?:is|are|adalah|itu|=)\\s+(.+?)[.!]?$"
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        for f in (facts ?? allFacts()).reversed() {
+            let t = plain(f)
+            if let m = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)),
+               let r = Range(m.range(at: 1), in: t) {
+                return String(t[r]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+
+    /// Answer "what's my editor?" / "apa editorku?" straight from memory —
+    /// only for personal questions, only when a fact matches. Nil = not a
+    /// memory question (the run goes on as usual).
+    public static func recall(_ goal: String, facts: [String]? = nil) -> String? {
+        let g = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "?.!"))
+        let patterns = [
+            /^(?i)(?:what|who|where|which)(?:'s| is| are| was)\s+(my\s+.+)$/,
+            /^(?i)(?:do you remember|remind me(?: of| about)?|what did i (?:say|tell you) about)\s+(.+)$/,
+            /^(?i)(?:apa|siapa|di ?mana)\s+(.+(?:ku|saya|aku))$/,
+        ]
+        guard enabled(),
+              let topic = patterns.lazy.compactMap({ g.firstMatch(of: $0).map { String($0.1) } }).first else { return nil }
+        if let v = resolve(topic.hasPrefix("my ") || topic.lowercased().hasSuffix("ku") ? topic : "my " + topic, facts: facts) {
+            return "\(topic.prefix(1).uppercased() + topic.dropFirst()): \(v)."
+        }
+        // Looser: the fact sharing the most meaningful words with the question.
+        let stop: Set<String> = ["my", "the", "a", "is", "are", "what", "ku", "saya", "aku", "apa", "itu", "about"]
+        let want = Set(topic.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init).filter { $0.count > 2 && !stop.contains($0) })
+        guard !want.isEmpty else { return nil }
+        let scored = (facts ?? allFacts()).map { f -> (String, Int) in
+            let words = Set(plain(f).lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
+            return (plain(f), want.intersection(words).count)
+        }.filter { $0.1 > 0 }.max { $0.1 < $1.1 }
+        return scored.map { "You told me: \($0.0)" }
+    }
+
     /// Dedupe key: stamp-free, case-folded — "Zed *(added …)*" == "zed".
     public static func normalizeFact(_ f: String) -> String {
         f.replacing(stampRe, with: "").lowercased()
@@ -286,6 +345,8 @@ public enum MetaCommand: Equatable, Sendable {
     case remember(String)
     case forget
     case saveSkill(String)
+    /// A personal question memory can answer ("what's my editor?").
+    case recall(String)
 
     public static func parse(_ goal: String) -> MetaCommand? {
         let g = goal.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -296,6 +357,7 @@ public enum MetaCommand: Equatable, Sendable {
             .ignoresCase().wholeMatch(in: g) {
             return .saveSkill(String(m.1).trimmingCharacters(in: CharacterSet(charactersIn: "\"'“” ")))
         }
+        if let answer = Memory.recall(g) { return .recall(answer) }
         if let m = try? /^(?:please\s+)?(?:remember|ingat(?:lah)?)\s+(?:that\s+|bahwa\s+)?(.+)$/
             .ignoresCase().wholeMatch(in: g) {
             return .remember(String(m.1))
@@ -304,7 +366,7 @@ public enum MetaCommand: Equatable, Sendable {
     }
 
     public var kind: String {
-        switch self { case .remember: "remember"; case .forget: "forget"; case .saveSkill: "saveSkill" }
+        switch self { case .remember: "remember"; case .forget: "forget"; case .saveSkill: "saveSkill"; case .recall: "recall" }
     }
 
     /// Runs the command; the reply is shown and spoken.
@@ -318,6 +380,8 @@ public enum MetaCommand: Equatable, Sendable {
                 if let topic { return "Got it — filed under " + topic + ": \(Memory.route(fact).fact)" }
                 return "Got it, I'll remember: \(fact)"
             } catch { return "Couldn't save memory: \(error.localizedDescription)" }
+        case .recall(let answer):
+            return answer
         case .forget:
             do { try Memory.clear(); return "Memory cleared." }
             catch { return "Couldn't clear memory: \(error.localizedDescription)" }

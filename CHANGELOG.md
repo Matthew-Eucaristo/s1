@@ -3,6 +3,21 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.16] - 2026-10-07
+
+### Added: System 1 is a full keyboard and mouse
+- **Repeats and sequences:** "press tab 3 times", "tekan panah bawah 5 kali",
+  "press 1 2 3" (three presses, not a chord). Function keys already worked.
+- **Scrolling** by amount ("a lot", "a little", "sedikit") and to the ends
+  ("scroll to top/bottom").
+- **Drag** one element onto another: "drag report.pdf to Trash", "seret X ke Y".
+- **Hover**: "hover over Share", "arahkan ke X".
+- **Dropdowns**: "pilih Large dari Size", "select PDF from Format" opens the
+  menu, then picks the item; "select X" clicks X.
+- **Memory in System 1**: "what's my editor?" / "apa kopi favoritku?" are
+  answered from memory without a model, and "open my editor" opens the app
+  memory names.
+
 ## [0.3.15] - 2026-10-07
 
 ### Fixed

@@ -39,9 +39,13 @@ Everything dangerous waits for you.
 - **Talk from anywhere.** <kbd>⇧</kbd><kbd>⇧</kbd> or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd>
   wakes the listener; talk over s1 to interrupt it. A Liquid Glass pill under
   the notch shows what it hears and what it's doing.
-- **Instant for the everyday.** The grammar understands English and Indonesian
-  (`open`, `type`, `press ⌘S`, `new tab`, `volume up`, `buka Notes lalu ketik halo`).
-  Zero model calls, zero latency.
+- **A full keyboard and mouse, by voice, instantly.** The built-in grammar
+  (English and Indonesian) opens apps, types, presses any key or chord
+  (`press f5`, `press tab 3 times`, `tekan 1 2 3`), clicks, double/right-clicks,
+  drags (`drag report.pdf to Trash`), hovers, scrolls (`scroll down a lot`,
+  `scroll to top`), picks from dropdowns (`pilih Large dari Size`), edits text
+  (`hapus kata ayam`), copies and pastes, and drives tabs, windows and media
+  keys. Zero model calls, zero latency; the Reasoner is only for thinking.
 - **One model per job, any provider.** Connect TypeSafe, OpenCode Go, OpenAI,
   OpenRouter, Groq, Gemini, xAI, DeepSeek, Liquid AI, Cloudflare, Ollama,
   LM Studio or any OpenAI-compatible server, then pick a Judge (System 1) and
@@ -219,6 +223,7 @@ to the Reasoner, which reads any language.
 | <kbd>⌥</kbd><kbd>Space</kbd> | Launcher: apps, files, snippets, calculator, unit and currency conversion, window layouts |
 | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd> | Dictate into any app |
 | *“remember that my editor is Zed”* | Memory in `~/.s1/memory.md`, never passwords or keys |
+| *“what's my editor?”* · *“open my editor”* | Answered and resolved from memory instantly, no model |
 | *“save that as a skill called morning setup”* | Replay a sequence by name, every step through the gate |
 | Siri & Shortcuts | “Ask s1 to …”, “Wake s1” |
 
