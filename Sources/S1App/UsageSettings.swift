@@ -107,7 +107,7 @@ struct UsageSettings: View {
                         }
                     }
                 }
-                .chartXScale(domain: Date().addingTimeInterval(-period.seconds)...Date())
+                .chartXScale(domain: Self.domain(period))
                 .overlay {
                     if metric == .cost, report.spentUSD == 0 {
                         Text(report.planCalls + report.freeCalls > 0
@@ -174,6 +174,14 @@ struct UsageSettings: View {
         report = await Task.detached {
             UsageReport.build(UsageLog.load(since: since), prices: Pricing.table(), bucket: bucket)
         }.value
+    }
+
+    /// Whole buckets, so the current day's (or hour's) bar isn't clipped.
+    static func domain(_ p: Period) -> ClosedRange<Date> {
+        let cal = Calendar.current, now = Date()
+        let start = cal.dateInterval(of: p.bucket, for: now.addingTimeInterval(-p.seconds))?.start ?? now
+        let end = cal.dateInterval(of: p.bucket, for: now)?.end ?? now
+        return start...end
     }
 
     // MARK: - formatting

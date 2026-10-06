@@ -3,6 +3,12 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.22] - 2026-10-07
+
+### Fixed
+- Usage chart: today's bar no longer spills past the right edge (the axis
+  covers whole days or hours).
+
 ## [0.3.21] - 2026-10-07
 
 ### Fixed
