@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Lifecycle events the serve daemon reports — UI and CLI both render these.
@@ -10,6 +11,8 @@ public struct ServeEvent: Sendable {
         case interrupted
         /// Esc pressed (by the user): whatever s1 is doing should stop.
         case escape
+        /// Hands-free dictation switched on ("on") or off ("").
+        case dictating
     }
     public var kind: Kind
     public var text: String
@@ -69,6 +72,8 @@ public final class Serve: @unchecked Sendable {
         /// sustained voice burst aborts it and the listener reopens for
         /// the next command. Off = only the hotkey/kill switch stops work.
         public var voiceInterrupt: Bool
+        /// Types one dictated chunk into the focused field.
+        public var dictate: @Sendable (String) async throws -> Void
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -86,7 +91,12 @@ public final class Serve: @unchecked Sendable {
                         S1Runner.anotherRunActive() },
                     languages: [Locale] = [],
                     voice: String? = nil,
-                    voiceInterrupt: Bool = true) {
+                    voiceInterrupt: Bool = true,
+                    dictate: @escaping @Sendable (String) async throws -> Void = { text in
+                        _ = try await CGEventActuator().perform(
+                            .typeText(text),
+                            frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
+                    }) {
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -102,6 +112,7 @@ public final class Serve: @unchecked Sendable {
             self.languages = languages
             self.voice = voice
             self.voiceInterrupt = voiceInterrupt
+            self.dictate = dictate
         }
     }
 
@@ -125,6 +136,10 @@ public final class Serve: @unchecked Sendable {
     /// utterance is joined onto it instead of becoming a fresh command.
     private var pendingPrefix: (text: String, at: Date)?
     static let continuationWindow: TimeInterval = 3
+    /// Hands-free dictation: utterances are typed, not run.
+    private let dictating = Locked(false)
+    /// Pauses to think are normal while dictating — allow ~2 min of silence.
+    static let dictationSilentTurns = 10
     private let sayLanguage: String
     /// ~/.s1/serve-state.json — external observability for `s1 status`.
     /// Best-effort: a daemon should never fail because telemetry can't write.
@@ -179,11 +194,12 @@ public final class Serve: @unchecked Sendable {
         sleep()
     }
 
-    /// Esc stops a run or a spoken reply (like ⇧⇧ would). While only
-    /// listening it does nothing — Esc in other apps stays theirs.
+    /// Esc stops a run or a spoken reply (like ⇧⇧ would), or ends dictation.
+    /// While only listening it does nothing — Esc in other apps stays theirs.
     private func escapePressed() {
         emit(.escape)
-        if state == .running { sleep("escape") }
+        if dictating.withLock({ d in defer { d = false }; return d }) { emit(.dictating, "") }
+        else if state == .running { sleep("escape") }
     }
 
     /// Hotkey/menu action: idle → start listening; listening/running → stop.
@@ -241,6 +257,7 @@ public final class Serve: @unchecked Sendable {
         S1Runner.releaseMic()
         // And cut any speech in flight — "sleep" should mean silent.
         speaker.stop()
+        if dictating.withLock({ d in defer { d = false }; return d }) { emit(.dictating, "") }
         if state != .idle {
             setState(.idle)
             emit(.sleeping, reason)
@@ -249,6 +266,9 @@ public final class Serve: @unchecked Sendable {
 
     /// One full listen→run→listen cycle. Silence and STT errors count toward
     /// auto-sleep; a stop phrase ends the session; anything else becomes a goal.
+    /// Chunks typed this dictation session (the first gets no leading space).
+    private var typedChunks = 0
+
     private func listenLoop() async {
         var silentTurns = 0
         var errors = 0        // STT/transcribe failures
@@ -271,6 +291,14 @@ public final class Serve: @unchecked Sendable {
                     return
                 }
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let cmd = Dictation.command(trimmed) {
+                    emit(.heard, trimmed)
+                    dictating.value = cmd == .start
+                    typedChunks = 0
+                    pendingPrefix = nil
+                    emit(.dictating, cmd == .start ? "on" : "")
+                    continue
+                }
                 if Self.isStop(trimmed, phrases: config.stopPhrases) {
                     emit(.heard, trimmed)
                     emit(.stopped, "stop phrase")
@@ -279,13 +307,24 @@ public final class Serve: @unchecked Sendable {
                 }
                 if trimmed.isEmpty {
                     silentTurns += 1
-                    if silentTurns >= config.maxSilentTurns {
+                    let limit = dictating.value ? Self.dictationSilentTurns : config.maxSilentTurns
+                    if silentTurns >= limit {
                         sleep("silence")
                         return
                     }
                     continue
                 }
                 silentTurns = 0
+                if dictating.value {
+                    emit(.heard, trimmed)
+                    do {
+                        try await config.dictate(Dictation.chunk(trimmed, first: typedChunks == 0))
+                        typedChunks += 1
+                    } catch {
+                        emit(.error, error.localizedDescription)
+                    }
+                    continue
+                }
                 var goal = trimmed
                 if let p = pendingPrefix, Date().timeIntervalSince(p.at) < 15 {
                     goal = Self.join(p.text, trimmed)

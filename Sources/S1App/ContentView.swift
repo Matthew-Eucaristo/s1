@@ -133,7 +133,8 @@ struct ContentView: View {
     private var subtitle: String {
         if !model.companionAvailable { return String(localized: "Companion off — a terminal listener is active") }
         switch model.serveState {
-        case .listening: return String(localized: "Listening…")
+        case .listening: return model.dictatingHandsFree
+            ? String(localized: "Dictating — say “stop dictating” to finish") : String(localized: "Listening…")
         case .running: return String(localized: "Working…")
         case .idle: return model.running ? String(localized: "Working…") : String(localized: "Press ⇧⇧ anywhere to talk")
         }

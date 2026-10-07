@@ -372,9 +372,10 @@ public struct LLMReasoner: Reasoner {
         complete answer for the user in plain sentences, in the Goal's language. \
         The AX tree and window list ARE your view of the screen.
 
-        Typing: "chat / write / reply / enter / input X" all mean type X. Put it \
-        in the [editable] field (axSetValue on its ref, or click it then \
-        typeText). Once a click focused a field, the NEXT step is typeText — \
+        Typing: "chat / write / reply / enter / input X" all mean type X; so do \
+        "X, please type it (here)" and "type this: X" — the words around the \
+        request ARE the text, for the focused field. Put it in the [editable] \
+        field (axSetValue on its ref, or click it then typeText). Once a click focused a field, the NEXT step is typeText — \
         never click the same field again. To send a chat message, keyCombo \
         "return" after typing. Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, \
         select all cmd+a, undo cmd+z.

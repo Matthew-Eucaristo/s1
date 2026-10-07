@@ -1068,9 +1068,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     // seen, "s1" is always present, and the 100-phrase Apple cap holds.
     let apps = { (1...200).map { "App\($0)" } }
     let v = Vocabulary.assemble(custom: ["Warp", " warp ", "Linear"], appNames: apps)
-    #expect(v.first == "s1")
-    #expect(v[1] == "Warp")
-    #expect(v[2] == "Linear")
+    #expect(Array(v.prefix(Vocabulary.fixed.count)) == Vocabulary.fixed)
+    #expect(v[Vocabulary.fixed.count] == "Warp")
+    #expect(v[Vocabulary.fixed.count + 1] == "Linear")
     #expect(v.count == Vocabulary.appleLimit)
     let lowered = v.map { $0.lowercased() }
     #expect(Set(lowered).count == lowered.count)
@@ -1083,7 +1083,7 @@ func serveRunUsesConfiguredPolicy() async throws {
     let apps = { ["Finder", "TextEdit"] }
     let v = Vocabulary.assemble(custom: ["Warp"], learned: { [] }, appNames: apps)
     #expect(v.first == "s1")
-    #expect(v[1] == "Warp")
+    #expect(v[Vocabulary.fixed.count] == "Warp")
     #expect(v.contains("buka"))
     #expect(v.contains("ketik"))
     #expect(!v.contains("open"))                     // common English: no slot spent
@@ -2926,7 +2926,7 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(InstalledApps.shortForm("QuickTime Player") == nil)
     #expect(InstalledApps.shortForm("Safari") == nil)
     let v = Vocabulary.assemble(custom: [], learned: { [] }, appNames: { ["Google Chrome", "Chrome"] })
-    #expect(Array(v.prefix(3)) == ["s1", "Google Chrome", "Chrome"])     // apps before command words
+    #expect(Array(v.prefix(Vocabulary.fixed.count + 2)) == Vocabulary.fixed + ["Google Chrome", "Chrome"])     // apps before command words
 }
 
 @Test func keyboardLayoutTypesCommonCharactersAsRealKeys() {
@@ -2952,4 +2952,60 @@ private struct ChoosingJudge: DecisionJudge {
     obs.frontmostApp = "Finder"
     let f = try await AXPolicy().decide(observation: obs, goal: "search for invoices", history: [])
     #expect(f.action == nil)                 // not a browser: the Reasoner decides
+}
+
+@Test func dictationCommands() {
+    #expect(Dictation.command("Start dictating.") == .start)
+    #expect(Dictation.command("okay, start dictation please") == .start)
+    #expect(Dictation.command("Mulai dikte") == .start)
+    #expect(Dictation.command("ketik apa yang aku bilang") == .start)
+    #expect(Dictation.command("Stop dictating.") == .stop)
+    #expect(Dictation.command("selesai dikte") == .stop)
+    #expect(Dictation.command("start dictating my essay about cats") == nil)
+    #expect(Dictation.command("type hello") == nil)
+    #expect(Dictation.chunk(" Hello there. ", first: true) == "Hello there.")
+    #expect(Dictation.chunk("And more.", first: false) == " And more.")
+}
+
+@Test func typeItAfterTheText() {
+    #expect(AXPolicy.typeItRewrite("Okay, nice, all good, please type it into my chat box.")
+            == "type Okay, nice, all good")
+    #expect(AXPolicy.typeItRewrite("halo semuanya, tolong ketik itu di sini") == "type halo semuanya")
+    #expect(AXPolicy.typeItRewrite("open Notes and type it") == nil)
+    #expect(AXPolicy.typeItRewrite("type hello") == nil)
+    #expect(AXPolicy.intents(of: "Okay, nice, all good, please type it here.").first?.verb == "type")
+    #expect(AXPolicy.stripFillers("Uh, open Notes") == "open Notes")
+    #expect(AXPolicy.stripFillers("um uh buka notes") == "buka notes")
+}
+
+@Test func serveDictationTypesUtterances() async throws {
+    // "start dictating" turns utterances into typing (no agent run) until
+    // "stop dictating"; chunks after the first get a separating space.
+    let feed = Locked<[String]>(["Start dictating.", "Hello there.", "How are you?",
+                                 "Stop dictating.", "stop"])
+    let typed = Locked<[String]>([])
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let events = Locked<[ServeEvent]>([])
+    let serve = Serve(
+        config: .init(
+            speak: false,
+            artifacts: dir.path,
+            killSwitch: dir.appendingPathComponent("ks").path,
+            transcribe: { _ in
+                var out = "stop"
+                feed.mutate { f in out = f.isEmpty ? "stop" : f.removeFirst() }
+                return out
+            },
+            dictate: { text in typed.mutate { $0.append(text) } }),
+        locale: Locale(identifier: "en-US"),
+        hotkeyPatterns: nil
+    ) { ev in events.mutate { $0.append(ev) } }
+    serve.wake()
+    for _ in 0 ..< 200 where serve.state != .idle {
+        try await Task.sleep(nanoseconds: 20_000_000)
+    }
+    #expect(typed.get() == ["Hello there.", " How are you?"])
+    let kinds = events.get().map(\.kind)
+    #expect(!kinds.contains(.runStart))
+    #expect(events.get().filter { $0.kind == .dictating }.map(\.text) == ["on", ""])
 }

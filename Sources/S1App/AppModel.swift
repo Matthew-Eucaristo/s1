@@ -68,6 +68,8 @@ final class AppModel {
     /// A reply is being spoken: the pill keeps it on screen until the voice
     /// ends or you talk over it, then turns into the listening pill.
     private(set) var speaking = false { didSet { syncHUD() } }
+    /// Hands-free dictation ("start dictating"): speech is typed, not run.
+    private(set) var dictatingHandsFree = false { didSet { syncHUD() } }
     /// False when a CLI `s1 serve` owns the listener slot.
     private(set) var companionAvailable = true
     var launchAtLogin = false
@@ -406,6 +408,9 @@ final class AppModel {
         case .partial: transcript = ev.text
         case .heard: transcript = ev.text
         case .speaking: speaking = true
+        case .dictating:
+            dictatingHandsFree = !ev.text.isEmpty
+            transcript = ""
         case .escape:
             // A typed command or its spoken reply stops on Esc too.
             if running || speaking { stop() }
@@ -428,6 +433,7 @@ final class AppModel {
             finishCurrent(status: status, answer: summary?.summary, why: nil, runDir: ev.dir)
         case .sleeping, .stopped, .idle:
             speaking = false
+            dictatingHandsFree = false
             serveState = .idle
             transcript = ""
         case .error:
@@ -835,6 +841,10 @@ final class AppModel {
     /// Priority: listening > running > a brief outcome flash > hidden.
     private func syncHUD() {
         guard notchHUD, !booting, !DemoContent.enabled else { return }
+        if dictatingHandsFree {
+            hud.show(.dictating(transcript))
+            return
+        }
         if serveState == .listening || listening {
             hud.show(.listening(transcript))
             return

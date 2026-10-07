@@ -13,6 +13,8 @@ import S1Core
 final class NotchHUDController {
     enum Content: Equatable {
         case listening(String)
+        /// Hands-free dictation: what's heard is typed where the caret is.
+        case dictating(String)
         case working(String)
         case finished(Turn.State, String)
     }
@@ -104,7 +106,7 @@ struct NotchHUDView: View {
                 }
             }
             .frame(maxWidth: 300, alignment: .leading)
-            if case .listening = content {
+            if isListening {
                 LiveWaveform(barCount: 14, barWidth: 2.5, gap: 2)
                     .frame(width: 52, height: 18)
                     .accessibilityHidden(true)
@@ -133,7 +135,9 @@ struct NotchHUDView: View {
         .accessibilityLabel("s1, \(title)\(detail.isEmpty ? "" : ", \(detail)")")
     }
 
-    private var isListening: Bool { if case .listening = content { return true }; return false }
+    private var isListening: Bool {
+        switch content { case .listening, .dictating: true; default: false }
+    }
     private var isFinished: Bool { if case .finished = content { return true }; return false }
 
     @ViewBuilder
@@ -144,6 +148,11 @@ struct NotchHUDView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.tint)
                 .symbolEffect(.variableColor.iterative, isActive: true)
+        case .dictating:
+            Image(systemName: "character.cursor.ibeam")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse, isActive: true)
         case .working:
             ProgressView().controlSize(.small)
         case .finished(let state, _):
@@ -157,6 +166,7 @@ struct NotchHUDView: View {
     private var title: String {
         switch content {
         case .listening: String(localized: "Listening")
+        case .dictating: String(localized: "Dictating")
         case .working: String(localized: "Working")
         case .finished(let state, _): state.labelText
         }
@@ -164,7 +174,7 @@ struct NotchHUDView: View {
 
     private var detail: String {
         switch content {
-        case .listening(let t): t
+        case .listening(let t), .dictating(let t): t
         case .working(let t): t
         case .finished(_, let r): r
         }

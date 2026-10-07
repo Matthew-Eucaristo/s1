@@ -13,6 +13,9 @@ public enum Vocabulary {
     /// and a perfectly heard sentence fails to parse.
     /// Indonesian only: English command words ("open", "type") are common
     /// enough that a hint slot is better spent on an app name.
+    /// Always first: the name and the hands-free dictation switches.
+    static let fixed = ["s1", "start dictating", "stop dictating", "dikte"]
+
     static let grammarWords = [
         "buka", "ketik", "klik", "tulis", "tunggu", "gulir", "geser",
         "tangkap", "tangkapan", "cek", "pastikan", "selesai", "tekan", "isi",
@@ -45,7 +48,7 @@ public enum Vocabulary {
         var out: [String] = []
         // App names before grammar words: with 100 slots, "Chrome" being
         // heard right matters more than biasing "buka".
-        for w in ["s1"] + custom + learned() + appNames() + grammarWords {
+        for w in fixed + custom + learned() + appNames() + grammarWords {
             let t = w.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty else { continue }
             guard seen.insert(t.lowercased()).inserted else { continue }

@@ -36,6 +36,10 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Provider logos: `Sources/S1App/ProviderLogo.swift` (generated, embedded SVG/PNG templates); the site
   uses the same marks in `s1-landingpage/public/logos`.
 
+- Hands-free dictation lives in `Serve` (`Dictation.command` toggles it): while on, utterances go to
+  `Config.dictate` (typeText through `CGEventActuator`, so act-time secure-field/terminal checks
+  apply), never to a run. ⌃⌥D hold-to-dictate is separate (`AppModel.dictate`, paste).
+
 ## Vocabulary (keep it identical in app, CLI, README, site, llms*.txt)
 - **Judge = System 1** (fast decision model), **Reasoner = System 2** (LLM). The built-in grammar is
   "the built-in grammar", never its own "System". Step tags: S1 = fast path, S2 = Reasoner.

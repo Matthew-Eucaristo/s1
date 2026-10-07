@@ -229,6 +229,10 @@ to the Reasoner, which reads any language.
   text in place (last whole-word match; Undo works).
 - **Dictate anywhere:** hold <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd>, speak, release;
   the text lands where you were typing.
+- **Hands-free dictation:** say *“start dictating”* (*“mulai dikte”*) and everything
+  you say is typed where the caret is, no keys, until *“stop dictating”*, “stop”,
+  <kbd>⇧</kbd><kbd>⇧</kbd> or <kbd>Esc</kbd>. Password fields are never typed into.
+  One-off: *“nice, all good, please type it here”* types “nice, all good”.
 
 ## Everything else
 
@@ -236,7 +240,7 @@ to the Reasoner, which reads any language.
 |---|---|
 | <kbd>⇧</kbd><kbd>⇧</kbd> · <kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd> | Talk to s1 from anywhere |
 | <kbd>⌥</kbd><kbd>Space</kbd> | Launcher: apps, files, snippets, calculator, unit and currency conversion, window layouts |
-| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd> | Dictate into any app |
+| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd> · *“start dictating”* | Dictate into any app (hold the key, or hands-free by voice) |
 | *“remember that my editor is Zed”* | Memory in `~/.s1/memory.md`, never passwords or keys |
 | *“what's my editor?”* · *“open my editor”* | Answered and resolved from memory instantly, no model |
 | *“save that as a skill called morning setup”* | Replay a sequence by name, every step through the gate |

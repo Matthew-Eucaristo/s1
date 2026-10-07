@@ -399,3 +399,5 @@
 "Close the notification" = "Tutup notifikasi";
 "Quit the front app" = "Keluar dari app depan";
 "Quit %@" = "Keluar dari %@";
+"Dictating" = "Mendikte";
+"Dictating — say “stop dictating” to finish" = "Mendikte — ucapkan “selesai dikte” untuk berhenti";

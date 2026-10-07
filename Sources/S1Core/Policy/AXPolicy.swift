@@ -54,6 +54,7 @@ public struct AXPolicy: Policy {
     /// Also splits on conjunctions — voice transcriptions rarely use commas:
     /// "buka TextEdit lalu ketik halo" → [buka TextEdit, ketik halo].
     static func intents(of goal: String) -> [Intent] {
+        let goal = typeItRewrite(goal) ?? goal
         // Dictation arrives as sentences: "Please type hi. Please open Notes."
         // A sentence that starts (after filler) with a verb is a new command;
         // any other sentence continues the previous one's text.
@@ -211,6 +212,7 @@ public struct AXPolicy: Policy {
         let original = s.trimmingCharacters(in: .whitespacesAndNewlines)
         var g = original
         let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "hello", "hi", "hey", "halo", "hai",
+                       "uh", "uhm", "um", "umm", "erm", "eh", "ehm", "hmm", "mm", "ah", "oh", "anu",
                        "okay", "ok", "tolong", "please", "coba", "bisa", "boleh", "mohon",
                        "can you", "could you", "would you", "ayo", "c'mon", "yuk"]
         var stripped = true
@@ -232,6 +234,20 @@ public struct AXPolicy: Policy {
         // Only filler ("hello", "please"): keep it — chit-chat for the
         // Reasoner, not an empty command that finishes instantly as "done".
         return g.trimmingCharacters(in: .whitespaces).isEmpty ? original : g
+    }
+
+    /// "Okay, all good, please type it into my chat box" → "type Okay, all
+    /// good": the words before "type it" ARE the text (kept verbatim —
+    /// "okay" is part of what the user said, not filler here).
+    static func typeItRewrite(_ goal: String) -> String? {
+        let pattern = #"^(.+?)[\s,.;:!?-]+(?:(?:and|then|now|terus|lalu)\s+)?(?:(?:please|pls|tolong|can you|could you)\s+)?(?:type|write|ketik|tulis|input|enter)\s+(?:it|that|this|them|itu|ini|aja)(?:\s+(?:in|into|on|to|here|there|di|ke|disini|di sini)\b.*)?[\s.!?]*$"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let m = re.firstMatch(in: goal, range: NSRange(goal.startIndex..., in: goal)),
+              let r = Range(m.range(at: 1), in: goal) else { return nil }
+        let text = goal[r].trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:-")))
+        // "open Notes and type it" has no text before it — not a dictation.
+        guard !text.isEmpty, !startsWithVerb(stripFillers(text)) else { return nil }
+        return "type " + text
     }
 
     static func startsWithVerb(_ s: String) -> Bool {

@@ -3,6 +3,21 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.29] - 2026-10-07
+
+### Added
+- **Hands-free dictation.** Say “start dictating” (“mulai dikte”, “type what I
+  say”) and every utterance is typed into the focused field, with no Reasoner
+  and no key to hold, until “stop dictating”, “stop”, ⇧⇧ or Esc. The notch pill
+  reads “Dictating”; about two minutes of silence ends it. Password fields are
+  refused and text typed into a terminal is still scanned.
+- **“…, please type it here”:** text said *before* the type request is typed
+  (“Okay, nice, all good, please type it into my chat box”).
+
+### Fixed
+- Hesitations (“uh”, “um”, “eh”, “hmm”) at the start no longer send a simple
+  command to the Reasoner.
+
 ## [0.3.28] - 2026-10-07
 
 ### Fixed
