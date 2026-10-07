@@ -3,7 +3,6 @@ import SwiftUI
 import S1Core
 
 /// The standard Settings window (⌘,), grouped by what each pane changes.
-@available(macOS 26, *)
 struct SettingsView: View {
     @Bindable var model: AppModel
 
@@ -25,7 +24,6 @@ struct SettingsView: View {
 
 // MARK: - General
 
-@available(macOS 26, *)
 private struct GeneralSettings: View {
     @Bindable var model: AppModel
     @State private var confirmClear = false
@@ -119,7 +117,6 @@ private struct GeneralSettings: View {
 
 // MARK: - Voice
 
-@available(macOS 26, *)
 private struct VoiceSettings: View {
     @Bindable var model: AppModel
     @State private var newWord = ""
@@ -243,7 +240,6 @@ private struct VoiceSettings: View {
 
 // MARK: - Permissions
 
-@available(macOS 26, *)
 private struct PermissionSettings: View {
     @Bindable var model: AppModel
 
@@ -281,7 +277,6 @@ private struct PermissionSettings: View {
     }
 }
 
-@available(macOS 26, *)
 struct PermissionRow: View {
     let title: LocalizedStringKey
     let detail: LocalizedStringKey
@@ -311,7 +306,6 @@ struct PermissionRow: View {
 
 // MARK: - Advanced
 
-@available(macOS 26, *)
 private struct AdvancedSettings: View {
     @Bindable var model: AppModel
     @State private var doctor: [Doctor.Item]?
@@ -426,7 +420,6 @@ private struct AdvancedSettings: View {
 
 /// Snippet editor over ~/.s1/snippets.json — type the keyword in the ⌥Space
 /// launcher and Return pastes the expansion where you were typing.
-@available(macOS 26, *)
 private struct SnippetSettings: View {
     @State private var items: [Snippet] = Snippets.load()
     @State private var selection: Int?
@@ -502,7 +495,6 @@ private struct SnippetSettings: View {
 
 // MARK: - About
 
-@available(macOS 26, *)
 enum AboutPanel {
     private static let credits: [(String, String, String)] = [
         ("Cua Driver", "MIT", "Background executor, used when installed"),

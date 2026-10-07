@@ -1,3 +1,4 @@
+import Synchronization
 import Foundation
 
 /// Installs Cua Driver using CUA's own recommended installer —
@@ -146,31 +147,30 @@ public enum CuaInstaller {
 
 /// Partial-line buffer for streamed process output — fragments arrive
 /// mid-line, so complete lines go to `output` only at each \n.
-final class LockedBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending = ""
-    private var last: String?
+final class LockedBuffer: Sendable {
+    private let state = Mutex<(pending: String, last: String?)>(("", nil))
 
     /// Feed a chunk; returns the complete lines it closed.
     func append(_ s: String) -> [String] {
-        lock.lock(); defer { lock.unlock() }
-        pending += s
-        var lines = pending.split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-        pending = pending.hasSuffix("\n") || lines.isEmpty ? "" : lines.removeLast()
-        let done = lines.filter { !$0.isEmpty }
-        if let l = done.last { last = l }
-        return done
+        state.withLock { st in
+            st.pending += s
+            var lines = st.pending.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            st.pending = st.pending.hasSuffix("\n") || lines.isEmpty ? "" : lines.removeLast()
+            let done = lines.filter { !$0.isEmpty }
+            if let l = done.last { st.last = l }
+            return done
+        }
     }
 
     /// Whatever's left when the process exits (no trailing newline).
     func flush() -> [String] {
-        lock.lock(); defer { lock.unlock() }
-        let r = pending.isEmpty ? [] : [pending]
-        if let l = r.last { last = l }
-        pending = ""
-        return r
+        state.withLock { st in
+            let r = st.pending.isEmpty ? [] : [st.pending]
+            if let l = r.last { st.last = l }
+            st.pending = ""
+            return r
+        }
     }
 
-    var lastLine: String? { lock.lock(); defer { lock.unlock() }; return last }
+    var lastLine: String? { state.withLock { $0.last } }
 }

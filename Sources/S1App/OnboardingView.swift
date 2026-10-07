@@ -5,7 +5,6 @@ import S1Core
 /// the app menu ("Set Up s1…"). Only what s1 genuinely needs, every step
 /// skippable, the recommended choice always the default button.
 /// `s1 setup` is the same flow in Terminal.
-@available(macOS 26, *)
 struct OnboardingView: View {
     @Bindable var model: AppModel
     @Environment(\.dismissWindow) private var dismissWindow
@@ -268,7 +267,6 @@ struct OnboardingView: View {
 }
 
 /// One recommended provider as an inline card: paste the key, done.
-@available(macOS 26, *)
 private struct QuickConnect: View {
     let model: AppModel
     let id: String

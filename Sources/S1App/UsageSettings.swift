@@ -5,7 +5,6 @@ import SwiftUI
 /// Settings → Usage: what the models did and what it cost. Numbers only,
 /// from ~/.s1/usage.jsonl; prices are what the provider billed, else the
 /// public list price, else plan / free / unknown — and always labelled so.
-@available(macOS 26, *)
 struct UsageSettings: View {
     enum Period: String, CaseIterable, Identifiable {
         case day, week, month
@@ -203,7 +202,6 @@ struct UsageSettings: View {
     static func compact(_ n: Int) -> String { n.formatted(.number.notation(.compactName)) }
 }
 
-@available(macOS 26, *)
 private struct Tile: View {
     let title: LocalizedStringKey
     let value: String
@@ -222,7 +220,6 @@ private struct Tile: View {
     }
 }
 
-@available(macOS 26, *)
 private struct ModelUsageRow: View {
     let row: UsageReport.Row
 
@@ -265,7 +262,6 @@ private struct ModelUsageRow: View {
     }
 }
 
-@available(macOS 26, *)
 private struct BillingBadge: View {
     let billing: Billing
 

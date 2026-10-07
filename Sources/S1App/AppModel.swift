@@ -35,7 +35,6 @@ struct Turn: Identifiable {
 /// Observable bridge between the SwiftUI shell and the S1Core agent loop —
 /// the one model behind the window, the menu-bar companion and App
 /// Intents, so a Siri invocation drives the same agent the user sees.
-@available(macOS 26, *)
 @MainActor
 @Observable
 final class AppModel {

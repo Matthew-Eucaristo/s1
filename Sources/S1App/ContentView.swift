@@ -5,7 +5,6 @@ import S1Core
 /// past run) in the detail. Glass is reserved for the navigation layer —
 /// toolbar, sidebar, composer, banners; content uses plain fills so a long
 /// run never stacks dozens of material layers.
-@available(macOS 26, *)
 struct ContentView: View {
     enum Item: Hashable {
         case conversation
@@ -177,7 +176,6 @@ struct AnyPrimitiveButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
 
-@available(macOS 26, *)
 private struct HistoryRow: View {
     let run: RunSummary
 
@@ -202,7 +200,6 @@ private struct HistoryRow: View {
 
 // MARK: - conversation
 
-@available(macOS 26, *)
 struct ConversationView: View {
     @Bindable var model: AppModel
     @FocusState private var composerFocused: Bool
@@ -241,7 +238,6 @@ struct ConversationView: View {
     }
 }
 
-@available(macOS 26, *)
 private struct TurnView: View {
     let turn: Turn
     let model: AppModel
@@ -288,7 +284,6 @@ private struct TurnView: View {
 
 /// The agent's work for one turn — open while it runs, folded to one line
 /// when it's done (click to see every step again).
-@available(macOS 26, *)
 private struct ActivityCard: View {
     let turn: Turn
     let model: AppModel
@@ -362,7 +357,6 @@ private struct ActivityCard: View {
 
 // MARK: - composer
 
-@available(macOS 26, *)
 private struct Composer: View {
     @Bindable var model: AppModel
     var focused: FocusState<Bool>.Binding
@@ -467,7 +461,6 @@ private struct Composer: View {
 
 // MARK: - empty state + banners
 
-@available(macOS 26, *)
 private struct EmptyConversation: View {
     @Bindable var model: AppModel
     var focusComposer: () -> Void
@@ -526,7 +519,6 @@ private struct EmptyConversation: View {
     }
 }
 
-@available(macOS 26, *)
 private struct AccessibilityBanner: View {
     let model: AppModel
 

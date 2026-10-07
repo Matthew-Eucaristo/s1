@@ -89,7 +89,7 @@ public enum ModelPull {
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
-        let latest = LockedLine()
+        let latest = Locked<String?>(nil)
         pipe.fileHandleForReading.readabilityHandler = { h in
             let chunk = String(decoding: h.availableData, as: UTF8.self)
             for frag in chunk.split(whereSeparator: { $0 == "\r" || $0 == "\n" }) {
@@ -98,7 +98,7 @@ public enum ModelPull {
                 let line = Self.stripANSI(frag)
                     .trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty else { continue }
-                latest.set(line)
+                latest.value = line
                 progress(line)
             }
         }
@@ -110,16 +110,8 @@ public enum ModelPull {
         guard proc.terminationStatus == 0 else {
             throw S1Error.actionFailed(
                 "ollama pull \(model) failed (exit \(proc.terminationStatus))" +
-                (latest.get().map { " — \($0)" } ?? ""))
+                (latest.value.map { " — \($0)" } ?? ""))
         }
     }
 }
 
-/// Last-writer-wins string box for the pull's streaming progress —
-/// the pipe handler runs on its own queue while the caller awaits exit.
-private final class LockedLine: @unchecked Sendable {
-    private let lock = NSLock()
-    private var line: String?
-    func set(_ s: String) { lock.lock(); line = s; lock.unlock() }
-    func get() -> String? { lock.lock(); defer { lock.unlock() }; return line }
-}

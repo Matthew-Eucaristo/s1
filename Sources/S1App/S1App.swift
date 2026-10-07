@@ -3,7 +3,6 @@ import S1Core
 
 /// The s1 macOS app — one window, a menu-bar companion, Settings, and a
 /// first-run setup, all over the same `AppModel`.
-@available(macOS 26, *)
 @main
 struct S1App: App {
     @State private var model = AppModel.shared
@@ -40,7 +39,6 @@ struct S1App: App {
     }
 }
 
-@available(macOS 26, *)
 private struct S1Commands: Commands {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
@@ -89,7 +87,6 @@ private struct S1Commands: Commands {
 
 /// Menu-bar glyph: the s1 mark at rest, live bars while listening, a
 /// spinner-free "working" symbol while a run is in flight.
-@available(macOS 26, *)
 private struct MenuBarLabel: View {
     let state: Serve.State
     let running: Bool
@@ -112,7 +109,6 @@ private struct MenuBarLabel: View {
     }
 }
 
-@available(macOS 26, *)
 private struct MenuBarPanel: View {
     @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow

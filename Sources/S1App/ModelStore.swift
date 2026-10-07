@@ -6,7 +6,6 @@ import SwiftUI
 /// `Models` in S1Core, which the CLI and the agent read from the same
 /// `~/.s1/config.json`. Every edit writes through immediately; `onChange`
 /// lets the agent re-arm with the new models.
-@available(macOS 26, *)
 @MainActor
 @Observable
 final class ModelStore {
@@ -245,7 +244,6 @@ final class ModelStore {
 
 // MARK: - presentation
 
-@available(macOS 26, *)
 extension ModelRole {
     var title: LocalizedStringKey {
         switch self {

@@ -1,3 +1,4 @@
+import Synchronization
 import Foundation
 
 /// "100 usd to idr", "5 km in mi", "70f to c", "2 gb mb" — units via
@@ -83,27 +84,24 @@ public enum Convert {
     }
 
     /// mtime-checked cache — the launcher calls this per keystroke, so the
-    /// file is only re-read when it actually changed on disk. Guarded by
-    /// extLock (Swift 6 can't see that — hence nonisolated(unsafe)).
-    nonisolated(unsafe) private static var extCache: (mtime: Date?, ext: Extensions)?
-    private static let extLock = NSLock()
+    /// file is only re-read when it actually changed on disk.
+    private static let extCache = Mutex<(mtime: Date?, ext: Extensions)?>(nil)
 
     public static func extensions() -> Extensions {
-        extLock.lock(); defer { extLock.unlock() }
         let p = extensionsPath.path
         let mtime = (try? FileManager.default.attributesOfItem(atPath: p))?[.modificationDate] as? Date
-        if let c = extCache, c.mtime == mtime { return c.ext }
+        if let c = extCache.withLock({ $0 }), c.mtime == mtime { return c.ext }
         let ext = (try? Data(contentsOf: extensionsPath))
             .flatMap { try? JSONDecoder().decode(Extensions.self, from: $0) }
             ?? Extensions()
-        extCache = (mtime, ext)
+        extCache.withLock { $0 = (mtime, ext) }
         return ext
     }
 
     /// Drop the cached parse — call after writing convert.json so the next
     /// lookup sees the new aliases without an app restart.
     public static func reloadExtensions() {
-        extLock.lock(); extCache = nil; extLock.unlock()
+        extCache.withLock { $0 = nil }
     }
 
     /// Unit lookup: builtin table first, then a user alias resolving to a

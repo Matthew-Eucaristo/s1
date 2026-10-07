@@ -157,7 +157,6 @@ private func jsonlDecoder() -> JSONDecoder {
 }
 
 @Test func terminalTypingGetsCommandScan() {
-    let gate = SafetyGate(allowReversible: true)
     // In a terminal, text becomes commands — plain `rm` (no flags) and
     // `sudo` must escalate even though they'd type freely into TextEdit.
     for t in ["rm dokumen.txt", "sudo echo hi", "ssh admin@prod",
@@ -480,18 +479,18 @@ private func jsonlDecoder() -> JSONDecoder {
         """
     let d = LLMDecisionCodec.parse(reply)
     #expect(d?.confidence == 0.8)
-    if case .axPress(let ref)?? = d?.action { #expect(ref == "e7") } else { Issue.record("expected axPress") }
+    if case .axPress(let ref)? = d?.action ?? nil { #expect(ref == "e7") } else { Issue.record("expected axPress") }
 }
 
 @Test func llmCodecConvertsClickWithRefToAxPress() {
     let d = LLMDecisionCodec.parse("""
         {"action":{"type":"click","ref":"e3"},"confidence":0.9,"rationale":"x"}
         """)
-    if case .axPress(let ref)?? = d?.action { #expect(ref == "e3") } else { Issue.record("click+ref should become axPress") }
+    if case .axPress(let ref)? = d?.action ?? nil { #expect(ref == "e3") } else { Issue.record("click+ref should become axPress") }
     let d2 = LLMDecisionCodec.parse("""
         {"action":{"type":"click","x":50,"y":60},"confidence":0.9,"rationale":"x"}
         """)
-    if case .click(let x, let y)?? = d2?.action { #expect(x == 50 && y == 60) } else { Issue.record("expected click") }
+    if case .click(let x, let y)? = d2?.action ?? nil { #expect(x == 50 && y == 60) } else { Issue.record("expected click") }
 }
 
 @Test func llmCodecGarbageAbstains() {

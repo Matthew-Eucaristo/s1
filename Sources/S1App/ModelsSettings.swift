@@ -5,7 +5,6 @@ import S1Core
 /// server, one key each) and **roles** (what s1 uses a model for). Pick a
 /// model per role from any connected provider; connecting one fills its
 /// recommended roles for you.
-@available(macOS 26, *)
 struct ModelsSettings: View {
     @Bindable var model: AppModel
     @State private var adding = false
@@ -81,7 +80,6 @@ struct ModelsSettings: View {
 
 // MARK: - roles
 
-@available(macOS 26, *)
 struct RoleRow: View {
     let store: ModelStore
     let role: ModelRole
@@ -120,7 +118,6 @@ struct RoleRow: View {
 
 /// The model picker for one role: every connected provider that can fill
 /// it, curated picks first, the provider's live list under "More".
-@available(macOS 26, *)
 struct RoleMenu: View {
     let store: ModelStore
     let role: ModelRole
@@ -179,7 +176,6 @@ struct RoleMenu: View {
 
 // MARK: - providers
 
-@available(macOS 26, *)
 private struct ProviderRow: View {
     let store: ModelStore
     let provider: Provider
@@ -230,7 +226,6 @@ private struct ProviderRow: View {
 
 /// Add a provider: pick one, then a single form — key, URL or account
 /// as that provider needs — verified live before anything is saved.
-@available(macOS 26, *)
 struct AddProviderSheet: View {
     let model: AppModel
     var onConnected: (([ModelRole]) -> Void)? = nil
@@ -308,7 +303,6 @@ struct AddProviderSheet: View {
     }
 }
 
-@available(macOS 26, *)
 private struct ConnectForm: View {
     let model: AppModel
     let template: ProviderTemplate
@@ -419,7 +413,6 @@ private struct ConnectForm: View {
 
 /// One provider up close: its key, server, what it's used for, and its
 /// models — with one-tap downloads for Ollama.
-@available(macOS 26, *)
 private struct ProviderDetailSheet: View {
     let store: ModelStore
     let provider: Provider
@@ -571,7 +564,6 @@ private struct ProviderDetailSheet: View {
     }
 }
 
-@available(macOS 26, *)
 private struct ModelLine: View {
     let store: ModelStore
     let provider: Provider

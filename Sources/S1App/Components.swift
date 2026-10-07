@@ -89,7 +89,6 @@ struct StepPresentation {
 
 /// One step as a compact row — the conversation's activity cards and the
 /// history detail both use it.
-@available(macOS 26, *)
 struct StepRow: View {
     let step: StepRecord
     var compact = true
@@ -160,7 +159,7 @@ extension Turn.State {
         }
     }
 
-    @available(macOS 26, *) @MainActor
+    @MainActor
     var tint: Color {
         switch self {
         case .running: AppModel.shared.accent

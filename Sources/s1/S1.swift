@@ -1,3 +1,4 @@
+import Synchronization
 import ArgumentParser
 import AppKit
 import CoreGraphics
@@ -179,9 +180,6 @@ struct TranscribeCmd: AsyncParsableCommand {
     var vocabulary: String?
 
     func run() async throws {
-        guard #available(macOS 26, *) else {
-            throw ValidationError("SpeechAnalyzer needs macOS 26+")
-        }
         let stt = SpeechToText(locales: SpokenLanguage.candidates(for: resolveLocale(locale)),
                                vocabulary: sttVocabulary(vocabulary))
         let text: String
@@ -242,9 +240,6 @@ struct ListenCmd: AsyncParsableCommand {
     var vocabulary: String?
 
     func run() async throws {
-        guard #available(macOS 26, *) else {
-            throw ValidationError("SpeechAnalyzer needs macOS 26+")
-        }
         let pol = try makePolicy(policy)   // fail fast, before the mic turn
         let loc = resolveLocale(locale)
         let stt = SpeechToText(locales: SpokenLanguage.candidates(for: loc),
@@ -414,9 +409,6 @@ struct ServeCmd: AsyncParsableCommand {
     func run() async throws {
         if uninstall { try manageLaunchAgent(install: false); return }
         if install { try manageLaunchAgent(install: true); return }
-        guard #available(macOS 26, *) else {
-            throw ValidationError("SpeechAnalyzer needs macOS 26+")
-        }
         let loc = resolveLocale(locale)
         let resolvedSpeak = speak ?? S1Config.load().speak ?? false
         setbuf(stdout, nil)   // daemon: stream events unbuffered
@@ -651,16 +643,6 @@ private enum KeepAlive {
 
 /// Lock-protected value readable from @Sendable closures (the auto brain's
 /// upgrade probe lands off the serve loop's thread).
-final class LockedBox<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _v: Value
-    init(_ v: Value) { _v = v }
-    var value: Value {
-        get { lock.lock(); defer { lock.unlock() }; return _v }
-        set { lock.lock(); _v = newValue; lock.unlock() }
-    }
-}
-
 struct TasksCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "tasks",
         abstract: "List the task library usable with --task.")
@@ -698,7 +680,7 @@ struct PullCmd: AsyncParsableCommand {
     var model: String
 
     func run() async throws {
-        let last = Locked()
+        let last = PrintOnce()
         try await ModelPull.pull(model: model) { line in
             last.printOnce(line)
         }
@@ -708,13 +690,10 @@ struct PullCmd: AsyncParsableCommand {
 
 /// Dedupes ollama's progress redraws before printing — the pull callback
 /// is @Sendable and may fire on another queue.
-private final class Locked: @unchecked Sendable {
-    private let lock = NSLock()
-    private var last = ""
+private final class PrintOnce: Sendable {
+    private let last = Mutex("")
     func printOnce(_ line: String) {
-        lock.lock(); defer { lock.unlock() }
-        guard line != last else { return }
-        last = line
+        guard last.withLock({ prev in defer { prev = line }; return prev != line }) else { return }
         print(line)
     }
 }

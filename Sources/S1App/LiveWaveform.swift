@@ -6,7 +6,6 @@ import S1Core
 /// turn is open. `TimelineView` ticks only while the view is onscreen and
 /// `Canvas` redraws in one pass — the pair costs nothing the moment the
 /// HUD or button area isn't visible.
-@available(macOS 26, *)
 struct LiveWaveform: View {
     /// Visible bars — recent samples right-aligned (newest at the right).
     var barCount: Int = 24

@@ -1,3 +1,4 @@
+import Synchronization
 import AppKit
 import Foundation
 
@@ -160,10 +161,9 @@ public struct CuaActuator: Actuator {
     /// Set once Cua Driver reports it lacks its own permissions: every later
     /// call would fail the same way, so this process stops paying for it.
     /// Cleared by a relaunch (after granting) or `resetAvailability()`.
-    nonisolated(unsafe) private static var missingPermissions = false
-    private static let lock = NSLock()
-    public static var needsPermissions: Bool { lock.withLock { missingPermissions } }
-    public static func resetAvailability() { lock.withLock { missingPermissions = false } }
+    private static let missingPermissions = Atomic<Bool>(false)
+    public static var needsPermissions: Bool { missingPermissions.load(ordering: .relaxed) }
+    public static func resetAvailability() { missingPermissions.store(false, ordering: .relaxed) }
 
     public init(binary: String) { self.binary = binary }
 
@@ -176,7 +176,7 @@ public struct CuaActuator: Actuator {
                 return "cua \(c[0]): \(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))"
             } catch {
                 DebugTrace.event("cua", ["tool": c[0], "ok": false, "error": "\(error)"])
-                if "\(error)".contains("permissions_pending") { Self.lock.withLock { Self.missingPermissions = true } }
+                if "\(error)".contains("permissions_pending") { Self.missingPermissions.store(true, ordering: .relaxed) }
                 let r = try await fallback.perform(action, frontmostPID: frontmostPID)
                 return r + " (cua fallback: \(error.localizedDescription.prefix(120)))"
             }

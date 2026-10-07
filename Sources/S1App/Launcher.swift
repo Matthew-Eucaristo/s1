@@ -6,7 +6,6 @@ import S1Core
 /// ⌥Space launcher — a Spotlight-style floating panel. Carbon hotkey (no
 /// Input Monitoring grant needed), non-activating panel so the app you were
 /// in stays frontmost and paste / window moves land there.
-@available(macOS 26, *)
 @MainActor
 final class LauncherController: NSObject, NSWindowDelegate {
     static let shared = LauncherController()
@@ -174,7 +173,6 @@ final class LauncherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-@available(macOS 26, *)
 @Observable
 @MainActor
 final class LauncherState {
@@ -211,7 +209,6 @@ final class LauncherState {
     }
 }
 
-@available(macOS 26, *)
 struct LauncherView: View {
     @Bindable var state: LauncherState
     let perform: (LauncherItem?) -> Void

@@ -1,15 +1,6 @@
 import AVFoundation
 import Foundation
 
-/// Tiny lock-guarded boolean shared by the barge monitor and the serve
-/// loop — the same role FinishedFlag plays inside Voice.swift's turns.
-final class AtomicFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _v = false
-    var get: Bool { lock.lock(); defer { lock.unlock() }; return _v }
-    func set() { lock.lock(); _v = true; lock.unlock() }
-}
-
 /// Voice interrupt ("barge-in"): watches the mic while a run or the TTS
 /// reply is in flight — a sustained voiced burst fires `onSpeech` once so
 /// the caller can abort the run and stop speaking.

@@ -49,9 +49,7 @@ public enum Preflight {
         }
 
         var mic = false
-        if #available(macOS 14, *) {
-            mic = AVCaptureDeviceAuthStatus() == .authorized
-        }
+        mic = AVCaptureDeviceAuthStatus() == .authorized
         if !mic {
             // Without the request calls nothing ever lands in the Microphone
             // or Speech Recognition panes — the user would have to "+"-add

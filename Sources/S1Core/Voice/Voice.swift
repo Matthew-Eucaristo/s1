@@ -178,7 +178,6 @@ public enum SpokenLanguage {
 /// On-device speech-to-text via macOS 26's SpeechAnalyzer/SpeechTranscriber —
 /// no cloud, 60+ locales, Indonesian included. With more than one locale it
 /// auto-detects the spoken language per turn (see `SpokenLanguage`).
-@available(macOS 26, *)
 public struct SpeechToText: Sendable {
     /// Candidate languages — one = fixed, several = auto-detect per turn.
     public var locales: [Locale]
@@ -352,7 +351,7 @@ public struct SpeechToText: Sendable {
         return try await withCheckedThrowingContinuation { (c: CheckedContinuation<(String, Double?), Error>) in
             // The callback isn't serialized — resume-at-most-once needs a
             // lock, or a final+error pair on two queues double-resumes (fatal).
-            let once = OnceFlag()
+            let once = AtomicFlag()
             rec.recognitionTask(with: req) { result, error in
                 if let r = result, r.isFinal {
                     let segs = r.bestTranscription.segments
@@ -412,7 +411,7 @@ public struct SpeechToText: Sendable {
                             await collected.append(String(result.text.characters), confidence: c)
                         }
                     } catch {
-                        failures.value.append(error)
+                        failures.withLock { $0.append(error) }
                     }
                 }
                 group.addTask {
@@ -421,7 +420,7 @@ public struct SpeechToText: Sendable {
                             try await analyzer.finalizeAndFinish(through: last)
                         }
                     } catch {
-                        failures.value.append(error)
+                        failures.withLock { $0.append(error) }
                         await analyzer.cancelAndFinishNow()
                     }
                 }
@@ -516,7 +515,7 @@ public struct SpeechToText: Sendable {
         if !vocabulary.isEmpty { req.contextualStrings = vocabulary }
         let collected = Locked<String>("")
         let failure = Locked<Error?>(nil)
-        let finished = FinishedFlag()
+        let finished = AtomicFlag()
         let lastText = Locked<Date?>(nil)
         let task = rec.recognitionTask(with: req) { result, error in
             // First terminal callback wins — a trailing error must not erase
@@ -670,7 +669,7 @@ public struct SpeechToText: Sendable {
 
         let collectors = lanes.map { _ in TextCollector() }
         let leader = Locked<[Double]>(Array(repeating: -1, count: lanes.count))
-        let speechEnded = FinishedFlag()
+        let speechEnded = AtomicFlag()
         let lastText = Locked<Date?>(nil)
         // VAD: speechDetected true→false means the utterance is over —
         // close the turn promptly even when the final segment lags.
@@ -695,7 +694,7 @@ public struct SpeechToText: Sendable {
                     if result.isFinal {
                         await collected.append(text, confidence: Self.confidence(of: result.text))
                         let mean = await collected.meanConfidence ?? 0
-                        leader.value[i] = mean
+                        leader.withLock { $0[i] = mean }
                     } else {
                         // Volatile best-guess of the in-flight segment — only
                         // the currently most confident language streams to
@@ -799,19 +798,6 @@ public struct SpeechToText: Sendable {
     }
 }
 
-/// Lock-protected cell for values written from non-isolated callbacks and
-/// read on the calling task — replaces fire-and-forget `Task { await … }`
-/// appends that could lose the final transcript.
-private final class Locked<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: Value
-    init(_ v: Value) { stored = v }
-    var value: Value {
-        get { lock.lock(); defer { lock.unlock() }; return stored }
-        set { lock.lock(); stored = newValue; lock.unlock() }
-    }
-}
-
 /// Mutable string shared safely between the results task and the analyzer.
 /// Segments arrive per-utterance — joining without a space welds words
 /// ("buka" + "TextEdit" → "bukaTextEdit") and breaks the intent parser.
@@ -833,27 +819,6 @@ private actor TextCollector {
     /// No new final segment for `seconds` — the utterance has ended.
     func idleFor(_ seconds: Double) -> Bool {
         Date().timeIntervalSince(lastAppend) >= seconds
-    }
-}
-
-/// One-bit flag settable from a non-isolated callback.
-private final class FinishedFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-    var get: Bool { lock.lock(); defer { lock.unlock() }; return done }
-    func set() { lock.lock(); done = true; lock.unlock() }
-}
-
-/// First `claim()` wins — the atomic test-and-set continuation resumption
-/// needs when several callbacks could race to finish it.
-private final class OnceFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-    func claim() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if done { return false }
-        done = true
-        return true
     }
 }
 

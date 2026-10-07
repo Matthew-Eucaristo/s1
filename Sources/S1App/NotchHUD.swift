@@ -9,7 +9,6 @@ import S1Core
 ///
 /// Cost model: the window only exists while s1 is listening or working —
 /// idle hides *and releases* it, so the HUD's steady-state price is nil.
-@available(macOS 26, *)
 @MainActor
 final class NotchHUDController {
     enum Content: Equatable {
@@ -86,7 +85,6 @@ final class NotchHUDController {
     }
 }
 
-@available(macOS 26, *)
 struct NotchHUDView: View {
     let content: NotchHUDController.Content
 

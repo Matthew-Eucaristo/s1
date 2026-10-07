@@ -4,7 +4,6 @@ import S1Core
 
 /// A past run, read back from its evidence: what was asked, every step
 /// with who decided it and why, and the screenshots it took.
-@available(macOS 26, *)
 struct RunDetailView: View {
     let run: RunSummary
     let model: AppModel
@@ -93,7 +92,6 @@ struct RunDetailView: View {
 
 /// A step you can open: rationale, confidence, the gate's verdict, and
 /// the model's raw reply when there was one.
-@available(macOS 26, *)
 private struct StepDetail: View {
     let step: StepRecord
     @State private var open = false

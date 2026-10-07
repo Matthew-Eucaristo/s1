@@ -1,3 +1,4 @@
+import Synchronization
 import Foundation
 import AppKit
 import ScreenCaptureKit
@@ -342,18 +343,17 @@ public enum AXReader {
     /// The most recently observed data-tree per app — used by `element` to
     /// detect index drift when the UI changed between decide and act.
     private static let treeStore = TreeStore()
-    private final class TreeStore: @unchecked Sendable {
-        private let lock = NSLock()
-        private var map: [pid_t: AXNode] = [:]
+    private final class TreeStore: Sendable {
+        private let map = Mutex<[pid_t: AXNode]>([:])
         /// Bounded: long-running companions would otherwise accumulate
         /// trees for apps that quit hours ago.
         func set(_ t: AXNode, pid: pid_t) {
-            lock.lock()
-            if map.count >= 16, map[pid] == nil { map.removeAll(keepingCapacity: true) }
-            map[pid] = t
-            lock.unlock()
+            map.withLock { m in
+                if m.count >= 16, m[pid] == nil { m.removeAll(keepingCapacity: true) }
+                m[pid] = t
+            }
         }
-        func get(_ pid: pid_t) -> AXNode? { lock.lock(); defer { lock.unlock() }; return map[pid] }
+        func get(_ pid: pid_t) -> AXNode? { map.withLock { $0[pid] } }
     }
     static func noteTree(_ tree: AXNode, pid: pid_t) { treeStore.set(tree, pid: pid) }
 

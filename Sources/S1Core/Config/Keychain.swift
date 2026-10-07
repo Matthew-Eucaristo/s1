@@ -1,3 +1,4 @@
+import Synchronization
 import Foundation
 import Security
 
@@ -12,8 +13,7 @@ import Security
 public enum SecretStore {
     public static let defaultService = "com.matthew.s1.api-keys"
 
-    nonisolated(unsafe) private static var cache: [String: String] = [:]
-    private static let lock = NSLock()
+    private static let cache = Mutex<[String: String]>([:])
     private static func key(_ service: String, _ account: String) -> String { service + "/" + account }
 
     public static func set(_ secret: String, account: String,
@@ -34,11 +34,11 @@ public enum SecretStore {
         guard status == errSecSuccess else {
             throw S1Error.aborted("keychain write failed (\(status))")
         }
-        lock.withLock { cache[key(service, account)] = secret }
+        cache.withLock { $0[key(service, account)] = secret }
     }
 
     public static func get(account: String, service: String = defaultService) -> String? {
-        if let hit = lock.withLock({ cache[key(service, account)] }) { return hit }
+        if let hit = cache.withLock({ $0[key(service, account)] }) { return hit }
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: account,
@@ -48,7 +48,7 @@ public enum SecretStore {
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
               let data = out as? Data, let s = String(data: data, encoding: .utf8),
               !s.isEmpty else { return nil }
-        lock.withLock { cache[key(service, account)] = s }
+        cache.withLock { $0[key(service, account)] = s }
         return s
     }
 
@@ -68,7 +68,7 @@ public enum SecretStore {
                                 kSecAttrService as String: service,
                                 kSecAttrAccount as String: account]
         let status = SecItemDelete(q as CFDictionary)
-        lock.withLock { _ = cache.removeValue(forKey: key(service, account)) }
+        cache.withLock { _ = $0.removeValue(forKey: key(service, account)) }
         return status == errSecSuccess || status == errSecItemNotFound
     }
 }

@@ -6,7 +6,6 @@ import S1Core
 /// "Hey Siri, ask s1 to open TextEdit" hits RunGoalIntent; the Toggle intent
 /// wakes/sleeps the listening companion. Everything lands on the same
 /// AppModel the UI drives, so state stays coherent.
-@available(macOS 26, *)
 struct RunGoalIntent: AppIntent {
     static let title: LocalizedStringResource = "Run s1 Goal"
     static let description = IntentDescription(
@@ -42,7 +41,6 @@ struct RunGoalIntent: AppIntent {
     }
 }
 
-@available(macOS 26, *)
 struct ToggleListeningIntent: AppIntent {
     static let title: LocalizedStringResource = "Toggle s1 Listening"
     static let description = IntentDescription(
@@ -61,7 +59,6 @@ struct ToggleListeningIntent: AppIntent {
     }
 }
 
-@available(macOS 26, *)
 struct S1Shortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
