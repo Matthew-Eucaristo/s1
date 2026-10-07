@@ -186,22 +186,30 @@ public struct AXPolicy: Policy {
     /// buka …", "please open …", "hey s1, open …". Without this the first
     /// word becomes an unknown verb and escalates.
     static func stripFillers(_ s: String) -> String {
-        var g = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "tolong", "please",
-                       "coba", "bisa", "boleh", "mohon", "can you", "could you",
-                       "ayo", "c'mon", "yuk"]
+        let original = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        var g = original
+        let fillers = ["s1", "es satu", "es one", "hey s1", "hai s1", "hello", "hi", "hey", "halo", "hai",
+                       "okay", "ok", "tolong", "please", "coba", "bisa", "boleh", "mohon",
+                       "can you", "could you", "would you", "ayo", "c'mon", "yuk"]
         var stripped = true
         while stripped {
             stripped = false
             let low = g.lowercased()
-            for f in fillers where low == f || low.hasPrefix(f + " ") || low.hasPrefix(f + ",") {
+            for f in fillers where low == f || low.hasPrefix(f + " ") || low.hasPrefix(f + ",") || low.hasPrefix(f + ".") {
                 g = String(g.dropFirst(f.count)).trimmingCharacters(
                     in: .whitespacesAndNewlines.union(.punctuationCharacters))
                 stripped = true
                 break
             }
         }
-        return g
+        // Trailing politeness: "close my reminder please?", "buka notes ya".
+        for tail in [" please", " ya", " dong", " deh", " thanks", " thank you", " plz"] {
+            let t = g.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            if t.lowercased().hasSuffix(tail) { g = String(t.dropLast(tail.count)); break }
+        }
+        // Only filler ("hello", "please"): keep it — chit-chat for the
+        // Reasoner, not an empty command that finishes instantly as "done".
+        return g.trimmingCharacters(in: .whitespaces).isEmpty ? original : g
     }
 
     static func startsWithVerb(_ s: String) -> Bool {

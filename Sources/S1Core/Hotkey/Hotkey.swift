@@ -29,7 +29,11 @@ public enum ChordMatcher {
 public struct ModifierTapTracker: Sendable {
     public var keyCodes: Set<UInt16>
     public var within: TimeInterval
+    /// A tap is a quick press: holding Shift (to think, to shift-scroll)
+    /// and then tapping once is not a double tap.
+    public var maxHold: TimeInterval = 0.4
     private var lastRelease: (keyCode: UInt16, at: TimeInterval)?
+    private var pressedAt: TimeInterval?
 
     public init(keyCodes: [UInt16], within: TimeInterval = 0.35) {
         self.keyCodes = Set(keyCodes)
@@ -41,19 +45,22 @@ public struct ModifierTapTracker: Sendable {
     public mutating func feed(keyCode: UInt16, isDown: Bool, at t: TimeInterval) -> Bool {
         guard keyCodes.contains(keyCode) else { return false }
         if isDown {
+            pressedAt = t
             defer { lastRelease = nil }
             if let last = lastRelease, last.keyCode == keyCode, t - last.at <= within {
                 return true
             }
             return false
         }
-        lastRelease = (keyCode, t)
+        // Only a short press counts as the first tap.
+        if let p = pressedAt, t - p <= maxHold { lastRelease = (keyCode, t) } else { lastRelease = nil }
+        pressedAt = nil
         return false
     }
 
     /// Forget a pending release — any other input between the two taps means
     /// the user was typing, not gesturing (fast capital letters must NOT fire).
-    public mutating func reset() { lastRelease = nil }
+    public mutating func reset() { lastRelease = nil; pressedAt = nil }
 }
 
 /// Global hotkey listener — a passive CGEvent tap (listen-only, so it never
@@ -66,12 +73,19 @@ public struct ModifierTapTracker: Sendable {
 public final class Hotkey: @unchecked Sendable {
     private let patterns: [HotkeyPattern]
     private let onTrigger: @Sendable () -> Void
+    /// Esc pressed by the user (not by s1): cancel what s1 is doing.
+    private let onEscape: (@Sendable () -> Void)?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var trackers: [ModifierTapTracker]
+    /// Spamming the gesture toggles once, not on-off-on-off.
+    private var lastTrigger: TimeInterval = 0
+    static let cooldown: TimeInterval = 0.7
 
-    public init(patterns: [HotkeyPattern], onTrigger: @escaping @Sendable () -> Void) {
+    public init(patterns: [HotkeyPattern], onEscape: (@Sendable () -> Void)? = nil,
+                onTrigger: @escaping @Sendable () -> Void) {
         self.patterns = patterns
+        self.onEscape = onEscape
         self.onTrigger = onTrigger
         self.trackers = patterns.compactMap {
             if case .doubleTapModifier(let codes, let w) = $0 {
@@ -92,8 +106,13 @@ public final class Hotkey: @unchecked Sendable {
     /// callers (Serve) route this through the main queue.
     public func start() {
         guard tap == nil else { return }
+        // Mouse downs break a pending tap: shift-click, shift-click (extending
+        // a selection) must not read as ⇧⇧.
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.leftMouseDown.rawValue)
+            | (1 << CGEventType.rightMouseDown.rawValue)
+            | (1 << CGEventType.otherMouseDown.rawValue)
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -142,17 +161,29 @@ public final class Hotkey: @unchecked Sendable {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
+        // Keys s1 itself posts (its actions) are never gestures or cancels.
+        if event.getIntegerValueField(.eventSourceUnixProcessID) == Int64(getpid()) { return }
         let keyCode = UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode))
         let t = Double(event.timestamp) / 1e9   // mach absolute nanos → seconds
+        func fire() {
+            guard t - lastTrigger >= Self.cooldown else { return }
+            lastTrigger = t
+            onTrigger()
+        }
         switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            for i in trackers.indices { trackers[i].reset() }
         case .keyDown:
+            if keyCode == 53, event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).isEmpty {
+                onEscape?()
+            }
             // Any real key between two modifier taps breaks the gesture —
             // otherwise typing a fast capital letter would fire it.
             for i in trackers.indices { trackers[i].reset() }
             let flags = NSEvent.ModifierFlags(rawValue: UInt(clamping: event.flags.rawValue))
             for p in patterns where ChordMatcher.matches(
                 keyCode: keyCode, flags: flags, pattern: p) {
-                onTrigger()
+                fire()
                 return
             }
         case .flagsChanged:
@@ -171,7 +202,7 @@ public final class Hotkey: @unchecked Sendable {
             for i in trackers.indices where trackers[i].keyCodes.contains(keyCode) {
                 tracked = true
                 if trackers[i].feed(keyCode: keyCode, isDown: modHeld, at: t) {
-                    onTrigger()
+                    fire()
                     trackers[i] = ModifierTapTracker(
                         keyCodes: Array(trackers[i].keyCodes), within: trackers[i].within)
                     return

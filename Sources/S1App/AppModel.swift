@@ -406,6 +406,9 @@ final class AppModel {
         case .partial: transcript = ev.text
         case .heard: transcript = ev.text
         case .speaking: speaking = true
+        case .escape:
+            // A typed command or its spoken reply stops on Esc too.
+            if running || speaking { stop() }
         case .interrupted:
             // You're talking again: go straight to the listening pill.
             transcript = ""

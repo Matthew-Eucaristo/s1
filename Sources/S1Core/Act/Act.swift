@@ -254,6 +254,9 @@ public struct CGEventActuator: Actuator {
             guard NSWorkspace.shared.open(url) else { throw S1Error.aborted("couldn't open \(raw)") }
             return url.isFileURL ? "opened \(url.lastPathComponent)" : "opened settings"
 
+        case .dismissNotification(let all):
+            return try dismissNotifications(all: all)
+
         case .openApp(let name):
             // Report what actually opened: fuzzy resolution can map
             // "Notepad" to Notes, and the log must say so.
@@ -399,6 +402,40 @@ public struct CGEventActuator: Actuator {
             throw S1Error.axFailed("the text didn't change")
         }
         return replace.isEmpty ? "deleted “\(find)”" : "replaced “\(find)” with “\(replace)”"
+    }
+
+    /// Press Notification Center's own Close / Clear action on banners and
+    /// alerts (a reminder alert, a message banner). Newest first; `all`
+    /// clears every one, stacks included.
+    func dismissNotifications(all: Bool) throws -> String {
+        guard let nc = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.notificationcenterui").first else {
+            throw S1Error.axFailed("Notification Center isn't running")
+        }
+        let app = AXUIElementCreateApplication(nc.processIdentifier)
+        AXReader.bindTimeout(app)
+        var queue: [AXUIElement] = [app], visited = 0, closed = 0
+        while !queue.isEmpty, visited < 800 {
+            let el = queue.removeFirst(); visited += 1
+            var names: CFArray?
+            if AXUIElementCopyActionNames(el, &names) == .success, let actions = names as? [String],
+               let close = actions.first(where: {
+                   let n = $0.lowercased()
+                   return n.contains("name:close") || n.contains("name:clear") || n == "axclose"
+               }),
+               AXUIElementPerformAction(el, close as CFString) == .success {
+                closed += 1
+                if !all { break }
+                continue
+            }
+            var kids: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
+               let children = kids as? [AXUIElement] {
+                queue += children
+            }
+        }
+        guard closed > 0 else { throw S1Error.axFailed("no notification on screen to close") }
+        return closed == 1 ? "dismissed a notification" : "dismissed \(closed) notifications"
     }
 
     /// Shortcuts that open a new window or tab: ⌘N, ⇧⌘N, ⌘T, ⇧⌘T, ⌘O.

@@ -45,6 +45,9 @@ public enum Action: Codable, Sendable, Equatable {
     /// A System Settings pane (`x-apple.systempreferences:`) or a folder
     /// (`file://`, directories only) — what Mac skills open.
     case openURL(String)
+    /// Close the newest notification banner/alert (or all of them) through
+    /// Notification Center's own Close / Clear actions.
+    case dismissNotification(all: Bool)
     case wait(seconds: Double)
     // irreversible
     case shell(command: String)

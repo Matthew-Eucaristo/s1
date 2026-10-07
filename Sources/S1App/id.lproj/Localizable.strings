@@ -395,3 +395,5 @@
 
 "Keep running in the menu bar" = "Tetap jalan di bar menu";
 "Closing the window keeps s1 in the menu bar so ⇧⇧, the launcher and dictation still work; it uses no microphone and almost no power while idle. Turn it off to quit when the window closes. The status pill appears only while s1 listens or works." = "Menutup jendela membuat s1 tetap di bar menu agar ⇧⇧, peluncur, dan dikte tetap jalan; saat diam s1 tidak memakai mikrofon dan hampir tidak memakai daya. Matikan untuk keluar saat jendela ditutup. Pil status hanya muncul saat s1 mendengarkan atau bekerja.";
+"Clear all notifications" = "Hapus semua notifikasi";
+"Close the notification" = "Tutup notifikasi";

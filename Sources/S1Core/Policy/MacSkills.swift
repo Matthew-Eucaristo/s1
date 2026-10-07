@@ -118,6 +118,12 @@ public enum MacSkills {
     /// "mission control", "open downloads"), with a label for the log.
     public static func match(_ phrase: String) -> (action: Action, label: String)? {
         let p = normalize(phrase), bare = stripVerbs(p)
+        // "close my reminder", "dismiss the notification", "hapus semua notifikasi".
+        if let m = p.firstMatch(of: /^(?:close|dismiss|clear|hide|tutup|hapus|buang|tutupin)\s+(?:(the|my|all|all the|all my|semua|the latest|that)\s+)?(notifications?|notifikasi|reminders?|pengingat|alerts?|banners?)(?:\s+(?:notification|alert|itu|ini|semua|all))?$/) {
+            let all = m.1.map { $0.contains("all") || $0.contains("semua") } == true
+                || p.hasSuffix(" semua") || p.hasSuffix(" all") || m.2.hasSuffix("s") && m.2 != "notifikasi"
+            return (.dismissNotification(all: all), all ? "Clear all notifications" : "Close the notification")
+        }
         if let s = system.first(where: { $0.phrases.contains(p) || $0.phrases.contains(bare) }) {
             return (.keyCombo(keys: s.keys), s.label)
         }
@@ -183,7 +189,8 @@ public enum MacSkills {
         Mac skills System 1 runs instantly — delegate them as plain goals: \
         "open <pane> settings" (\(paneNames)); "open <folder>" (downloads, documents, \
         desktop folder, pictures folder, applications, icloud drive); \(actions); \
-        lock screen, volume up/down, mute, play/pause; "what time is it", "battery".
+        lock screen, volume up/down, mute, play/pause; "close the notification" / "clear all \
+        notifications" (banners and alerts, a reminder alert included); "what time is it", "battery".
         """
     }
 }

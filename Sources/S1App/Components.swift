@@ -29,6 +29,7 @@ struct StepPresentation {
         switch action {
         case .openApp(let n): return ("app.badge", String(localized: "Open \(n)"))
         case .webSearch(let q): return ("globe", String(localized: "Search the web for “\(q)”"))
+        case .dismissNotification(let all): return ("bell.slash", all ? String(localized: "Clear all notifications") : String(localized: "Close the notification"))
         case .openURL(let u):
             return u.hasPrefix("file:")
                 ? ("folder", String(localized: "Open \(URL(string: u)?.lastPathComponent ?? u)"))

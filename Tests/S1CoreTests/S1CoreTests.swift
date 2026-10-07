@@ -2864,3 +2864,32 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(lines.last == "{\"i\":199}")
     #expect(lines.allSatisfy { $0.hasPrefix("{\"i\":") && $0.hasSuffix("}") })   // no torn lines
 }
+
+@Test func doubleShiftIgnoresHeldShiftAndCountsQuickTapsOnly() {
+    // Holding Shift (thinking, shift-scrolling), then one tap: not ⇧⇧.
+    var t = ModifierTapTracker(keyCodes: [56, 60], within: 0.45)
+    _ = t.feed(keyCode: 56, isDown: true, at: 0.0)
+    _ = t.feed(keyCode: 56, isDown: false, at: 1.2)          // held 1.2 s
+    let held = t.feed(keyCode: 56, isDown: true, at: 1.4)
+    #expect(!held)
+    // Two quick taps still fire.
+    var q = ModifierTapTracker(keyCodes: [56, 60], within: 0.45)
+    _ = q.feed(keyCode: 56, isDown: true, at: 0.0)
+    _ = q.feed(keyCode: 56, isDown: false, at: 0.08)
+    let quick = q.feed(keyCode: 56, isDown: true, at: 0.25)
+    #expect(quick)
+}
+
+@Test func closingAReminderMeansTheNotification() async throws {
+    let obs = NullPerceiver().observation
+    func act(_ g: String) async throws -> Action? { try await AXPolicy().decide(observation: obs, goal: g, history: []).action }
+    #expect(try await act("Hello, can you close my reminder please?") == .dismissNotification(all: false))
+    #expect(try await act("dismiss the notification") == .dismissNotification(all: false))
+    #expect(try await act("clear all notifications") == .dismissNotification(all: true))
+    #expect(try await act("tolong hapus semua notifikasi") == .dismissNotification(all: true))
+    #expect(try await act("tutup pengingat itu") == .dismissNotification(all: false))
+    // Greetings and politeness are filler; filler alone is chit-chat, not an instant "done".
+    #expect(AXPolicy.intents(of: "Hi, open Notes ya").first?.arg == "Notes")
+    let hello = try await AXPolicy().decide(observation: obs, goal: "Hello!", history: [])
+    #expect(hello.action == nil)
+}

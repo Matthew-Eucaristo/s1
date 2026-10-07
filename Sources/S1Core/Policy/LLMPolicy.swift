@@ -44,6 +44,7 @@ enum LLMDecisionCodec {
         switch a {
         case .openApp(let n): return "openApp(\(n))"
         case .openURL(let u): return "open(\(u.prefix(40)))"
+        case .dismissNotification(let all): return all ? "clearNotifications" : "closeNotification"
         case .webSearch(let q): return "webSearch(\(q.prefix(40)))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
@@ -379,6 +380,12 @@ public struct LLMReasoner: Reasoner {
         "replace X with Y"): {"type":"editText","text":"X","value":"Y"} edits \
         the focused field in place (value "" deletes X). Prefer it over \
         retyping the whole field.
+
+        Ambiguity: when the request could mean different things ("close my \
+        reminder": quit Reminders, or dismiss the reminder alert?) and the screen \
+        doesn't settle it, don't guess: reply type "done" with "expect" holding one \
+        short question. Never reply a bare "done" unless the history shows the goal \
+        actually happened.
 
         Failures: read each step's outcome in the history. Never repeat an \
         action that failed. When an app is "not found", try at most ONE other \

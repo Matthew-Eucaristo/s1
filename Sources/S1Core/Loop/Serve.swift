@@ -8,6 +8,8 @@ public struct ServeEvent: Sendable {
         case speaking
         /// The user talked over the run or the reply; listening resumes next.
         case interrupted
+        /// Esc pressed (by the user): whatever s1 is doing should stop.
+        case escape
     }
     public var kind: Kind
     public var text: String
@@ -131,7 +133,9 @@ public final class Serve: @unchecked Sendable {
         self.sayLanguage = locale.identifier
         self.onEvent = onEvent
         if let patterns = hotkeyPatterns {
-            hotkey = Hotkey(patterns: patterns) { [weak self] in
+            hotkey = Hotkey(patterns: patterns, onEscape: { [weak self] in
+                self?.escapePressed()
+            }) { [weak self] in
                 self?.toggle()
             }
         }
@@ -168,6 +172,13 @@ public final class Serve: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.hotkey?.stop() }
         }
         sleep()
+    }
+
+    /// Esc stops a run or a spoken reply (like ⇧⇧ would). While only
+    /// listening it does nothing — Esc in other apps stays theirs.
+    private func escapePressed() {
+        emit(.escape)
+        if state == .running { sleep("escape") }
     }
 
     /// Hotkey/menu action: idle → start listening; listening/running → stop.
