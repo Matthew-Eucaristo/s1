@@ -2399,7 +2399,7 @@ struct DoneEachSubgoal: Policy {
         return nil
     }
     #expect(try await keys("close") == ["cmd", "w"])
-    #expect(try await keys("quit") == ["cmd", "q"])
+    #expect(try await AXPolicy().decide(observation: NullPerceiver().observation, goal: "quit", history: []).action == .quitApp(name: ""))
     #expect(try await keys("minimize") == ["cmd", "m"])
     #expect(try await keys("fullscreen") == ["ctrl", "cmd", "f"])
     #expect(try await keys("new tab") == ["cmd", "t"])
@@ -2892,4 +2892,21 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(AXPolicy.intents(of: "Hi, open Notes ya").first?.arg == "Notes")
     let hello = try await AXPolicy().decide(observation: obs, goal: "Hello!", history: [])
     #expect(hello.action == nil)
+}
+
+@Test func closingOrQuittingARunningAppQuitsItGracefully() async throws {
+    var obs = NullPerceiver().observation
+    obs.frontmostApp = "Reminders"
+    obs.appStates = [AppState(name: "Reminders", pid: 42, isActive: true, windowTitles: []),
+                     AppState(name: "Safari", pid: 43, isActive: false, windowTitles: [])]
+    func act(_ g: String) async throws -> Action? { try await AXPolicy().decide(observation: obs, goal: g, history: []).action }
+    #expect(try await act("Can you close my reminder, please?") == .quitApp(name: "Reminders"))
+    #expect(try await act("OK, quit the reminder please.") == .quitApp(name: "Reminders"))
+    #expect(try await act("tutup safari") == .quitApp(name: "Safari"))
+    #expect(try await act("quit") == .quitApp(name: ""))                       // the front app, not ⌘Q
+    #expect(try await act("close the window") == .keyCombo(keys: ["cmd", "w"]))
+    #expect(try await act("close the notification") == .dismissNotification(all: false))
+    // Not running → the notification it probably means.
+    obs.appStates = []; obs.frontmostApp = "Finder"
+    #expect(try await act("close my reminder") == .dismissNotification(all: false))
 }

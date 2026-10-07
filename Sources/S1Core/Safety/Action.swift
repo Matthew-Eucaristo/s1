@@ -48,6 +48,9 @@ public enum Action: Codable, Sendable, Equatable {
     /// Close the newest notification banner/alert (or all of them) through
     /// Notification Center's own Close / Clear actions.
     case dismissNotification(all: Bool)
+    /// Ask an app to quit the way the Dock's Quit does (empty = frontmost):
+    /// the app saves, or asks about unsaved changes itself.
+    case quitApp(name: String)
     case wait(seconds: Double)
     // irreversible
     case shell(command: String)

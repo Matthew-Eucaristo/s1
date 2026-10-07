@@ -163,6 +163,16 @@ public struct AXPolicy: Policy {
         return Array(repeating: steps, count: times).flatMap { $0 }
     }
 
+    /// A running app the spoken name means, from the snapshot's app list.
+    static func runningApp(_ spoken: String, in obs: Snapshot) -> String? {
+        let name = AppResolver.spokenAppName(spoken)
+        guard !name.isEmpty, !["window", "jendela", "tab", "notification", "notifikasi"].contains(name) else { return nil }
+        let names = obs.appStates.map(\.name) + [obs.frontmostApp].compactMap { $0 }
+        if let exact = names.first(where: { $0.lowercased() == name }) { return exact }
+        return names.map { ($0, AppResolver.similarity(name, $0)) }
+            .filter { $0.1 >= AppResolver.quitCutoff }.max { $0.1 < $1.1 }?.0
+    }
+
     /// Best-matching on-screen element for a spoken label.
     static func best(_ needle: String, in tree: AXNode) -> AXNode? {
         tree.flattened.map { ($0, matchScore(needle, $0)) }
@@ -404,6 +414,13 @@ public struct AXPolicy: Policy {
                             rationale: "all \(intents.count) intents consumed")
         }
         let intent = intents[history.count]
+        // "close/quit/tutup <a running app>" quits it gracefully — before
+        // the notification skill, so "close my reminder" with Reminders open
+        // closes Reminders.
+        if ["close", "tutup", "quit", "keluar", "exit"].contains(intent.verb), !intent.arg.isEmpty,
+           let app = Self.runningApp(intent.arg, in: observation) {
+            return Decision(action: .quitApp(name: app), confidence: 0.9, rationale: "quit \(app)")
+        }
         // Mac skills: settings panes, folders, system shortcuts by name.
         if let skill = MacSkills.match(intent.verb + " " + intent.arg) {
             return Decision(action: skill.action, confidence: 0.95, rationale: "Mac skill: \(skill.label)")
@@ -634,7 +651,8 @@ public struct AXPolicy: Policy {
                             rationale: "\(intent.verb) (\(combo.joined(separator: "+")))")
         // ---- Window / tab / app control: plain keyCombos, no model needed.
         case "close", "tutup":
-            guard intent.arg.isEmpty else {
+            let target = AppResolver.spokenAppName(intent.arg)
+            guard intent.arg.isEmpty || ["window", "this window", "jendela", "jendela ini", "tab", "this tab", "ini"].contains(target) else {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "close what? — object targets need S2")
             }
@@ -645,7 +663,7 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "quit what? — named apps need S2")
             }
-            return Decision(action: .keyCombo(keys: ["cmd", "q"]), confidence: 0.9,
+            return Decision(action: .quitApp(name: ""), confidence: 0.9,
                             rationale: "quit frontmost app")
         case "minimize", "kecilkan":
             let a = intent.arg.lowercased()

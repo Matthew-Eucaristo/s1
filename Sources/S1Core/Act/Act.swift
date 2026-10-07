@@ -257,6 +257,9 @@ public struct CGEventActuator: Actuator {
         case .dismissNotification(let all):
             return try dismissNotifications(all: all)
 
+        case .quitApp(let name):
+            return try await quitApp(named: name)
+
         case .openApp(let name):
             // Report what actually opened: fuzzy resolution can map
             // "Notepad" to Notes, and the log must say so.
@@ -436,6 +439,27 @@ public struct CGEventActuator: Actuator {
         }
         guard closed > 0 else { throw S1Error.axFailed("no notification on screen to close") }
         return closed == 1 ? "dismissed a notification" : "dismissed \(closed) notifications"
+    }
+
+    /// Quit like the Dock does (`terminate`, never force): the app saves
+    /// or asks about unsaved work itself — no ⌘Q into the wrong window.
+    func quitApp(named name: String) async throws -> String {
+        let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        let target: NSRunningApplication?
+        if name.isEmpty {
+            target = NSWorkspace.shared.frontmostApplication
+        } else {
+            target = AppResolver.running(name, in: running)
+        }
+        guard let app = target, let label = app.localizedName else {
+            throw S1Error.aborted("no running app called \(name)")
+        }
+        guard app.processIdentifier != getpid() else {
+            throw S1Error.aborted("s1 won't quit itself mid-command — use ⇧⇧ or the menu bar")
+        }
+        guard app.terminate() else { throw S1Error.aborted("\(label) refused to quit") }
+        for _ in 0..<30 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(100)) }
+        return app.isTerminated ? "quit \(label)" : "\(label) is asking before it quits (unsaved work?)"
     }
 
     /// Shortcuts that open a new window or tab: ⌘N, ⇧⌘N, ⌘T, ⇧⌘T, ⌘O.
@@ -660,6 +684,27 @@ enum AppResolver {
     }
 
     /// Dice coefficient over character bigrams of normalized strings.
+    /// A running app by spoken name ("my reminder" → Reminders): exact,
+    /// then the same fuzzy gate as launching.
+    static func running(_ spoken: String, in apps: [NSRunningApplication]) -> NSRunningApplication? {
+        let name = spokenAppName(spoken)
+        if let exact = apps.first(where: { $0.localizedName?.lowercased() == name.lowercased() }) { return exact }
+        return apps.compactMap { a in a.localizedName.map { (a, similarity(name, $0)) } }
+            .filter { $0.1 >= quitCutoff }.max { $0.1 < $1.1 }?.0
+    }
+
+    /// Quitting the wrong app is worse than opening the wrong one: a much
+    /// closer match ("reminder" → Reminders 0.93; → Finder 0.67 is refused).
+    static let quitCutoff = 0.8
+
+    /// "my reminder app" → "reminder".
+    static func spokenAppName(_ s: String) -> String {
+        var t = s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        for lead in ["the ", "my ", "aplikasi ", "app "] where t.hasPrefix(lead) { t = String(t.dropFirst(lead.count)) }
+        for tail in [" app", " application", " aplikasi", " window"] where t.hasSuffix(tail) { t = String(t.dropLast(tail.count)) }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
     static func similarity(_ a: String, _ b: String) -> Double {
         func grams(_ s: String) -> Set<String> {
             let c = Array(s.lowercased().components(separatedBy: .alphanumerics.inverted).joined())

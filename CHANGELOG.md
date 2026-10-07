@@ -3,6 +3,18 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.26] - 2026-10-07
+
+### Fixed
+- **"close my reminder" / "quit the reminder" close the Reminders app.** A new
+  `quitApp` action quits like the Dock does: the app saves or asks about
+  unsaved changes itself, so it no longer hits the safety gate's ⌘Q hold.
+  "close / tutup / quit / keluar <app>" quits that running app; bare "quit"
+  quits the front app; "close the window / tab" still closes just that. When
+  no app matches, "close my reminder" closes the reminder notification.
+- Quitting needs a close name match (0.8): "reminder" never quits Finder.
+- The Reasoner quits apps with `quitApp`, never ⌘Q.
+
 ## [0.3.25] - 2026-10-07
 
 ### Added
