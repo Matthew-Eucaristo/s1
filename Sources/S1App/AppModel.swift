@@ -177,17 +177,56 @@ final class AppModel {
             for await _ in NotificationCenter.default.notifications(
                 named: NSApplication.didBecomeActiveNotification) {
                 refreshPermissions()
+                pollPermissionsWhileMissing()
             }
         }
-        Task { [weak self] in
+        pollPermissionsWhileMissing()
+        // Window closed → live in the menu bar (no Dock icon), or quit.
+        Task {
+            for await _ in NotificationCenter.default.notifications(named: NSWindow.willCloseNotification) {
+                try? await Task.sleep(for: .milliseconds(150))
+                windowsChanged()
+            }
+        }
+        Task {
+            for await _ in NotificationCenter.default.notifications(named: NSWindow.didBecomeKeyNotification) {
+                windowsChanged()
+            }
+        }
+    }
+
+    /// A 1.5 s poll while Accessibility or Input Monitoring is missing, so a
+    /// grant made in System Settings lands without a relaunch — and nothing
+    /// once both are on: an idle s1 must not wake itself up.
+    private var permissionPoll: Task<Void, Never>?
+    private func pollPermissionsWhileMissing() {
+        guard permissionPoll == nil, !(permissions.accessibility && permissions.inputMonitoring) else { return }
+        permissionPoll = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1.5))
                 guard let self else { return }
-                if !self.permissions.accessibility || !self.permissions.inputMonitoring {
-                    self.refreshPermissions()
-                }
+                self.refreshPermissions()
+                if self.permissions.accessibility && self.permissions.inputMonitoring { break }
             }
+            self?.permissionPoll = nil
         }
+    }
+
+    /// Keep running in the menu bar when the window closes (⇧⇧, the launcher
+    /// and dictation need s1 alive), or quit — the user's choice.
+    var keepRunning = UserDefaults.standard.object(forKey: "keepRunning") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(keepRunning, forKey: "keepRunning") }
+    }
+
+    /// No titled window open → no Dock icon (a menu-bar companion); a window
+    /// opens → back in the Dock and the app switcher.
+    private func windowsChanged() {
+        let open = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        if !open && !keepRunning && !DemoContent.enabled { NSApp.terminate(nil); return }
+        let want: NSApplication.ActivationPolicy = open ? .regular : .accessory
+        guard NSApp.activationPolicy() != want else { return }
+        NSApp.setActivationPolicy(want)
+        if want == .regular { NSApp.activate() }
     }
 
     // MARK: - language

@@ -138,7 +138,6 @@
 "Advanced" = "Lanjutan";
 "Open s1 at login" = "Buka s1 saat login";
 "Show status under the notch" = "Tampilkan status di bawah notch";
-"The status pill appears only while s1 listens or works, with a stop button." = "Pil status hanya muncul saat s1 mendengarkan atau bekerja, lengkap dengan tombol berhenti.";
 "Shortcuts" = "Pintasan";
 "Talk to s1" = "Bicara ke s1";
 "or" = "atau";
@@ -393,3 +392,6 @@
 "Billed: the provider reported the charge. Est.: tokens × the public list price (OpenRouter's catalog, refreshed daily). Plan: a subscription, nothing per call. Local and :free models cost nothing. Full log: `s1 usage`." = "Ditagih: provider melaporkan biayanya. Perk.: token × harga publik (katalog OpenRouter, diperbarui harian). Paket: langganan, tidak ada biaya per panggilan. Model lokal dan :free gratis. Log lengkap: `s1 usage`.";
 "Nothing billed: every call was in a plan or free." = "Tidak ada tagihan: semua panggilan termasuk paket atau gratis.";
 "No priced calls in this period." = "Tidak ada panggilan berharga di periode ini.";
+
+"Keep running in the menu bar" = "Tetap jalan di bar menu";
+"Closing the window keeps s1 in the menu bar so ⇧⇧, the launcher and dictation still work; it uses no microphone and almost no power while idle. Turn it off to quit when the window closes. The status pill appears only while s1 listens or works." = "Menutup jendela membuat s1 tetap di bar menu agar ⇧⇧, peluncur, dan dikte tetap jalan; saat diam s1 tidak memakai mikrofon dan hampir tidak memakai daya. Matikan untuk keluar saat jendela ditutup. Pil status hanya muncul saat s1 mendengarkan atau bekerja.";

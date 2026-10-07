@@ -36,9 +36,10 @@ private struct GeneralSettings: View {
                 Toggle("Open s1 at login", isOn: Binding(
                     get: { model.launchAtLogin },
                     set: { _ in model.toggleLoginItem() }))
+                Toggle("Keep running in the menu bar", isOn: $model.keepRunning)
                 Toggle("Show status under the notch", isOn: $model.notchHUD)
             } footer: {
-                FootNote("The status pill appears only while s1 listens or works, with a stop button.")
+                FootNote("Closing the window keeps s1 in the menu bar so ⇧⇧, the launcher and dictation still work; it uses no microphone and almost no power while idle. Turn it off to quit when the window closes. The status pill appears only while s1 listens or works.")
             }
 
             Section {

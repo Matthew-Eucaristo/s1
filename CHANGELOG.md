@@ -3,6 +3,19 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.23] - 2026-10-07
+
+### Changed
+- **Closing the window makes s1 a menu-bar companion:** no Dock icon until a
+  window opens again; ⇧⇧, the launcher and dictation keep working. New
+  setting, "Keep running in the menu bar" (on): turn it off to quit when the
+  window closes.
+
+### Fixed
+- **Idle really is idle.** A permission check woke s1 every 1.5 s forever; it
+  now polls only while Accessibility or Input Monitoring is missing and stops
+  once both are granted.
+
 ## [0.3.22] - 2026-10-07
 
 ### Fixed
