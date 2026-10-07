@@ -61,7 +61,17 @@ extension String {
 /// per-run artifacts with verbatim goal text + screenshots — owner-only,
 /// same convention as `~/.ssh`. Idempotent and non-destructive.
 public enum S1Home {
-    public static let path = NSHomeDirectory() + "/.s1"
+    /// `~/.s1`, or `S1_HOME`. Test runs get a throwaway folder so they never
+    /// read the user's config or contend for their real locks (mic.pid).
+    public static let path: String = {
+        let env = ProcessInfo.processInfo.environment
+        if let h = env["S1_HOME"], !h.isEmpty { return h }
+        if NSClassFromString("XCTestCase") != nil || env["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.processName.contains("testing") {
+            return NSTemporaryDirectory() + "s1-tests-\(ProcessInfo.processInfo.processIdentifier)"
+        }
+        return NSHomeDirectory() + "/.s1"
+    }()
 
     public static func ensurePrivate() {
         let fm = FileManager.default

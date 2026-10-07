@@ -3,6 +3,22 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.28] - 2026-10-07
+
+### Fixed
+- **Typing reaches Chrome's address bar (and Electron apps).** s1 typed by
+  attaching the text to a dummy key event; native text views accept that,
+  Chrome ignored it while s1 reported "typed 14 chars". Each character now goes
+  as the real key of the current keyboard layout (Shift/Option included;
+  emoji and other scripts still as unicode). In single-line fields s1 checks
+  the text landed and otherwise inserts it through Accessibility, or reports an
+  error instead of claiming success.
+- **"search for X" in a browser runs instantly:** ⌘L, type, Return, no model.
+  Outside a browser the Reasoner decides what "search" means there.
+- **Tests never touch your real ~/.s1.** Every s1 path now comes from
+  `S1Home.path` (`S1_HOME` overrides it); test runs use a throwaway folder,
+  which also fixes a flaky test that collided with a running s1's mic lock.
+
 ## [0.3.27] - 2026-10-07
 
 ### Fixed

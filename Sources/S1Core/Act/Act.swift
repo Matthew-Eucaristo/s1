@@ -127,7 +127,23 @@ public struct CGEventActuator: Actuator {
 
         case .typeText(let text):
             try actTimeChecks(payload: text)
-            try postUnicode(text)
+            let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? frontmostPID
+            // Single-line fields report their text reliably: check the typing
+            // landed there (some ignore synthetic keys), else insert through
+            // Accessibility. Terminals and canvases aren't checked.
+            let before = focusedField(pid: pid)?.value
+            try postKeystrokes(text)
+            if let before, !text.isEmpty {
+                var landed = false
+                for _ in 0..<8 {
+                    if let now = focusedField(pid: pid)?.value, now != before { landed = true; break }
+                    usleep(50_000)
+                }
+                if !landed {
+                    if insertViaAccessibility(text, pid: pid) { return "typed \(text.count) chars (via accessibility)" }
+                    throw S1Error.axFailed("the text didn't land in the focused field")
+                }
+            }
             return "typed \(text.count) chars"
 
         case .keyCombo(let keys):
@@ -478,6 +494,54 @@ public struct CGEventActuator: Actuator {
         guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &v) == .success,
               let w = v, CFGetTypeID(w) == AXUIElementGetTypeID() else { return nil }
         return (w as! AXUIElement)
+    }
+
+    /// Type like a person: each character as the real key (and modifiers)
+    /// of the current layout; characters no key makes (emoji, other
+    /// scripts) go as unicode events. Newlines stay unicode so a chat box
+    /// doesn't send early.
+    func postKeystrokes(_ text: String) throws {
+        let layout = KeyLayout.current()
+        let src = CGEventSource(stateID: .hidSystemState)
+        var pending = ""
+        func flush() throws { if !pending.isEmpty { try postUnicode(pending); pending = "" } }
+        for ch in text {
+            guard !ch.isNewline, let stroke = layout[ch] else { pending.append(ch); continue }
+            try flush()
+            guard let down = CGEvent(keyboardEventSource: src, virtualKey: stroke.code, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: src, virtualKey: stroke.code, keyDown: false) else {
+                throw S1Error.aborted("cannot create keyboard events")
+            }
+            down.flags = stroke.flags; up.flags = stroke.flags
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            usleep(1_500)
+        }
+        try flush()
+    }
+
+    /// The focused single-line field (text field, search, combo box) and its
+    /// value — the fields whose AX value reliably tracks typing.
+    func focusedField(pid: pid_t?) -> (element: AXUIElement, value: String)? {
+        guard let pid else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXReader.bindTimeout(app)
+        var v: CFTypeRef?, value: CFTypeRef?, role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &v) == .success,
+              let ref = v, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let el = ref as! AXUIElement
+        AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
+        guard ["AXTextField", "AXComboBox", "AXSearchField"].contains(role as? String ?? ""),
+              AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String else { return nil }
+        return (el, text)
+    }
+
+    /// Insert at the caret through Accessibility (replaces the selection).
+    func insertViaAccessibility(_ text: String, pid: pid_t?) -> Bool {
+        guard let field = focusedField(pid: pid) else { return false }   // never a secure field
+        return AXUIElementSetAttributeValue(field.element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+            && focusedField(pid: pid)?.value.contains(text) == true
     }
 
     /// Unicode-safe typing (works for Indonesian diacritics etc.).

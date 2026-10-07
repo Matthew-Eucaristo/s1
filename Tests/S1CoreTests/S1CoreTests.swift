@@ -1182,7 +1182,7 @@ func serveRunUsesConfiguredPolicy() async throws {
 }
 
 @Test func runLockReleaseOnlyRemovesOurOwn() throws {
-    let dir = NSHomeDirectory() + "/.s1"
+    let dir = S1Home.path
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     let path = dir + "/run.pid"
     defer { try? FileManager.default.removeItem(atPath: path) }
@@ -2927,4 +2927,29 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(InstalledApps.shortForm("Safari") == nil)
     let v = Vocabulary.assemble(custom: [], learned: { [] }, appNames: { ["Google Chrome", "Chrome"] })
     #expect(Array(v.prefix(3)) == ["s1", "Google Chrome", "Chrome"])     // apps before command words
+}
+
+@Test func keyboardLayoutTypesCommonCharactersAsRealKeys() {
+    let map = KeyLayout.current()
+    guard !map.isEmpty else { return }      // headless CI without a layout
+    #expect(map["a"]?.flags == [])
+    #expect(map["A"]?.flags.contains(.maskShift) == true)
+    #expect(map["1"] != nil && map[" "] != nil)
+    #expect(map["😀"] == nil)                 // emoji go as unicode events
+}
+
+@Test func searchingInABrowserUsesTheAddressBar() async throws {
+    let v = AXPolicy.intents(of: "open chrome, new tab, search for GeniusGrowthAI").map { "\($0.verb) \($0.arg)" }
+    #expect(v == ["open chrome", "new tab", "addressbar ", "type GeniusGrowthAI", "key return"])
+    var obs = NullPerceiver().observation
+    obs.frontmostApp = "Google Chrome"
+    let fake = { (i: Int) in StepRecord(index: i, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.9,
+                                       rationale: "", modelReply: nil, action: .keyCombo(keys: ["x"]),
+                                       gate: "allow", outcome: "ok", verified: nil, escalation: nil) }
+    let d = try await AXPolicy().decide(observation: obs, goal: "open chrome, new tab, search for GeniusGrowthAI",
+                                        history: [fake(0), fake(1)])
+    #expect(d.action == .keyCombo(keys: ["cmd", "l"]))
+    obs.frontmostApp = "Finder"
+    let f = try await AXPolicy().decide(observation: obs, goal: "search for invoices", history: [])
+    #expect(f.action == nil)                 // not a browser: the Reasoner decides
 }

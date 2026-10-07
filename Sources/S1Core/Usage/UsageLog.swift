@@ -40,7 +40,7 @@ public struct TokenCounts: Sendable, Equatable {
 
 public enum UsageLog {
     public static var path: String {
-        ProcessInfo.processInfo.environment["S1_USAGE_LOG"] ?? NSHomeDirectory() + "/.s1/usage.jsonl"
+        ProcessInfo.processInfo.environment["S1_USAGE_LOG"] ?? S1Home.path + "/usage.jsonl"
     }
     private static let lock = NSLock()
 

@@ -66,7 +66,7 @@ public struct S1Config: Codable, Sendable {
 
     public init() {}
 
-    public static var path: String { NSHomeDirectory() + "/.s1/config.json" }
+    public static var path: String { S1Home.path + "/config.json" }
 
     /// Missing or malformed file → empty config (defaults apply). Never throws:
     /// config is a convenience, not a gate.

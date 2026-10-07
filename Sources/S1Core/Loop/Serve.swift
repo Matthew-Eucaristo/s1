@@ -128,7 +128,7 @@ public final class Serve: @unchecked Sendable {
     private let sayLanguage: String
     /// ~/.s1/serve-state.json — external observability for `s1 status`.
     /// Best-effort: a daemon should never fail because telemetry can't write.
-    public static let statePath = NSHomeDirectory() + "/.s1/serve-state.json"
+    public static let statePath = S1Home.path + "/serve-state.json"
 
     public init(config: Config,
                 locale: Locale = Locale(identifier: Locale.preferredLanguages.first ?? "id-ID"),

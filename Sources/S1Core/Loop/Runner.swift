@@ -11,12 +11,12 @@ private func procPidPath(_ pid: pid_t, _ buffer: UnsafeMutableRawPointer?,
 public enum S1Runner {
     /// Pid file marking a live agent run. Two agents typing at once is the
     /// disaster this prevents: any process can check screen ownership.
-    public static let lockPath = NSHomeDirectory() + "/.s1/run.pid"
+    public static let lockPath = S1Home.path + "/run.pid"
     /// The mic is one physical input: a listening daemon, a foreground
     /// `s1 transcribe`, or the app's companion must never open two audio
     /// engines on it at once. This lock is shared across all consumers —
     /// claimed for a whole listening session or one foreground capture.
-    public static let micPidPath = NSHomeDirectory() + "/.s1/mic.pid"
+    public static let micPidPath = S1Home.path + "/mic.pid"
 
     /// True while another process holds the run lock. Stale files after a
     /// crash expire via pid-liveness AND identity: a recycled pid owned by

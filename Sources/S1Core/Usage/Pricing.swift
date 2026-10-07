@@ -20,7 +20,7 @@ public struct Price: Codable, Sendable, Equatable {
 }
 
 public enum Pricing {
-    public static var path: String { NSHomeDirectory() + "/.s1/prices.json" }
+    public static var path: String { S1Home.path + "/prices.json" }
     static let source = URL(string: "https://openrouter.ai/api/v1/models")!
 
     /// The cached public price list (model id → price).

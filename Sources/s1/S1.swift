@@ -454,7 +454,7 @@ struct ServeCmd: AsyncParsableCommand {
         // the same hotkey and compete for the mic. The app writes the same
         // pid file, so `s1 serve` next to S1.app is refused too. Atomic
         // (O_EXCL): two serves launched at the same instant can't both win.
-        let pidPath = NSHomeDirectory() + "/.s1/serve.pid"
+        let pidPath = S1Home.path + "/serve.pid"
         try S1Runner.claimPidFile(pidPath, what: "s1 listener")
         // Pid-checked release: if the file was stolen and re-claimed by a
         // competitor daemon, our exit must not delete THEIR lock.
@@ -552,7 +552,7 @@ struct ServeCmd: AsyncParsableCommand {
         // would respawn-churn against it forever. Our own agent was already
         // booted out above, so any live holder here is a manual serve/app.
         if let live = S1Runner.livePidHolder(
-            of: NSHomeDirectory() + "/.s1/serve.pid") {
+            of: S1Home.path + "/serve.pid") {
             throw S1Error.aborted(
                 "a listener is already running (pid \(live)) — `s1 stop` it first, " +
                 "then re-run `s1 serve --install`")
@@ -583,7 +583,7 @@ struct ServeCmd: AsyncParsableCommand {
         var claimed = false
         for _ in 0 ..< 50 {
             if S1Runner.livePidHolder(
-                of: NSHomeDirectory() + "/.s1/serve.pid") != nil {
+                of: S1Home.path + "/serve.pid") != nil {
                 claimed = true
                 break
             }
@@ -758,7 +758,7 @@ struct CleanCmd: AsyncParsableCommand {
         // write landing at the old offset — a sparse file of NULs.
         let log = S1Home.path + "/serve.log"
         let daemonAlive = S1Runner.livePidHolder(
-            of: NSHomeDirectory() + "/.s1/serve.pid") != nil
+            of: S1Home.path + "/serve.pid") != nil
         if daemonAlive {
             print("kept \(log) — a live listener holds it (`s1 stop` first)")
         } else if FileManager.default.fileExists(atPath: log),
@@ -792,7 +792,7 @@ struct StatusCmd: AsyncParsableCommand {
             print("state        \(st) · \(ev)\(detail.isEmpty ? "" : " · \(detail)")")
             if let at = obj["updated"] as? String { print("updated      \(at)") }
         }
-        let servePid = NSHomeDirectory() + "/.s1/serve.pid"
+        let servePid = S1Home.path + "/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
            S1Runner.pidLooksLikeS1(pid) {
@@ -866,7 +866,7 @@ struct StopCmd: AsyncParsableCommand {
         // the kill-switch treatment instead: its serve loop sleeps on the
         // stop file, its runs abort — SIGTERM would kill the app window
         // outright (no cleanup, stale pid file).
-        let servePid = NSHomeDirectory() + "/.s1/serve.pid"
+        let servePid = S1Home.path + "/serve.pid"
         if let txt = try? String(contentsOfFile: servePid, encoding: .utf8),
            let pid = pid_t(txt.trimmingCharacters(in: .whitespacesAndNewlines)),
            S1Runner.pidLooksLikeS1(pid) {

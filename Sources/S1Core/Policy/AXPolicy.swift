@@ -122,6 +122,15 @@ public struct AXPolicy: Policy {
                 if ["find", "cari"].contains(verb), !arg.isEmpty {
                     return [Intent(verb: "key", arg: "cmd f"), Intent(verb: "type", arg: arg)]
                 }
+                // "search for X" / "google X": in a browser, the address bar.
+                if ["search", "google"].contains(verb), !arg.isEmpty {
+                    var q = arg
+                    for lead in ["for ", "the web for ", "google for ", "on google for "] where q.lowercased().hasPrefix(lead) {
+                        q = String(q.dropFirst(lead.count))
+                    }
+                    return [Intent(verb: "addressbar", arg: ""), Intent(verb: "type", arg: q),
+                            Intent(verb: "key", arg: "return")]
+                }
                 return Self.expand(Intent(verb: verb, arg: arg))
             }
     }
@@ -172,6 +181,9 @@ public struct AXPolicy: Policy {
         return names.map { ($0, AppResolver.similarity(name, $0)) }
             .filter { $0.1 >= AppResolver.quitCutoff }.max { $0.1 < $1.1 }?.0
     }
+
+    static let browsers: Set<String> = ["Google Chrome", "Safari", "Arc", "Firefox", "Microsoft Edge",
+                                        "Brave Browser", "Orion", "Dia", "Vivaldi", "Opera", "Zen", "Chromium"]
 
     /// Best-matching on-screen element for a spoken label.
     static func best(_ needle: String, in tree: AXNode) -> AXNode? {
@@ -256,7 +268,7 @@ public struct AXPolicy: Policy {
         "double", "dobel", "right",
         "restart", "mulai", "start", "drag", "seret", "drop", "resize",
         "ubah", "rename", "ganti", "remove", "buang", "replace", "change",
-        "choose", "hover", "arahkan",
+        "choose", "hover", "arahkan", "google",
     ]
 
     /// Drop a dangling conjunction at the end of a part ("buka notes lalu"
@@ -449,6 +461,14 @@ public struct AXPolicy: Policy {
             }
             return Decision(action: .typeText(intent.arg), confidence: 0.95,
                             rationale: "type literal text")
+        case "addressbar":
+            // Only browsers have one; elsewhere "search for X" means
+            // something app-specific — the Reasoner decides.
+            guard let app = observation.frontmostApp, Self.browsers.contains(app) else {
+                return Decision(action: nil, confidence: 0.2, rationale: "search outside a browser — needs S2")
+            }
+            return Decision(action: .keyCombo(keys: ["cmd", "l"]), confidence: 0.95,
+                            rationale: "focus \(app)'s address bar")
         case "key", "keys", "hotkey":
             guard !intent.arg.isEmpty else {
                 return Decision(action: nil, confidence: 0.15,
