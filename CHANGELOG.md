@@ -3,6 +3,27 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.25] - 2026-10-07
+
+### Added
+- **Close notifications by voice.** "close my reminder", "dismiss the
+  notification", "clear all notifications", "hapus semua notifikasi" press
+  Notification Center's own Close / Clear on banners and alerts (a Reminders
+  alert included). Nothing on screen → the Reasoner takes it.
+- **Esc stops s1** while it works or speaks (typed or spoken commands). While
+  s1 only listens, Esc stays with the app you're in.
+
+### Fixed
+- **⇧⇧ is harder to trip and can't flap.** Spamming Shift toggles once per
+  0.7 s instead of on-off-on-off; shift-click, shift-click (extending a
+  selection) no longer reads as ⇧⇧; holding Shift and then tapping once isn't a
+  double tap; keys s1 itself presses never trigger it.
+- "Hello / hi / hey / halo, …" and trailing "please / ya / dong" are filler;
+  a message that is only filler ("Hello!") goes to the Reasoner as chit-chat
+  instead of finishing instantly as "Done".
+- The Reasoner asks one short question when a request is ambiguous ("Quit
+  Reminders, or dismiss the reminder alert?") instead of a bare "done".
+
 ## [0.3.24] - 2026-10-07
 
 ### Fixed
