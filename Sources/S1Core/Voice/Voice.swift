@@ -566,7 +566,7 @@ public struct SpeechToText: Sendable {
             if control?.stopped == true { endReason = "released"; break }
             if control?.holding != true {
                 if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
-                if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
+                if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle + TurnEnd.patience(spoken: waited) { endReason = "textSettle"; break }
             }
             try await Task.sleep(nanoseconds: 100_000_000)
             waited += 0.1
@@ -741,9 +741,10 @@ public struct SpeechToText: Sendable {
                 }
                 endReason = "unfinished+wait"; break
             }
+            let settle = Self.textSettle + TurnEnd.patience(spoken: waited)
             let ended: String? = speechEnded.get ? "speechDetector"
                 : endpointer.isDone ? "endpointer:\(endpointer.state)"
-                : lastText.value.map({ Date().timeIntervalSince($0) > Self.textSettle }) == true ? "textSettle" : nil
+                : lastText.value.map({ Date().timeIntervalSince($0) > settle }) == true ? "textSettle" : nil
             if let ended {
                 if extensions == 0, TurnEnd.looksUnfinished(heardSoFar.value) {
                     extensions = 1; extendUntil = Date().addingTimeInterval(TurnEnd.extraWait); continue
@@ -752,7 +753,7 @@ public struct SpeechToText: Sendable {
             }
             var settled = false
             for c in collectors {
-                if await c.hasContent, await c.idleFor(0.9) { settled = true; break }
+                if await c.hasContent, await c.idleFor(0.9 + TurnEnd.patience(spoken: waited)) { settled = true; break }
             }
             if settled {
                 if extensions == 0, TurnEnd.looksUnfinished(heardSoFar.value) {

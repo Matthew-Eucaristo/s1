@@ -83,7 +83,7 @@ public final class Serve: @unchecked Sendable {
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
                     speak: Bool = true,
-                    listenSeconds: Double = 12,
+                    listenSeconds: Double = 45,
                     maxSilentTurns: Int = 3,
                     maxListenErrors: Int = 3,
                     artifacts: String = S1Home.path + "/artifacts",

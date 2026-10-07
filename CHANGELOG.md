@@ -3,6 +3,17 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.34] - 2026-10-08
+
+### Fixed
+- **Long sentences aren't cut off mid-way.** The end-of-speech detector
+  learned the "room noise" level from your own voice during long speech, so
+  after ~10 s your voice counted as silence; a loud word early on did the same
+  to quieter speech after it. The noise level now only learns from the quiet
+  between words, the loud-word level fades, and the longer you've been talking
+  the longer a pause has to be (up to +0.7 s) before the turn ends. A turn
+  can now run 45 s instead of 12.
+
 ## [0.3.33] - 2026-10-08
 
 ### Changed

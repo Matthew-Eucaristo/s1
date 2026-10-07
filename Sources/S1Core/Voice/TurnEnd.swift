@@ -17,6 +17,12 @@ public enum TurnEnd {
     /// Extra wait after silence when the sentence looks unfinished.
     public static let extraWait: TimeInterval = 1.3
 
+    /// Extra pause allowed after `spoken` seconds of talking: none for a
+    /// short command, up to 0.7 s for someone explaining at length.
+    public static func patience(spoken: Double) -> Double {
+        min(0.7, max(0, (spoken - 3) * 0.12))
+    }
+
     public static func looksUnfinished(_ text: String) -> Bool {
         let words = text.lowercased()
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "'" })

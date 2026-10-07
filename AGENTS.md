@@ -76,6 +76,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - AX trees come from one traversal, `AXReader.visit` (focused window first, wrappers skipped,
   closed menus folded, off-window content pruned); refs are its pre-order indices, so snapshots
   and `AXReader.element` must both use it. Prompts list labeled/actionable nodes, not the first N.
+- Turn end (`Endpointer`): the noise floor learns only from waiting/quiet frames, the speech peak decays,
+  and `TurnEnd.patience` lengthens the pause needed after long speech. Listening turns cap at 45 s.
 - Stuck-loop guards apply to model decisions only; grammar steps (`s1:ax`) repeat when the user said so.
 
 ## Verify

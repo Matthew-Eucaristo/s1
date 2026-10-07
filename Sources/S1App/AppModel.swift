@@ -371,7 +371,7 @@ final class AppModel {
                 lockPath: S1Home.path + "/serve.pid",
                 transcribe: { [weak self] onPartial in
                     guard let self else { return "" }
-                    return try await self.stt.transcribeMic(maxSeconds: 12, onPartial: onPartial)
+                    return try await self.stt.transcribeMic(maxSeconds: 45, onPartial: onPartial)
                 },
                 isBusy: { [weak self] in
                     if await self?.running == true { return true }

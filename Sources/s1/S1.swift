@@ -393,7 +393,7 @@ struct ServeCmd: AsyncParsableCommand {
     @Option(help: "Silent turns before auto-sleep.")
     var idleTurns: Int = 3
     @Option(help: "Seconds per listening turn.")
-    var listenSeconds: Double = 12
+    var listenSeconds: Double = 45
     @Option(help: "Transcribe this audio file once, run it, exit (testing — no mic needed).")
     var file: String?
     @Option(help: "Comma-separated words the recognizer should bias toward.")

@@ -3164,3 +3164,20 @@ private struct PhraseJudge: DecisionJudge {
     #expect(!AgentLoop.unusable(.axPress(ref: "e3"), confidence: 0.8))
     #expect(!AgentLoop.unusable(.done(summary: "Which one?"), confidence: 0.1))
 }
+
+@Test func endpointerKeepsALongSentenceOpen() {
+    let e = Endpointer()
+    for _ in 0 ..< 5 { e.feed(dB: -65, seconds: 0.085) }    // room
+    e.feed(dB: -8, seconds: 0.085)                           // one loud "Okay!"
+    // 20 s of ordinary speech with short breaths between phrases.
+    for i in 0 ..< 235 { e.feed(dB: i % 25 < 20 ? -30 : -60, seconds: 0.085) }
+    #expect(e.state == .speaking)
+    // A thinking pause that would end a short command doesn't end this one…
+    for _ in 0 ..< 11 { e.feed(dB: -64, seconds: 0.085) }  // 0.94 s
+    #expect(e.state == .speaking)
+    // …a real stop does.
+    for _ in 0 ..< 12 { e.feed(dB: -64, seconds: 0.085) }
+    #expect(e.state == .ended)
+    #expect(TurnEnd.patience(spoken: 1) == 0)
+    #expect(TurnEnd.patience(spoken: 30) == 0.7)
+}

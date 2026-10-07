@@ -100,7 +100,7 @@ public final class Endpointer: @unchecked Sendable {
     private let config: Config
     private var floor: Float?
     private var peak: Float = -120
-    private var voiced = 0.0, silence = 0.0, elapsed = 0.0
+    private var voiced = 0.0, silence = 0.0, elapsed = 0.0, talked = 0.0
     private var _state = State.waiting
 
     public init(config: Config = Config()) { self.config = config }
@@ -122,21 +122,34 @@ public final class Endpointer: @unchecked Sendable {
         // speech itself barely lifts it while room noise changes do.
         // Digital-silence frames at engine start (-120) must not pin the
         // floor so low that ordinary room noise reads as speech forever.
+        // Only quiet frames teach the floor: during a long sentence the voice
+        // itself would otherwise drag the floor up to speech level within
+        // ~10 s, and the rest of the sentence would read as silence.
         let lvl = max(dB, -80)
-        let f = floor.map { lvl < $0 ? lvl : $0 + (lvl - $0) * 0.02 } ?? lvl
-        floor = f
-        var threshold = max(f + config.margin, config.absoluteMin)
+        let f0 = floor ?? lvl
+        // The peak fades (~3 dB/s): one loud word early on mustn't make
+        // ordinary speech afterwards count as silence.
+        peak = max(-120, peak - Float(3 * seconds))
+        var threshold = max(f0 + config.margin, config.absoluteMin)
         if _state == .speaking { threshold = max(threshold, peak - config.peakDrop) }
         let isVoice = dB > threshold
         if isVoice { peak = max(peak, dB) }
+        // Before speech starts the floor learns the room (steady fan noise);
+        // once someone is talking, only the quiet frames between words do.
+        if lvl < f0 { floor = lvl }
+        else if _state == .waiting || !isVoice { floor = f0 + (lvl - f0) * 0.02 }
+        else { floor = f0 }
         switch _state {
         case .waiting:
             voiced = isVoice ? voiced + seconds : max(0, voiced - seconds)
-            if voiced >= config.minSpeech { _state = .speaking; silence = 0 }
+            if voiced >= config.minSpeech { _state = .speaking; silence = 0; talked = voiced }
             else if elapsed >= config.noSpeechTimeout { _state = .timedOut }
         case .speaking:
+            if isVoice { talked += seconds }
             silence = isVoice ? 0 : silence + seconds
-            if silence >= config.trailingSilence { _state = .ended }
+            // Someone talking at length pauses to think: the longer they've
+            // spoken, the longer a pause has to be to end the turn.
+            if silence >= config.trailingSilence + TurnEnd.patience(spoken: talked) { _state = .ended }
         default: break
         }
     }
