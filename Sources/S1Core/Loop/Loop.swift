@@ -261,6 +261,16 @@ public struct AgentLoop {
                                         rationale: "s2 error: \(error.localizedDescription)")
                 }
                 decidedBy = "s2:\(s2.name)"
+                // The same press again right after it visibly worked: the
+                // request was one action and it happened. Finish instead of
+                // repeating ("skip" pressed Next three times).
+                if let a = decision.action, Self.isPress(a), let prev = history.last,
+                   prev.decidedBy.hasPrefix("s2:"), prev.action == a, let o = prev.outcome,
+                   o.contains(" → "), !o.contains("no visible change") {
+                    decision = Decision(action: .done(summary: "done"), confidence: 0.9,
+                                        rationale: "repeat of a step that already worked — finishing",
+                                        rawReply: decision.rawReply)
+                }
                 // A Reasoner guessing blindly (a "placeholder" click at 0,0,
                 // near-zero confidence) asks the user instead of acting.
                 if let a = decision.action, Self.unusable(a, confidence: decision.confidence) {
@@ -425,6 +435,8 @@ public struct AgentLoop {
         case .click, .doubleClick, .rightClick, .axPress, .axAction, .axSetAttribute: return true
         case .typeText, .editText, .axSetValue, .drag, .scroll: return decidedBy.hasPrefix("s2:")
         case .keyCombo(let keys):
+            // Track skips show up in the player; other media keys don't.
+            if keys.contains(where: { ["nexttrack", "prevtrack", "previoustrack"].contains($0.lowercased()) }) { return true }
             return decidedBy.hasPrefix("s2:") && !keys.contains { CGEventActuator.mediaKeys[$0.lowercased()] != nil }
         default: return false
         }
@@ -443,6 +455,13 @@ public struct AgentLoop {
         default: break
         }
         return confidence < 0.25
+    }
+
+    static func isPress(_ a: Action) -> Bool {
+        switch a {
+        case .axPress, .axAction, .click, .doubleClick: return true
+        default: return false
+        }
     }
 
     /// Roles where a second activation would undo the first.

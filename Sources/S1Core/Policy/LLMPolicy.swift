@@ -49,7 +49,7 @@ enum LLMDecisionCodec {
         }.joined(separator: "\n")
     }
 
-    private static func describe(_ a: Action?) -> String {
+    static func describe(_ a: Action?) -> String {
         guard let a else { return "none" }
         switch a {
         case .openApp(let n): return "openApp(\(n))"
@@ -434,9 +434,12 @@ public struct LLMReasoner: Reasoner {
         outcome ends with what changed on screen ("→ new: …", "→ now in App"); \
         "→ no visible change" means the step did nothing visible: don't repeat \
         it. Try another control or way, or, when the screen already shows the \
-        goal (e.g. a fresh chat is already open), reply done. When you can't \
-        tell what to act on, reply done with a short question; never guess \
-        with placeholder coordinates.
+        goal (e.g. a fresh chat is already open), reply done. A request for one \
+        thing (skip, press X, open Y) is done the moment one step's outcome \
+        shows it happened: reply done then; never press the same control again \
+        unless the user asked for several. When you can't tell what to act on, \
+        reply done with a short question; never guess with placeholder \
+        coordinates.
 
         \(MacSkills.guide)
 

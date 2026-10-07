@@ -256,7 +256,9 @@ public enum S1Runner {
                                plan: skill?.steps ?? [], onPhase: onPhase)
         }
         await logger.finish(report)
-        Conversation.shared.record(goal: goal, outcome: report.answer ?? report.status.rawValue,
+        let did = ((try? RunReader.steps(in: logger.runDir)) ?? []).compactMap(Conversation.digest)
+        let outcome = report.answer ?? ([report.status.rawValue] + did.suffix(4)).joined(separator: "; ")
+        Conversation.shared.record(goal: goal, outcome: outcome,
                                    steps: report.subgoals, ok: report.status == .done)
         DebugTrace.$runDir.withValue(logger.runDir) {
             DebugTrace.event("runEnd", ["status": report.status.rawValue, "steps": report.steps,

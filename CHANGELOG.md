@@ -3,6 +3,22 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.35] - 2026-10-08
+
+### Fixed
+- **Stops once it worked.** “You haven't skipped the music” pressed Next,
+  saw the new track, and pressed again until the loop guard gave up. Pressing
+  the same control again right after it visibly worked now ends the run as
+  done, and the Reasoner is told a one-thing request is finished at the first
+  visible success.
+- **Said twice, done once.** “Skip. Skip please.” skipped two tracks; the
+  same command repeated in one breath now runs once (“skip twice” still
+  skips two).
+- **Follow-ups know what happened.** Each finished request is remembered with
+  what s1 actually did and what changed (“key nexttrack → new: “Caprice
+  No. 24””), not just “done”, so “that didn't work” or “again” has context.
+  Track skips now report what changed in the player too.
+
 ## [0.3.34] - 2026-10-08
 
 ### Fixed

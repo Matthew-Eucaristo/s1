@@ -29,7 +29,9 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   beam of ≤ 2 covering 80%), then which control. "None" anywhere → the Reasoner.
 - Every UI step's outcome ends with what changed (`ScreenDiff`: "→ new: …", "→ no visible change");
   an AXPress that changed nothing gets one real click on the element's center (not toggles).
-  Reasoner actions at (0,0) or confidence < 0.25 are refused and become a question to the user.
+  Reasoner actions at (0,0) or confidence < 0.25 are refused and become a question to the user;
+  the same press repeated right after it visibly worked finishes the run as done.
+- `Conversation` turns carry what each step did and changed (`Conversation.digest`), not just a status.
 - Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
   /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first
   and the Reasoner prompt includes `MacSkills.guide`. `openURL` only opens settings panes and folders.

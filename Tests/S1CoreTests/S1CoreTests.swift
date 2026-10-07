@@ -3181,3 +3181,52 @@ private struct PhraseJudge: DecisionJudge {
     #expect(TurnEnd.patience(spoken: 1) == 0)
     #expect(TurnEnd.patience(spoken: 30) == 0.7)
 }
+
+@Test func repeatedCommandInOneBreathRunsOnce() {
+    #expect(AXPolicy.intents(of: "Okay, skip. Skip please.").count == 1)
+    #expect(AXPolicy.intents(of: "skip twice").count == 2)
+    #expect(AXPolicy.intents(of: "open Notes, type hi").count == 2)
+}
+
+@Test func conversationRemembersWhatEachStepDid() {
+    let r = StepRecord(index: 0, time: Date(), observation: "x", decidedBy: "s1:ax", confidence: 0.9,
+                       rationale: "", modelReply: nil, action: .axPress(ref: "e273"), gate: "allow",
+                       outcome: "AXPress e273 → new: “Caprice No. 24”", verified: nil, escalation: nil)
+    #expect(Conversation.digest(r) == "axPress(e273) → new: “Caprice No. 24”")
+    var done = r; done.action = .done(summary: "done")
+    #expect(Conversation.digest(done) == nil)
+}
+
+@Test func reasonerStopsAfterThePressWorked() async throws {
+    // "Skip" → Next pressed, a new track shows → the same press again ends the run.
+    final class Changing: Perceiver, @unchecked Sendable {
+        let n = Locked(0)
+        func observe(wantScreenshot: Bool) async throws -> Snapshot {
+            var k = 0
+            n.mutate { $0 += 1; k = $0 }
+            let next = AXNode(ref: "e1", role: "AXButton", title: "Next", desc: nil, value: nil, frame: nil, children: [])
+            let song = AXNode(ref: "e2", role: "AXStaticText", title: "Track \(k)", desc: nil, value: nil, frame: nil, children: [])
+            return Snapshot(timestamp: Date(), frontmostApp: "Music", frontmostPID: 1, windows: [],
+                            axTree: AXNode(ref: "e0", role: "AXWindow", title: "Music", desc: nil, value: nil,
+                                           frame: nil, children: [next, song]), screenshotPath: nil)
+        }
+    }
+    struct Presser: Actuator {
+        let name = "fake"
+        func perform(_ action: Action, frontmostPID: pid_t?) async throws -> String { "AXPress e1" }
+    }
+    struct PressNext: Reasoner {
+        let name = "presser"
+        func decide(observation: Snapshot, goal: String, history: [StepRecord], reason: String) async throws -> Decision {
+            Decision(action: .axPress(ref: "e1"), confidence: 0.9, rationale: "skip")
+        }
+    }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "skip", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: Changing(), actuator: Presser(),
+                         gate: SafetyGate(), s2: PressNext())
+    let report = try await loop.run(goal: "you haven't skipped the music", policy: DummyPolicy(confidence: 0.1),
+                                    logger: logger)
+    #expect(report.status == .done)
+    #expect(report.steps == 2)
+}

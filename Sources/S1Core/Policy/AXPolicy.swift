@@ -90,6 +90,13 @@ public struct AXPolicy: Policy {
             }
         }
         for c in conjWords { parts = parts.flatMap { splitOnConj($0, conj: c) } }
+        // Speech repeats itself ("skip. Skip please."): the same command said
+        // twice in a row is one request; a count ("twice", "3 times") is how
+        // people ask for more.
+        parts = parts.reduce(into: [String]()) { out, p in
+            if let last = out.last, normalized(last) == normalized(p) { return }
+            out.append(p)
+        }
         return parts
             // "and"/"dan" are ambiguous — real words inside typed text
             // ("milk and honey") AND conjunctions ("open X and type Y").
@@ -332,6 +339,10 @@ public struct AXPolicy: Policy {
         }
         walk(tree, inTabs: false)
         return out
+    }
+
+    private static func normalized(_ s: String) -> String {
+        stripFillers(s).lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
     }
 
     static func startsWithVerb(_ s: String) -> Bool {

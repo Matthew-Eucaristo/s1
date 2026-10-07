@@ -50,6 +50,20 @@ public final class Conversation: @unchecked Sendable {
             : "\(g) → \(t.ok ? "" : "FAILED: ")\(o)"
     }
 
+    /// One step as the next request needs to know it: what was done and
+    /// what visibly came of it ("keyCombo(nexttrack)", "axPress(e273) → new:
+    /// “Caprice No. 24”"). Answers and no-ops aren't worth the space.
+    static func digest(_ r: StepRecord) -> String? {
+        guard let a = r.action else { return nil }
+        switch a { case .done, .verify, .wait: return nil; default: break }
+        var s = LLMDecisionCodec.describe(a)
+        if let o = r.outcome {
+            if o.hasPrefix("error:") || o.hasPrefix("blocked:") { s += " FAILED: " + o.prefix(80) }
+            else if let i = o.range(of: " → ") { s += " → " + o[i.upperBound...].prefix(90) }
+        }
+        return s
+    }
+
     public func sessionID(now: Date = Date()) -> String {
         lock.lock(); defer { lock.unlock() }
         rotateIfIdle(now)
