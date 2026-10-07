@@ -3,6 +3,13 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.30] - 2026-10-07
+
+### Fixed
+- **Crash when dictating or typing hands-free.** macOS 27 traps when the
+  keyboard layout is read off the main thread; s1 now reads it on the main
+  thread (falling back to unicode typing if that's busy).
+
 ## [0.3.29] - 2026-10-07
 
 ### Added
