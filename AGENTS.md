@@ -76,5 +76,6 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   placed on a Retina screen if one exists). Assets must be 2x: on a 1x-only Mac, add a temporary
   HiDPI virtual display (CGVirtualDisplay, DeskPad technique) and capture the window there.
   Update `assets/app.png` and `s1-landingpage/public/shots/app.png` together.
-- Release: bump `S1Info.version` + Info.plist, tag `vX.Y.Z`, push (CI uploads the zip), then
-  `S1_SIGN_IDENTITY="Apple Development: …" ./scripts/publish-tap.sh X.Y.Z`.
+- Release: bump `S1Info.version` + Info.plist, tag `vX.Y.Z`, push, wait for CI's release job, then
+  `S1_SIGN_IDENTITY="Apple Development: …" ./scripts/publish-tap.sh X.Y.Z`. The script rebuilds and
+  signs locally and replaces CI's ad-hoc zip; an ad-hoc cask build makes TCC drop grants on upgrade.

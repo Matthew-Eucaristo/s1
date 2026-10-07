@@ -3,6 +3,19 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.31] - 2026-10-07
+
+### Fixed
+- **Permissions survive upgrades again.** 0.3.29 and 0.3.30 shipped ad-hoc
+  signed, so macOS treated each as a new app and dropped Screen Recording.
+  The release script now always builds and signs the zip with the stable
+  identity and refuses to publish an ad-hoc build. Grant Screen Recording one
+  last time after this update.
+- **“Please dictate this”** starts hands-free dictation (any “dictate /
+  dictation / dikte” phrasing); the Reasoner no longer claims it has no mic.
+- A speech-recognition hiccup no longer shows up as “Last run failed”; only a
+  streak that stops the listener is reported.
+
 ## [0.3.30] - 2026-10-07
 
 ### Fixed

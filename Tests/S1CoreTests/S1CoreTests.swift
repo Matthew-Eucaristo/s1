@@ -4,6 +4,9 @@ import AVFoundation
 import ApplicationServices
 @testable import S1Core
 
+/// Serve tests claim the one process-wide mic lock — run them one at a time.
+@Suite(.serialized) struct ServeTests {}
+
 private func jsonlDecoder() -> JSONDecoder {
     let d = JSONDecoder()
     d.dateDecodingStrategy = .iso8601
@@ -748,6 +751,7 @@ private final class Locked<T>: @unchecked Sendable {
 // A serve run needs a real Accessibility grant — the runner's first step
 // calls requireAccessibility(). Without it the test can't prove the wiring,
 // so it's gated rather than failing on machines that haven't granted yet.
+extension ServeTests {
 @Test(.enabled(if: AXIsProcessTrusted(), "no Accessibility grant on this machine"))
 func serveRunUsesConfiguredPolicy() async throws {
     // Prove an utterance becomes a goal and reaches the agent loop:
@@ -782,7 +786,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     let runs = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
     #expect(runs.contains { $0.contains("buka-test-done") })
 }
+}
 
+extension ServeTests {
 @Test func serveSleepsOnStopFile() async throws {
     // `s1 stop` (or the app's Stop button) landing mid-utterance must put
     // the listener to sleep — not just abort the next run.
@@ -819,7 +825,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(!FileManager.default.fileExists(atPath: kill))
     serve.sleep()
 }
+}
 
+extension ServeTests {
 @Test func wakeSkipsClaimWhenWeHoldLock() {
     // Startup already claimed serve.pid → wake() must see our own pid and
     // proceed without throwing busy (the re-entrant path).
@@ -836,7 +844,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(serve.state == .listening)
     serve.sleep()
 }
+}
 
+extension ServeTests {
 @Test func wakeReclaimsDeletedLock() {
     // serve.pid deleted while the daemon slept → wake() re-claims it so the
     // lock stays authoritative (and so a competitor can't sneak between).
@@ -853,7 +863,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     serve.sleep()
     #expect(!S1Runner.holdsPidFile("nonexistent-\(UUID().uuidString)"))
 }
+}
 
+extension ServeTests {
 @Test func serveAutoSleepsAfterSilentTurns() async throws {
     let events = Locked<[ServeEvent.Kind]>([])
     let serve = Serve(
@@ -873,7 +885,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(serve.state == .idle)
     #expect(events.get().contains(.sleeping))
 }
+}
 
+extension ServeTests {
 @Test func serveSttErrorsAutoSleep() async throws {
     struct Boom: Error {}
     let calls = Locked(0)
@@ -894,7 +908,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     #expect(serve.state == .idle)
     #expect(calls.get() >= 2)
 }
+}
 
+extension ServeTests {
 @Test func serveSkipsUtteranceWhileBusy() async throws {
     // While another run owns the screen, a heard utterance must be dropped —
     // never a second concurrent agent fighting for keyboard focus.
@@ -930,7 +946,9 @@ func serveRunUsesConfiguredPolicy() async throws {
     let runs = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
     #expect(!runs.contains { $0.contains("buka-test-done") })
 }
+}
 
+extension ServeTests {
 @Test func serveRunErrorsAutoSleep() async throws {
     // A run that keeps failing must not spin forever: each run() throws
     // while the mic keeps transcribing fine. Run failures are a separate
@@ -959,6 +977,7 @@ func serveRunUsesConfiguredPolicy() async throws {
     // ≥2 failed runs → auto-sleep (each transcribe succeeded between them,
     // which is exactly what must NOT keep it alive).
     #expect(calls.get() >= 2)
+}
 }
 
 // MARK: - ax policy command grammar
@@ -2958,6 +2977,10 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(Dictation.command("Start dictating.") == .start)
     #expect(Dictation.command("okay, start dictation please") == .start)
     #expect(Dictation.command("Mulai dikte") == .start)
+    #expect(Dictation.command("Please dictate this.") == .start)
+    #expect(Dictation.command("Let's start dictation mode") == .start)
+    #expect(Dictation.command("dictation off") == .stop)
+    #expect(Dictation.command("I'm done dictating") == .stop)
     #expect(Dictation.command("ketik apa yang aku bilang") == .start)
     #expect(Dictation.command("Stop dictating.") == .stop)
     #expect(Dictation.command("selesai dikte") == .stop)
@@ -2978,6 +3001,7 @@ private struct ChoosingJudge: DecisionJudge {
     #expect(AXPolicy.stripFillers("um uh buka notes") == "buka notes")
 }
 
+extension ServeTests {
 @Test func serveDictationTypesUtterances() async throws {
     // "start dictating" turns utterances into typing (no agent run) until
     // "stop dictating"; chunks after the first get a separating space.
@@ -3008,4 +3032,5 @@ private struct ChoosingJudge: DecisionJudge {
     let kinds = events.get().map(\.kind)
     #expect(!kinds.contains(.runStart))
     #expect(events.get().filter { $0.kind == .dictating }.map(\.text) == ["on", ""])
+}
 }

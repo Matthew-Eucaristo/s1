@@ -70,6 +70,7 @@ final class AppModel {
     private(set) var speaking = false { didSet { syncHUD() } }
     /// Hands-free dictation ("start dictating"): speech is typed, not run.
     private(set) var dictatingHandsFree = false { didSet { syncHUD() } }
+    private var lastListenError: String?
     /// False when a CLI `s1 serve` owns the listener slot.
     private(set) var companionAvailable = true
     var launchAtLogin = false
@@ -436,9 +437,19 @@ final class AppModel {
             dictatingHandsFree = false
             serveState = .idle
             transcript = ""
-        case .error:
+            if ev.kind == .sleeping, ev.text.hasPrefix("stt errors"), let e = lastListenError {
+                show(String(localized: "Speech recognition kept failing, so s1 stopped listening: \(e)"))
+            }
+            lastListenError = nil
+        case .listenError:
+            // One unheard turn is normal (noise, a rejected guess); only a
+            // streak that puts the listener to sleep is worth a banner.
+            lastListenError = ev.text
+        case .runError:
             show(String(localized: "Last run failed: \(ev.text)"))
             updateCurrent { $0.state = .failed; $0.reply = ev.text; $0.finished = Date() }
+        case .error:
+            show(ev.text)
         }
     }
 

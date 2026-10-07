@@ -13,6 +13,11 @@ public struct ServeEvent: Sendable {
         case escape
         /// Hands-free dictation switched on ("on") or off ("").
         case dictating
+        /// Speech recognition failed for one turn (transient; repeated
+        /// failures sleep the listener with reason "stt errors").
+        case listenError
+        /// The agent run itself threw.
+        case runError
     }
     public var kind: Kind
     public var text: String
@@ -354,7 +359,7 @@ public final class Serve: @unchecked Sendable {
                 return
             } catch {
                 errors += 1
-                emit(.error, error.localizedDescription)
+                emit(.listenError, error.localizedDescription)
                 if errors >= config.maxListenErrors {
                     sleep("stt errors x\(errors)")
                     return
@@ -436,7 +441,7 @@ public final class Serve: @unchecked Sendable {
             }
         } catch {
             ok = false
-            emit(.error, error.localizedDescription)
+            emit(.runError, error.localizedDescription)
         }
         // Talked over within the first seconds: still the same request.
         if bargedEarly.get { pendingPrefix = (goal, Date()) }

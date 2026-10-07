@@ -3,7 +3,8 @@
 #   ./scripts/publish-tap.sh 0.2.0
 #
 # What it does, in order:
-#   1. Builds the release artifact (scripts/make-app.sh): S1.app zip —
+#   1. Builds and signs the release artifact locally (scripts/make-app.sh;
+#      refuses ad-hoc so TCC grants survive upgrades): S1.app zip —
 #      the bundle carries BOTH the GUI (Contents/MacOS/S1) and the CLI
 #      (Contents/Resources/s1) that the cask links onto PATH.
 #   2. Uploads the zip to GitHub Release v<version> (creates it if missing);
@@ -26,8 +27,18 @@ TAG="v${VERSION}"
 ZIP="S1-${VERSION}-app.zip"
 
 # -- 1. artifact ---------------------------------------------------------------
-[[ -f "dist/$ZIP" ]] || ./scripts/make-app.sh release
-ZIP_SHA=$(shasum -a 256 "dist/$ZIP" | awk '{print $1}')
+# Always build and sign locally: CI's zip is ad-hoc signed, and macOS keys
+# Screen Recording/Accessibility grants to the signature — shipping it would
+# make every upgrade ask for permissions again. This zip replaces CI's.
+./scripts/make-app.sh release
+if codesign -dvv dist/S1.app 2>&1 | grep -q "Signature=adhoc"; then
+    echo "!! dist/S1.app is ad-hoc signed — set S1_SIGN_IDENTITY to a real identity" >&2
+    exit 1
+fi
+rm -f "dist/$ZIP" "dist/$ZIP.sha256"
+ditto -c -k --sequesterRsrc --keepParent dist/S1.app "dist/$ZIP"
+(cd dist && shasum -a 256 "$ZIP" > "$ZIP.sha256")
+ZIP_SHA=$(awk '{print $1}' "dist/$ZIP.sha256")
 echo "app zip sha256: $ZIP_SHA"
 
 # -- 2. artifact hosting --------------------------------------------------------
@@ -35,10 +46,10 @@ RELEASE_URLS=0
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     RELEASE_URLS=1
     if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-        gh release upload "$TAG" "dist/$ZIP" --repo "$REPO" --clobber
+        gh release upload "$TAG" "dist/$ZIP" "dist/$ZIP.sha256" --repo "$REPO" --clobber
         echo "uploaded to existing release $TAG"
     else
-        gh release create "$TAG" "dist/$ZIP" --repo "$REPO" \
+        gh release create "$TAG" "dist/$ZIP" "dist/$ZIP.sha256" --repo "$REPO" \
             --title "s1 $VERSION" --generate-notes
         echo "created release $TAG"
     fi

@@ -375,10 +375,14 @@ public struct LLMReasoner: Reasoner {
         Typing: "chat / write / reply / enter / input X" all mean type X; so do \
         "X, please type it (here)" and "type this: X" — the words around the \
         request ARE the text, for the focused field. Put it in the [editable] \
-        field (axSetValue on its ref, or click it then typeText). Once a click focused a field, the NEXT step is typeText — \
-        never click the same field again. To send a chat message, keyCombo \
-        "return" after typing. Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, \
-        select all cmd+a, undo cmd+z.
+        field (axSetValue on its ref, or click it then typeText). Once a click \
+        focused a field, the NEXT step is typeText — never click the same \
+        field again. To send a chat message, keyCombo "return" after typing. \
+        Clipboard: copy cmd+c, paste cmd+v, cut cmd+x, select all cmd+a, undo cmd+z. \
+        Hands-free dictation is s1's own mode: asked to dictate with no text, \
+        reply done with expect "Say “start dictating”, then talk; say “stop \
+        dictating” to finish." (in the Goal's language); never claim you have \
+        no microphone.
 
         Editing what's already written ("delete the word X", "hapus kata X", \
         "replace X with Y"): {"type":"editText","text":"X","value":"Y"} edits \

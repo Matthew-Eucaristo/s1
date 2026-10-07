@@ -7,23 +7,24 @@ public enum Dictation {
     public enum Command: Sendable, Equatable { case start, stop }
 
     static let startPhrases: Set<String> = [
-        "start dictating", "start dictation", "dictation mode", "dictation on", "dictate",
         "type what i say", "type everything i say", "just type what i say",
-        "dikte", "mulai dikte", "mode dikte", "ketik apa yang aku bilang",
-        "ketik yang aku bilang", "ketik apa yang saya bilang", "ketik semua yang aku bilang",
+        "ketik apa yang aku bilang", "ketik yang aku bilang", "ketik apa yang saya bilang",
+        "ketik semua yang aku bilang",
     ]
-    static let stopPhrases: Set<String> = [
-        "stop dictating", "stop dictation", "end dictation", "dictation off", "done dictating",
-        "selesai dikte", "berhenti dikte", "stop dikte", "udah dikte", "sudah dikte",
-    ]
+    private static let word = #"(?:dictat(?:e|ing|ion)|dikte|mendikte)"#
+    private static let tail = #"(?:\s+(?:mode|on|this|that|for me|now|please|ya|dong|sekarang|ini))*"#
+    private static let startRegex = #"^(?:(?:let'?s|i want to|i'?d like to|start|begin|turn on|mulai|aku mau|saya mau)\s+)*"#
+        + word + tail + "$"
+    private static let stopRegex = #"^(?:stop|end|finish|turn off|done|i'?m done|selesai|berhenti|udah|sudah|matikan)\s+"#
+        + word + #"(?:\s+(?:mode|now|please|ya|dong|sekarang))*$|^"# + word + #"\s+off$"#
 
     /// The whole utterance is a dictation switch (fillers allowed:
-    /// "okay, start dictating please").
+    /// "okay, please dictate this", "start dictating", "selesai dikte").
     public static func command(_ text: String) -> Command? {
         let t = AXPolicy.stripFillers(text).lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-        if startPhrases.contains(t) { return .start }
-        if stopPhrases.contains(t) { return .stop }
+        if startPhrases.contains(t) || t.range(of: startRegex, options: .regularExpression) != nil { return .start }
+        if t.range(of: stopRegex, options: .regularExpression) != nil { return .stop }
         return nil
     }
 

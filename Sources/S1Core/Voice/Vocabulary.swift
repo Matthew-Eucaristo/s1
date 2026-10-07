@@ -14,7 +14,7 @@ public enum Vocabulary {
     /// Indonesian only: English command words ("open", "type") are common
     /// enough that a hint slot is better spent on an app name.
     /// Always first: the name and the hands-free dictation switches.
-    static let fixed = ["s1", "start dictating", "stop dictating", "dikte"]
+    static let fixed = ["s1", "dictate", "start dictating", "stop dictating", "dikte"]
 
     static let grammarWords = [
         "buka", "ketik", "klik", "tulis", "tunggu", "gulir", "geser",
