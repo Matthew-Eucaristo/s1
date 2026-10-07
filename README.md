@@ -226,6 +226,9 @@ to the Reasoner, which reads any language.
   listens for what's next (echo-cancelled, so its own voice doesn't trip it).
 - **Custom words:** add names it misspells; it already learns your installed
   apps, skill names and remembered names.
+- **Every app's menu, by voice:** s1 reads the app in front's menu bar, so
+  *“new chat”*, *“shuffle on”*, *“show sidebar”* run the app's own command.
+  `s1 menus` lists them.
 - **Browser tabs:** *“go to tab 3”*, *“the last tab”*, *“switch to the TikTok tab”*,
   *“next tab”*: instant, no model. s1 reads the web page itself too, so *“click Usage”*
   works on page links and buttons.

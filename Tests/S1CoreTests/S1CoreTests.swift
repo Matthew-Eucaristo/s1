@@ -3230,3 +3230,68 @@ private struct PhraseJudge: DecisionJudge {
     #expect(report.status == .done)
     #expect(report.steps == 2)
 }
+
+private let musicMenus = [
+    MenuCommand(path: ["File", "New Chat"], shortcut: "⌘N"),
+    MenuCommand(path: ["View", "Show Sidebar"], shortcut: "⌃⌘S"),
+    MenuCommand(path: ["View", "Notes"]),
+    MenuCommand(path: ["Controls", "Next Track"], shortcut: "⌘→"),
+    MenuCommand(path: ["Controls", "Increase Volume"], shortcut: "⌘↑"),
+    MenuCommand(path: ["Controls", "Shuffle", "On"]),
+    MenuCommand(path: ["Controls", "Shuffle", "Off"]),
+    MenuCommand(path: ["Edit", "Delete Chat"]),
+    MenuCommand(path: ["File", "Export"], enabled: false),
+]
+
+private func menuSnapshot(_ menus: [MenuCommand] = musicMenus) -> Snapshot {
+    var s = Snapshot(timestamp: Date(), frontmostApp: "ChatGPT", frontmostPID: 1, windows: [],
+                     axTree: AXNode(ref: "e0", role: "AXWindow", title: "ChatGPT", desc: nil, value: nil,
+                                    frame: nil, children: []), screenshotPath: nil)
+    s.menus = menus
+    return s
+}
+
+@Test func menuShortcutsAreReadable() {
+    #expect(MenuReader.format(char: "n", modifiers: 0) == "⌘N")
+    #expect(MenuReader.format(char: "s", modifiers: 1 | 4) == "⌃⇧⌘S")
+    #expect(MenuReader.format(char: "Space", modifiers: 2 | 8) == "⌥Space")
+    #expect(MenuReader.keyName(Unicode.Scalar(0xF703)!) == "→")
+    #expect(MenuReader.keyName(Unicode.Scalar(0x01)!) == nil)
+    #expect(MenuReader.resolve(["new chat"], in: musicMenus) == ["File", "New Chat"])
+    #expect(MenuReader.resolve(["Shuffle", "On"], in: musicMenus) == ["Controls", "Shuffle", "On"])
+}
+
+@Test func spokenCommandsFindTheAppsMenu() async throws {
+    func act(_ goal: String) async throws -> Action? {
+        try await AXPolicy().decide(observation: menuSnapshot(), goal: goal, history: []).action
+    }
+    #expect(try await act("new chat") == .menuItem(path: ["File", "New Chat"]))
+    #expect(try await act("create a new chat") == .menuItem(path: ["File", "New Chat"]))
+    #expect(try await act("shuffle on") == .menuItem(path: ["Controls", "Shuffle", "On"]))
+    #expect(try await act("click Show Sidebar") == .menuItem(path: ["View", "Show Sidebar"]))
+    #expect(try await act("open Notes") == .openApp(name: "Notes"))       // the app, not View › Notes
+    #expect(try await act("export") != .menuItem(path: ["File", "Export"]))  // greyed out
+    // Not a grammar verb, but the app has it: a candidate for the Judge, too unsure alone.
+    let louder = try await AXPolicy().decide(observation: menuSnapshot(), goal: "louder", history: [])
+    #expect(louder.action == .menuItem(path: ["Controls", "Increase Volume"]))
+    #expect(louder.confidence < 0.6)
+    #expect(louder.options?.isEmpty == false)
+}
+
+@Test func destructiveMenuCommandsWaitForTheUser() {
+    let gate = SafetyGate()
+    if case .needsHuman = gate.evaluate(.menuItem(path: ["Edit", "Delete Chat"])) {} else { Issue.record("delete allowed") }
+    if case .needsHuman = gate.evaluate(.menuItem(path: ["ChatGPT", "Log Out"])) {} else { Issue.record("log out allowed") }
+    #expect(gate.evaluate(.menuItem(path: ["File", "New Chat"])) == .allow)
+    #expect(LLMDecisionCodec.parse(#"{"action":{"type":"menu","text":"File > New Chat"},"confidence":0.9,"rationale":"x"}"#)?.action
+            == .menuItem(path: ["File", "New Chat"]))
+}
+
+@Test func judgeLooksInTheMenuToo() async throws {
+    // "click the shuffle thing": nothing on screen is called that; the Judge
+    // picks the menu, then the command.
+    let d = try await JudgedPolicy(inner: AXPolicy(), judge: PhraseJudge(region: "Menu commands", target: "Shuffle › On"),
+                                   capture: { nil })
+        .decide(observation: menuSnapshot(), goal: "click the shuffle thing", history: [])
+    #expect(d.action == .menuItem(path: ["Controls", "Shuffle", "On"]))
+}

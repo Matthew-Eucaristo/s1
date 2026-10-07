@@ -124,6 +124,9 @@ public struct SafetyGate: Sendable {
         self.allowIrreversible = allowIrreversible
     }
 
+    static let destructiveMenu =
+        #"\b(delete|erase|empty trash|move to (the )?trash|remove|discard|revert|clear (all|history)|log ?out|sign ?out|restart|shut ?down|reset|uninstall|format|burn)\b"#
+
     public func evaluate(_ action: Action) -> GateVerdict {
         // Deny-list first: it applies to every class.
         if case .keyCombo(let keys) = action {
@@ -164,6 +167,12 @@ public struct SafetyGate: Sendable {
             if opt && !ctrl && !cmd && !ks.isDisjoint(with: ["space", "spacebar"]) {
                 return .needsHuman(reason: "⌥Space is s1's launcher hotkey — it would steal focus mid-run")
             }
+        }
+        // Menu commands that destroy or end something wait for the user,
+        // whoever asked: deleting, erasing, logging out, shutting down.
+        if case .menuItem(let path) = action, let title = path.last,
+           title.range(of: Self.destructiveMenu, options: [.regularExpression, .caseInsensitive]) != nil {
+            return .needsHuman(reason: "“\(path.joined(separator: " › "))” can't be undone")
         }
         for payload in action.textPayloads {
             for rule in Self.denyPatterns {

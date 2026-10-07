@@ -432,7 +432,7 @@ public struct AgentLoop {
     /// steps, where the next decision depends on knowing what happened.
     static func checksEffect(_ action: Action, decidedBy: String) -> Bool {
         switch action {
-        case .click, .doubleClick, .rightClick, .axPress, .axAction, .axSetAttribute: return true
+        case .click, .doubleClick, .rightClick, .axPress, .axAction, .axSetAttribute, .menuItem: return true
         case .typeText, .editText, .axSetValue, .drag, .scroll: return decidedBy.hasPrefix("s2:")
         case .keyCombo(let keys):
             // Track skips show up in the player; other media keys don't.

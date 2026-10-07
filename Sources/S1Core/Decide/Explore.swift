@@ -19,12 +19,17 @@ extension JudgedPolicy {
 
     func explore(_ words: String, base: Decision, goal: String, observation: Snapshot,
                  history: [StepRecord], images: [String]) async throws -> Decision? {
-        guard let tree = observation.axTree else { return nil }
-        let regions = Screen.regions(tree)
+        var regions = observation.axTree.map(Screen.regions) ?? []
+        // The menu bar is one more place to look: the app's own commands.
+        let menus = observation.menus.filter(\.enabled)
+        if !menus.isEmpty {
+            regions.append(Screen.Region(name: "Menu commands",
+                                         targets: menus.map { Screen.Target(menu: $0) }))
+        }
         let total = regions.reduce(0) { $0 + $1.targets.count }
         guard total > 0 else { return nil }
 
-        var pool: [AXNode]
+        var pool: [Screen.Target]
         var trail: [String] = []
         if total <= Self.directLimit || regions.count == 1 {
             pool = regions.flatMap(\.targets)
@@ -57,18 +62,18 @@ extension JudgedPolicy {
         // Too many to list: keep the ones whose words overlap, in screen order.
         if pool.count > Self.directLimit + 2 {
             let ranked = pool.enumerated()
-                .map { ($0.offset, AXPolicy.matchScore(words, $0.element)) }
+                .map { ($0.offset, $0.element.score(words)) }
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
                 .prefix(Self.directLimit + 2).map(\.0).sorted()
             pool = ranked.map { pool[$0] }
         }
-        let keys = pool.enumerated().map { "\($0.offset + 1). \(AXPolicy.label($0.element))" }
+        let keys = pool.enumerated().map { "\($0.offset + 1). \($0.element.label)" }
         guard let answer = try await choose(
             "Which control on the `current` screen does `goal` mean? The list is in screen order.",
             among: keys, observation: observation, goal: goal, history: history, images: images),
-              let i = answer.index, answer.p >= Self.exploreFloor,
-              let action = Screen.press(pool[i]) else { return nil }
-        trail.append(String(format: "%@ p=%.2f", AXPolicy.label(pool[i]), answer.p))
+              let i = answer.index, answer.p >= Self.exploreFloor else { return nil }
+        let action = pool[i].action
+        trail.append(String(format: "%@ p=%.2f", pool[i].label, answer.p))
         var d = base
         d.action = action
         d.confidence = min(answer.p, Self.pickedCap)
@@ -80,12 +85,33 @@ extension JudgedPolicy {
 
 /// The screen as parts a person would name, each with the controls in it.
 enum Screen {
+    /// Something the Judge can point at: an on-screen control or a menu command.
+    struct Target {
+        var label: String
+        var name: String
+        var action: Action
+        var node: AXNode?
+
+        init?(node n: AXNode) {
+            guard let a = Screen.press(n) else { return nil }
+            label = AXPolicy.label(n); name = n.title ?? n.desc ?? n.value ?? ""; action = a; node = n
+        }
+        init(menu m: MenuCommand) {
+            label = "Menu “\(m.label)”"; name = m.title; action = .menuItem(path: m.path); node = nil
+        }
+
+        func score(_ words: String) -> Double {
+            if let node { return AXPolicy.matchScore(words, node) }
+            return MenuMatch.fuzzy(words, in: [MenuCommand(path: [name])]).first?.1 ?? 0
+        }
+    }
+
     struct Region {
         var name: String
-        var targets: [AXNode]
+        var targets: [Target]
         /// "List: New chat, Search chats, Library +9" — what the Judge reads.
         var summary: String {
-            let sample = targets.prefix(4).map { ($0.title ?? $0.desc ?? $0.value ?? "").prefix(28) }
+            let sample = targets.prefix(4).map { $0.name.prefix(28) }
                 .filter { !$0.isEmpty }.joined(separator: ", ")
             let more = targets.count > 4 ? " +\(targets.count - 4)" : ""
             return "\(name) (\(targets.count)): \(sample)\(more)"
@@ -118,7 +144,7 @@ enum Screen {
                 out.append(Region(name: title.isEmpty ? kind : "\(kind) “\(title)”", targets: []))
                 here = out.count - 1
             }
-            if let r = here, isTarget(n) { out[r].targets.append(n) }
+            if let r = here, isTarget(n), let t = Target(node: n) { out[r].targets.append(t) }
             for c in n.children { walk(c, region: here) }
         }
         walk(tree, region: nil)

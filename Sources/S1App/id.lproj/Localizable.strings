@@ -402,3 +402,4 @@
 "Dictating" = "Mendikte";
 "Dictating — say “stop dictating” to finish" = "Mendikte — ucapkan “selesai dikte” untuk berhenti";
 "Speech recognition kept failing, so s1 stopped listening: %@" = "Pengenalan suara terus gagal, jadi s1 berhenti mendengarkan: %@";
+"Choose %@" = "Pilih %@";

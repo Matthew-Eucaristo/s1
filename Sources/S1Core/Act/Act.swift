@@ -125,6 +125,11 @@ public struct CGEventActuator: Actuator {
             up.post(tap: .cghidEventTap)
             return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
 
+        case .menuItem(let path):
+            let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? frontmostPID
+            guard let pid else { throw S1Error.axFailed("no app in front") }
+            return try MenuReader.press(path: path, pid: pid)
+
         case .typeText(let text):
             try actTimeChecks(payload: text)
             let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? frontmostPID

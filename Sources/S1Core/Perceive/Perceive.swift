@@ -53,6 +53,7 @@ public struct SystemPerceiver: Perceiver {
             var appPID: pid_t?
             var secure: Bool
             var tree: AXNode?
+            var menus: [MenuCommand] = []
         }
         let m = await MainActor.run { () -> OnMain in
             var o = OnMain(windows: Self.windowList(), appName: nil, appPID: nil,
@@ -64,6 +65,7 @@ public struct SystemPerceiver: Perceiver {
                 if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
                     o.tree = tree
                 }
+                o.menus = MenuReader.commands(pid: app.processIdentifier)
             }
             return o
         }
@@ -73,6 +75,7 @@ public struct SystemPerceiver: Perceiver {
             windows: m.windows,
             axTree: m.tree, screenshotPath: nil)
         obs.secureTextFocused = m.secure
+        obs.menus = m.menus
         if let tree = m.tree, let pid = m.appPID {
             AXReader.noteTree(tree, pid: pid)
         }

@@ -51,6 +51,9 @@ public enum Action: Codable, Sendable, Equatable {
     /// Ask an app to quit the way the Dock's Quit does (empty = frontmost):
     /// the app saves, or asks about unsaved changes itself.
     case quitApp(name: String)
+    /// Choose a command from the frontmost app's menu bar by its titles,
+    /// ["File", "New Chat"] — the app's own way of doing it.
+    case menuItem(path: [String])
     case wait(seconds: Double)
     // irreversible
     case shell(command: String)
@@ -84,6 +87,7 @@ public enum Action: Codable, Sendable, Equatable {
         // Model-controlled AX action/attribute names get scanned too.
         case .axAction(_, let name): return [name]
         case .axSetAttribute(_, let attr, _): return [attr]
+        case .menuItem(let path): return [path.joined(separator: " ")]
         default: return []
         }
     }
@@ -182,12 +186,15 @@ public struct Snapshot: Codable, Sendable {
     /// True while an AXSecureTextField (password input) has keyboard focus —
     /// the gate routes keystrokes to a human instead of typing into it.
     public var secureTextFocused: Bool = false
+    /// The frontmost app's menu commands — its own list of what it can do.
+    public var menus: [MenuCommand] = []
 
     /// One-line digest for the step log.
     public var summary: String {
         var s = frontmostApp ?? "none"
         s += " | windows:\(windows.count)"
         if let t = axTree { s += " | ax:\(t.flattened.count) nodes" }
+        if !menus.isEmpty { s += " | menus:\(menus.count)" }
         if screenshotPath != nil { s += " | shot" }
         return s
     }

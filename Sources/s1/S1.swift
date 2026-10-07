@@ -13,7 +13,7 @@ struct S1: AsyncParsableCommand {
         abstract: "Voice-first macOS agent — see, decide, act, verify, log.",
         version: S1Info.version,
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
-                      AXCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
+                      AXCmd.self, MenusCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
                       TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
                       ProvidersCmd.self, ConnectCmd.self, DisconnectCmd.self, UseCmd.self,
@@ -375,6 +375,37 @@ struct AXCmd: AsyncParsableCommand {
         if let exact = running.first(where: {
             $0.localizedName?.caseInsensitiveCompare(target) == .orderedSame }) { return exact }
         return running.first { $0.localizedName?.localizedCaseInsensitiveContains(target) ?? false }
+    }
+}
+
+struct MenusCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "menus",
+        abstract: "List an app's menu commands, the ones s1 can choose (default: frontmost).")
+    @Argument(help: "App name, bundle id or pid (default: frontmost app).")
+    var target: String?
+    @Option(help: "Choose this command, e.g. \"File > New Chat\" (goes through the safety gate).")
+    var choose: String?
+
+    func run() async throws {
+        let ws = NSWorkspace.shared
+        let app: NSRunningApplication? = target.flatMap { t in
+            pid_t(t).flatMap(NSRunningApplication.init(processIdentifier:))
+                ?? ws.runningApplications.first { $0.bundleIdentifier?.caseInsensitiveCompare(t) == .orderedSame }
+                ?? ws.runningApplications.first { $0.localizedName?.caseInsensitiveCompare(t) == .orderedSame }
+                ?? ws.runningApplications.first { $0.activationPolicy == .regular && ($0.localizedName?.localizedCaseInsensitiveContains(t) ?? false) }
+        } ?? ws.frontmostApplication
+        guard let app else { print("no such app running"); throw ExitCode(1) }
+        if let choose {
+            let action = Action.menuItem(path: MenuReader.path(choose))
+            guard case .allow = SafetyGate().evaluate(action) else {
+                print("refused by the safety gate: \(SafetyGate().evaluate(action))"); throw ExitCode(1)
+            }
+            print(try MenuReader.press(path: MenuReader.path(choose), pid: app.processIdentifier))
+            return
+        }
+        let items = MenuReader.commands(pid: app.processIdentifier)
+        print("\(app.localizedName ?? "?"): \(items.count) menu commands")
+        for m in items { print("  \(m.enabled ? " " : "-") \(m.label.terminalSafe)") }
     }
 }
 

@@ -547,6 +547,10 @@ public struct AXPolicy: Policy {
         }
         // Tabs by number or by title: "go to tab 3", "switch to the TikTok tab".
         if let d = Self.tabDecision(intent.verb + " " + intent.arg, in: observation) { return d }
+        // The app's own command for it: "new chat" → File › New Chat.
+        if let m = MenuMatch.exact(verb: intent.verb, arg: intent.arg, in: observation.menus) {
+            return Decision(action: .menuItem(path: m.path), confidence: 0.92, rationale: "menu: \(m.label)")
+        }
         // Mac skills: settings panes, folders, system shortcuts by name.
         if let skill = MacSkills.match(intent.verb + " " + intent.arg) {
             return Decision(action: skill.action, confidence: 0.95, rationale: "Mac skill: \(skill.label)")
@@ -1006,6 +1010,17 @@ public struct AXPolicy: Policy {
                                 rationale: "volume how? — up/down/mute")
             }
         default:
+            // Not a verb the grammar knows — but maybe a command the app has
+            // ("shuffle", "louder"): its closest menu commands go to the
+            // Judge as a choice. Unsure on their own, so no Judge → Reasoner.
+            let near = MenuMatch.fuzzy(intent.verb + " " + intent.arg, in: observation.menus)
+                .filter { $0.1 >= 0.5 }
+            if let best = near.first {
+                return Decision(action: .menuItem(path: best.0.path), confidence: 0.5,
+                                rationale: "maybe the menu command \(best.0.label)",
+                                options: near.map { Decision.Option(label: "Menu “\($0.0.label)”",
+                                                                     action: .menuItem(path: $0.0.path)) })
+            }
             return Decision(action: nil, confidence: 0.1,
                             rationale: "unknown verb '\(intent.verb)' — needs a smarter brain")
         }

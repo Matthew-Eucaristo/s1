@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 /// serialize the observation compactly, ask for a JSON decision, parse it.
 enum LLMDecisionCodec {
     static let maxPromptNodes = 220
+    static let maxPromptMenus = 120
 
     /// Keep prompts small: role/title/value of the labeled AX nodes, window
     /// titles, and the app name. Token cost stays low and the model still
@@ -38,6 +39,13 @@ enum LLMDecisionCodec {
             if let v = n.value, !v.isEmpty, v != n.title { s += " value=\"\(v.prefix(60))\"" }
             lines.append(s)
         }
+        // The app's own command list: what it can do, even when no button
+        // for it is on screen. Greyed-out items are left out.
+        let menus = obs.menus.filter(\.enabled).prefix(maxPromptMenus)
+        if !menus.isEmpty {
+            lines.append("Menu commands (\(obs.frontmostApp ?? "app")):")
+            lines += menus.map { "  " + $0.label }
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -56,6 +64,7 @@ enum LLMDecisionCodec {
         case .openURL(let u): return "open(\(u.prefix(40)))"
         case .dismissNotification(let all): return all ? "clearNotifications" : "closeNotification"
         case .quitApp(let n): return "quitApp(\(n))"
+        case .menuItem(let p): return "menu(\(p.joined(separator: " › ")))"
         case .webSearch(let q): return "webSearch(\(q.prefix(40)))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
@@ -241,6 +250,7 @@ enum LLMDecisionCodec {
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
         case "verify":    a = field("expect").map { .verify(expectation: $0) }
         case "captureScreenshot": a = .captureScreenshot(reason: field("expect") ?? "salvaged")
+        case "menu":      a = field("text").map { .menuItem(path: MenuReader.path($0)) }
         case "done":      a = .done(summary: field("expect") ?? "done")
         default:          a = nil
         }
@@ -288,6 +298,8 @@ enum LLMDecisionCodec {
         case "quitApp":   return .quitApp(name: a.app ?? a.name ?? a.text ?? "")
         case "webSearch": guard let q = a.text ?? a.expect, !q.isEmpty else { return nil }
                           return .webSearch(query: q)
+        case "menu":      guard let t = a.text ?? a.name, !t.isEmpty else { return nil }
+                          return .menuItem(path: MenuReader.path(t))
         case "editText":  guard let f = a.text, !f.isEmpty else { return nil }
                           return .editText(find: f, replace: a.value ?? "")
         case "keyCombo":  guard !a.keys.isEmpty else { return nil }
@@ -406,6 +418,11 @@ public struct LLMReasoner: Reasoner {
         reply done with expect "Say “start dictating”, then talk; say “stop \
         dictating” to finish." (in the Goal's language); never claim you have \
         no microphone.
+
+        Menu commands: the app's menu bar is listed under "Menu commands" — its \
+        own list of everything it can do. When a command there does what the \
+        user asked ("new chat", "next track", "shuffle", "show sidebar"), prefer \
+        it over hunting for a button: {"type":"menu","text":"File > New Chat"}.
 
         Browsers: the tabs are the AXRadioButton items inside the AXTabGroup — \
         axPress one to switch tabs (or keyCombo cmd+1 … cmd+9, cmd+9 = last). \

@@ -369,7 +369,8 @@ public struct JudgedPolicy: Policy {
         }
         guard let action = d.action else { return d }
         let isDone: Bool = { if case .done = action { return true }; return false }()
-        let options = (d.options?.count ?? 0) > 1 ? d.options : nil
+        // One candidate is a real question too: with "none of these" beside it.
+        let options = (d.options?.isEmpty == false) ? d.options : nil
         guard inner.judgeable || options != nil || d.confidence < Self.sureAbove
                 || (isDone && Self.touchedUI(history)) else { return d }
 

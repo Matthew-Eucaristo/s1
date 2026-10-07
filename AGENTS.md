@@ -31,6 +31,12 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   an AXPress that changed nothing gets one real click on the element's center (not toggles).
   Reasoner actions at (0,0) or confidence < 0.25 are refused and become a question to the user;
   the same press repeated right after it visibly worked finishes the run as done.
+- **Menus are each app's manual.** `MenuReader` (Perceive/Menus.swift) reads the frontmost app's menu
+  bar into `Snapshot.menus` (cached 30 s per pid, Apple and Services menus skipped); `.menuItem(path:)`
+  presses by path or by title (`MenuReader.resolve`). The grammar uses exact title matches
+  (`MenuMatch.exact`, never "open X" → X), unknown verbs offer `MenuMatch.fuzzy` candidates to the Judge,
+  `explore` adds a "Menu commands" region, the Reasoner prompt lists enabled commands. Destructive titles
+  (`SafetyGate.destructiveMenu`) need the user.
 - `Conversation` turns carry what each step did and changed (`Conversation.digest`), not just a status.
 - Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
   /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first

@@ -3,6 +3,23 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.36] - 2026-10-08
+
+### Added
+- **Every app's menu bar is s1's manual for it.** s1 reads the app in front's
+  menu commands (without opening a menu, cached, ~0.1 s) and uses the app's
+  own way of doing things:
+  - the built-in grammar runs exact ones instantly: “new chat” → File › New
+    Chat, “shuffle on” → Controls › Shuffle › On, “show sidebar”;
+  - words it doesn't know (“louder”, “shuffle”) offer the closest commands to
+    the Judge, and the Judge's screen search includes the menu bar;
+  - the Reasoner sees the command list with shortcuts and can choose any of
+    them, instead of hunting for a button.
+  Greyed-out commands are skipped; delete, erase, log out, restart and the
+  like wait for you.
+- `s1 menus [app]` lists an app's commands; `--choose "File > New Chat"` runs
+  one through the safety gate.
+
 ## [0.3.35] - 2026-10-08
 
 ### Fixed
