@@ -3,6 +3,29 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.33] - 2026-10-08
+
+### Changed
+- **The Judge chooses from a distribution instead of rubber-stamping one
+  guess.** When the built-in grammar isn't sure which control you mean, the
+  Judge gets the top candidates plus “none of these”. When nothing matches
+  your words (“click the first step”), it narrows down coarse to fine: which
+  part of the screen (toolbar, tabs, sidebar list, page, dialog), widening to
+  the next most likely part when unsure, then which control there, with the
+  screen image if it reads images. “None” at any level hands the step to the
+  Reasoner.
+- **Short answers by default.** Questions get one sentence (“Yes, ChatGPT is
+  open.”), details only when you ask.
+
+### Fixed
+- **Native apps like ChatGPT:** every click now reports what changed on
+  screen. A button that ignores Accessibility presses (common in SwiftUI and
+  web views) gets a real click on its center, and the Reasoner sees “no
+  visible change” instead of pressing the same button until the loop guard
+  stops it.
+- The Reasoner can no longer act blindly (a “placeholder” click at 0,0, or
+  near-zero confidence); s1 asks you instead.
+
 ## [0.3.32] - 2026-10-08
 
 ### Fixed

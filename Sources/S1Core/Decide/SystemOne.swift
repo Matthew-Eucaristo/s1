@@ -358,20 +358,22 @@ public struct JudgedPolicy: Policy {
 
     public func decide(observation: Snapshot, goal: String, history: [StepRecord]) async throws -> Decision {
         var d = try await inner.decide(observation: observation, goal: goal, history: history)
+        if d.action == nil, let words = d.explore {
+            // The grammar knows it's a click but not on what: look for it.
+            let images = await screen(observation)
+            if let found = try? await explore(words, base: d, goal: goal, observation: observation,
+                                               history: history, images: images) {
+                return found
+            }
+            return d
+        }
         guard let action = d.action else { return d }
         let isDone: Bool = { if case .done = action { return true }; return false }()
         let options = (d.options?.count ?? 0) > 1 ? d.options : nil
         guard inner.judgeable || options != nil || d.confidence < Self.sureAbove
                 || (isDone && Self.touchedUI(history)) else { return d }
 
-        var images: [String] = []
-        if judge.acceptsImages {
-            if let path = observation.screenshotPath, let jpeg = ScreenImage.downscaledJPEG(path: path) {
-                images = [jpeg]
-            } else if let jpeg = await capture() {
-                images = [jpeg]
-            }
-        }
+        let images = await screen(observation)
         do {
             if let options {
                 try await pick(options, for: &d, goal: goal, observation: observation,
@@ -399,21 +401,56 @@ public struct JudgedPolicy: Policy {
         return d
     }
 
-    /// Several controls fit: the Judge chooses which one the goal means.
+    /// The screen, for a Judge that reads images — taken only when it looks.
+    func screen(_ observation: Snapshot) async -> [String] {
+        guard judge.acceptsImages else { return [] }
+        if let path = observation.screenshotPath, let jpeg = ScreenImage.downscaledJPEG(path: path) {
+            return [jpeg]
+        }
+        return await capture().map { [$0] } ?? []
+    }
+
+    static let noneOption = "none of these"
+
+    /// The grammar's candidates as a distribution: the Judge chooses one, or
+    /// says none fits. A confident choice among the grammar's own candidates
+    /// may carry the step (capped below exact grammar hits); "none" or a
+    /// flat answer hands it to the Reasoner.
     private func pick(_ options: [Decision.Option], for d: inout Decision, goal: String,
                       observation: Snapshot, history: [StepRecord], images: [String]) async throws {
         let keys = options.enumerated().map { "\($0.offset + 1). \($0.element.label)" }
-        let q: [String: DecisionQuestion] = ["target": .choice(
+        guard let answer = try await choose(
             "Which of these controls on the `current` screen should be used next for `goal`?",
-            options: Dictionary(uniqueKeysWithValues: keys.map { ($0, String?.none) }))]
-        let state = DecisionContext.state(goal: goal, observation: observation, history: history)
-        let r = try await judge.evaluate(state: state, questions: q, images: images)
-        guard let ans = r.answers["target"], let chosen = ans.choice,
-              let i = keys.firstIndex(of: chosen) else { return }
-        let p = ans.probabilities?[chosen] ?? ans.confidence ?? 1
+            among: keys, observation: observation, goal: goal, history: history, images: images) else { return }
+        guard let i = answer.index else {
+            d.confidence = min(d.confidence, 0.2)
+            d.rationale += " · judge \(judge.model): none of the candidates fits"
+            return
+        }
+        let p = answer.p
         d.action = options[i].action
         d.rationale += String(format: " · judge %@ picked %d/%d p=%.2f", judge.model, i + 1, options.count, p)
-        if p < vetoBelow { d.confidence = min(d.confidence, p) }
+        d.confidence = p < vetoBelow ? min(d.confidence, p) : max(d.confidence, min(p, Self.pickedCap))
+    }
+
+    /// A Judge's choice can carry a step this far — never as sure as an exact match.
+    static let pickedCap = 0.85
+
+    /// One `choice` question over `keys` plus "none of these": the chosen
+    /// index (nil = none fits) and its probability; nil when the Judge gave
+    /// no usable answer.
+    func choose(_ question: String, among keys: [String], observation: Snapshot, goal: String,
+                history: [StepRecord], images: [String]) async throws -> (index: Int?, p: Double)? {
+        var criteria = Dictionary(uniqueKeysWithValues: keys.map { ($0, String?.none) })
+        criteria[Self.noneOption] = "What `goal` refers to is not in this list"
+        let state = DecisionContext.state(goal: goal, observation: observation, history: history)
+        let r = try await judge.evaluate(state: state, questions: ["target": .choice(question, options: criteria)],
+                                         images: images)
+        guard let ans = r.answers["target"], let chosen = ans.choice else { return nil }
+        let p = ans.probabilities?[chosen] ?? ans.confidence ?? 1
+        if chosen == Self.noneOption { return (nil, p) }
+        guard let i = keys.firstIndex(of: chosen) else { return nil }
+        return (i, p)
     }
 }
 

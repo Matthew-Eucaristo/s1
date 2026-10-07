@@ -23,6 +23,13 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   several controls match, a score when the grammar is unsure (< 0.9), and a done-check after UI steps.
   Exact grammar steps are never judged. A Judge that sees captures the screen on demand
   (`JudgedPolicy.capture`), never every step.
+- **Distributions, not branches.** An inexact click hands the Judge its top candidates plus "none of
+  these"; no match at all sets `Decision.explore`, and `JudgedPolicy.explore` (Decide/Explore.swift)
+  narrows coarse-to-fine: which part of the screen (`Screen.regions`: toolbar, tabs, list, page…, a
+  beam of ≤ 2 covering 80%), then which control. "None" anywhere → the Reasoner.
+- Every UI step's outcome ends with what changed (`ScreenDiff`: "→ new: …", "→ no visible change");
+  an AXPress that changed nothing gets one real click on the element's center (not toggles).
+  Reasoner actions at (0,0) or confidence < 0.25 are refused and become a question to the user.
 - Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
   /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first
   and the Reasoner prompt includes `MacSkills.guide`. `openURL` only opens settings panes and folders.
@@ -47,7 +54,9 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   `Policy`/`Reasoner`, skills, Shortcuts, CLI). Plugins are roadmap only; never claim they exist.
 
 ## Invariants
-- The safety gate runs before every action; judges can only lower confidence.
+- The safety gate runs before every action. The Judge lowers confidence on grammar steps; it raises it
+  only by choosing among the grammar's own candidates or finding a control in `explore`, capped at
+  `JudgedPolicy.pickedCap` (0.85), so exact grammar hits stay the only near-certain steps.
 - Screenshots are optional evidence: perception uses `observe(preferScreenshot:)` so a missing Screen
   Recording grant degrades to the AX tree; only an explicit `.captureScreenshot` action requires it.
 - Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save).

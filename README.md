@@ -62,7 +62,7 @@ Everything dangerous waits for you.
 - **Every step is evidence.** Each run keeps its steps, who decided them, why,
   and screenshots. Browse them in the app's history or `~/.s1/artifacts`.
 - **Careful by design.** A safety gate runs before every action. Passwords,
-  purchases and anything irreversible stop and ask. The Judge can only add caution.
+  purchases and anything irreversible stop and ask. The Judge never gets past the gate.
 - **Great defaults, all of it yours.** Works the moment it opens, and every
   default is a setting. Models, vision and voices are also a CLI command and a
   line in `~/.s1/config.json`. See [Configure and extend](#configure-and-extend).
@@ -125,11 +125,12 @@ brew uninstall --cask s1 --zap       # app + ~/.s1 + Library traces
   knows, deterministically. No model, no network.
 - **The Judge (System 1)** is a fast decision model that answers typed questions
   about the screen; it never writes plans. It steps in where it adds something:
-  when several controls match ("click Send" with two Send buttons) it picks
-  one, when the grammar's match is fuzzy it scores the step, and after typing
-  or clicking it checks the goal really happened. If it reads images, it looks
-  at the screen for those questions only. It can only lower confidence; exact
-  steps (open an app, press a key) stay instant. No Judge set: the grammar
+  when the grammar isn't sure which control you mean, it chooses from the top
+  candidates (or says none fits); when nothing matches your words ("click the
+  first step") it narrows the screen down, first which part, then which
+  control; and after typing or clicking it checks the goal really happened. If
+  it reads images, it looks at the screen for those questions only. Exact steps
+  (open an app, press a key) stay instant and unjudged. No Judge set: the grammar
   runs alone.
 - **The Reasoner (System 2)** gets the step when the grammar doesn't know it or
   confidence is low: the goal, the run so far, the accessibility tree and, if it

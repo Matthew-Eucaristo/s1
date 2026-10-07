@@ -2610,7 +2610,10 @@ private struct ChoosingJudge: DecisionJudge {
     let judged = try await JudgedPolicy(inner: AXPolicy(), judge: ChoosingJudge(pick: 2), capture: { nil })
         .decide(observation: obs, goal: "click Send", history: [])
     #expect(judged.action == .axPress(ref: "e2"))
-    #expect(judged.confidence <= plain.confidence)   // picking never raises confidence
+    // A confident pick among the grammar's own candidates carries the step,
+    // capped below an exact grammar hit.
+    #expect(judged.confidence == 0.8)
+    #expect(judged.confidence > plain.confidence)
     #expect(judged.rationale.contains("picked 2/2"))
 }
 
@@ -3083,4 +3086,81 @@ extension ServeTests {
     #expect(summary != "done")
     let plain = LLMDecisionCodec.parse(#"{"action":{"type":"done"},"confidence":0.9,"rationale":"Chrome is open."}"#)
     #expect(plain?.action == .done(summary: "done"))
+}
+
+
+/// Answers each `choice` with the first option whose text contains a phrase.
+private struct PhraseJudge: DecisionJudge {
+    var region: String
+    var target: String
+    var p: Double = 0.9
+    var model: String { "phrase" }
+    func evaluate(state: JSONValue, questions: [String: DecisionQuestion]) async throws -> DecisionResult {
+        var answers: [String: DecisionAnswer] = [:]
+        for (name, q) in questions {
+            let want = name == "region" ? region : target
+            let k = ChoosingJudge.keys(q).sorted().first { $0.contains(want) } ?? JudgedPolicy.noneOption
+            answers[name] = DecisionAnswer(type: "choice", choice: k, probabilities: [k: p])
+        }
+        return DecisionResult(answers: answers)
+    }
+}
+
+@Test func judgeExploresTheScreenCoarseToFine() async throws {
+    func node(_ ref: String, _ role: String, _ title: String?, _ kids: [AXNode] = []) -> AXNode {
+        AXNode(ref: ref, role: role, title: title, desc: nil, value: nil,
+               frame: CGRectCodable(CGRect(x: 10, y: 10, width: 50, height: 20)), children: kids)
+    }
+    let tools = node("e1", "AXToolbar", nil, (0..<8).map { node("t\($0)", "AXButton", "Tool \($0)") })
+    let steps = node("e2", "AXList", nil, (1...10).map { node("s\($0)", "AXButton", "Step \($0): setup") })
+    let tree = node("e0", "AXWindow", "Studio", [tools, steps])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "Chrome", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    // No control is called "the first step": the grammar can't match it…
+    let plain = try await AXPolicy().decide(observation: obs, goal: "click the first step", history: [])
+    #expect(plain.action == nil)
+    #expect(plain.explore == "the first step")
+    // …the Judge picks the list, then its first entry.
+    let judged = try await JudgedPolicy(inner: AXPolicy(), judge: PhraseJudge(region: "List", target: "Step 1:"),
+                                        capture: { nil })
+        .decide(observation: obs, goal: "click the first step", history: [])
+    #expect(judged.action == .axPress(ref: "s1"))
+    #expect(judged.confidence == JudgedPolicy.pickedCap)
+    #expect(judged.rationale.contains("List"))
+    // A Judge that finds nothing fitting leaves it to the Reasoner.
+    let none = try await JudgedPolicy(inner: AXPolicy(), judge: PhraseJudge(region: "List", target: "nothing"),
+                                      capture: { nil })
+        .decide(observation: obs, goal: "click the first step", history: [])
+    #expect(none.action == nil)
+}
+
+@Test func judgeSaysNoneOfTheCandidates() async throws {
+    let a = AXNode(ref: "e1", role: "AXButton", title: "Send later", desc: nil, value: nil, frame: nil, children: [])
+    let b = AXNode(ref: "e2", role: "AXButton", title: "Send now", desc: nil, value: nil, frame: nil, children: [])
+    let tree = AXNode(ref: "e0", role: "AXWindow", title: "Mail", desc: nil, value: nil, frame: nil, children: [a, b])
+    let obs = Snapshot(timestamp: Date(), frontmostApp: "Mail", frontmostPID: 1,
+                       windows: [], axTree: tree, screenshotPath: nil)
+    let d = try await JudgedPolicy(inner: AXPolicy(), judge: PhraseJudge(region: "", target: "nothing"),
+                                   capture: { nil })
+        .decide(observation: obs, goal: "click send", history: [])
+    #expect(d.confidence <= 0.2)
+}
+
+@Test func screenDiffReportsWhatChanged() {
+    func snap(_ app: String, _ titles: [String]) -> Snapshot {
+        let kids = titles.map { AXNode(ref: "x", role: "AXButton", title: $0, desc: nil, value: nil, frame: nil, children: []) }
+        return Snapshot(timestamp: Date(), frontmostApp: app, frontmostPID: 1, windows: [],
+                        axTree: AXNode(ref: "e0", role: "AXWindow", title: nil, desc: nil, value: nil,
+                                       frame: nil, children: kids), screenshotPath: nil)
+    }
+    #expect(ScreenDiff.summary(snap("A", ["New chat"]), snap("A", ["New chat"])) == nil)
+    #expect(ScreenDiff.summary(snap("A", ["New chat"]), snap("A", ["New chat", "Chat 2"])) == "new: “Chat 2”")
+    #expect(ScreenDiff.summary(snap("A", ["x"]), snap("B", [])) == "now in B; 1 gone")
+}
+
+@Test func blindReasonerActionsAreRefused() {
+    #expect(AgentLoop.unusable(.click(x: 0, y: 0), confidence: 0.9))
+    #expect(AgentLoop.unusable(.axPress(ref: "e3"), confidence: 0.1))
+    #expect(!AgentLoop.unusable(.axPress(ref: "e3"), confidence: 0.8))
+    #expect(!AgentLoop.unusable(.done(summary: "Which one?"), confidence: 0.1))
 }

@@ -261,6 +261,18 @@ public struct AgentLoop {
                                         rationale: "s2 error: \(error.localizedDescription)")
                 }
                 decidedBy = "s2:\(s2.name)"
+                // A Reasoner guessing blindly (a "placeholder" click at 0,0,
+                // near-zero confidence) asks the user instead of acting.
+                if let a = decision.action, Self.unusable(a, confidence: decision.confidence) {
+                    let why = "I'm not sure what to do here; name the button or item you mean"
+                    let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
+                                   rat: decision.rationale, action: nil,
+                                   gate: "needsHuman(\(why))", out: "suppressed: \(a)",
+                                   ver: nil, esc: StepRecord.Escalation(to: "human", reason: why),
+                                   reply: decision.rawReply)
+                    try await logger.log(r)
+                    return (r, nil)
+                }
             } else {
                 esc = StepRecord.Escalation(to: "s2:none", reason: "no S2 configured; conf \(decision.confidence)")
                 // Below threshold with nowhere to escalate: suppress the
@@ -376,6 +388,9 @@ public struct AgentLoop {
             } else {
                 do {
                     outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
+                    if Self.checksEffect(action, decidedBy: decidedBy), !(actuator is DryRunActuator) {
+                        outcome += await effect(of: action, before: obs)
+                    }
                 } catch {
                     // A failed action is evidence too — log it and keep looping
                     // (the model sees "error:" and picks a different move).
@@ -400,6 +415,67 @@ public struct AgentLoop {
                        reply: decision.rawReply)
         try await logger.log(r)
         return (r, nil)
+    }
+
+    /// Steps whose result shows on screen. Clicks and presses always (a press
+    /// that did nothing gets a real click); typing and keys only for model
+    /// steps, where the next decision depends on knowing what happened.
+    static func checksEffect(_ action: Action, decidedBy: String) -> Bool {
+        switch action {
+        case .click, .doubleClick, .rightClick, .axPress, .axAction, .axSetAttribute: return true
+        case .typeText, .editText, .axSetValue, .drag, .scroll: return decidedBy.hasPrefix("s2:")
+        case .keyCombo(let keys):
+            return decidedBy.hasPrefix("s2:") && !keys.contains { CGEventActuator.mediaKeys[$0.lowercased()] != nil }
+        default: return false
+        }
+    }
+
+    /// An action not worth executing: a pointer action at the screen's corner
+    /// (models emit 0,0 as a placeholder) or a screen action at near-zero
+    /// confidence. Answers and checks are always fine.
+    static func unusable(_ a: Action, confidence: Double) -> Bool {
+        switch a {
+        case .done, .verify, .wait, .captureScreenshot, .webSearch: return false
+        case .click(let x, let y), .doubleClick(let x, let y), .rightClick(let x, let y), .moveMouse(let x, let y):
+            if x <= 1 && y <= 1 { return true }
+        case .drag(let fx, let fy, _, _):
+            if fx <= 1 && fy <= 1 { return true }
+        default: break
+        }
+        return confidence < 0.25
+    }
+
+    /// Roles where a second activation would undo the first.
+    static let toggles: Set<String> = ["AXCheckBox", "AXSwitch", "AXDisclosureTriangle", "AXToggle"]
+
+    /// What the step changed, polled briefly (apps publish AX changes a beat
+    /// late). An AXPress that changed nothing gets one real click on the
+    /// element's center: SwiftUI and web controls often accept AXPress and
+    /// ignore it.
+    private func effect(of action: Action, before: Snapshot) async -> String {
+        if let change = await observedChange(since: before) { return " → " + change }
+        if case .axPress(let ref) = action,
+           let n = before.axTree?.flattened.first(where: { $0.ref == ref }),
+           let f = n.frame, f.w > 0, f.h > 0, !Self.toggles.contains(n.role) {
+            let click = Action.click(x: f.x + f.w / 2, y: f.y + f.h / 2)
+            guard (try? await actuator.perform(click, frontmostPID: before.frontmostPID)) != nil else {
+                return " → no visible change"
+            }
+            if let change = await observedChange(since: before) {
+                return " (the press did nothing, so s1 clicked it) → " + change
+            }
+            return " → no visible change, even after a real click"
+        }
+        return " → no visible change"
+    }
+
+    private func observedChange(since before: Snapshot) async -> String? {
+        for delay: UInt64 in [250_000_000, 500_000_000] {
+            try? await Task.sleep(nanoseconds: delay)
+            guard let now = try? await perceiver.observe(wantScreenshot: false) else { return nil }
+            if let change = ScreenDiff.summary(before, now) { return change }
+        }
+        return nil
     }
 
     /// Post-action check: re-observe and see if the expectation is visible in

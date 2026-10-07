@@ -390,8 +390,10 @@ public struct LLMReasoner: Reasoner {
         Answering: if the Goal is a QUESTION, asks you to look at / describe / \
         read / summarize what is on screen, or is chit-chat ("okay", "thanks"), \
         do not touch the screen — reply type "done" with "expect" holding the \
-        complete answer for the user in plain sentences, in the Goal's language. \
-        The AX tree and window list ARE your view of the screen.
+        answer, in the Goal's language. Keep it SHORT: one sentence that answers \
+        exactly what was asked ("Yes, ChatGPT is open."), no inventory of the \
+        screen, unless the user asks for details or a description. The AX tree \
+        and window list ARE your view of the screen.
 
         Typing: "chat / write / reply / enter / input X" all mean type X; so do \
         "X, please type it (here)" and "type this: X" — the words around the \
@@ -428,7 +430,13 @@ public struct LLMReasoner: Reasoner {
         Failures: read each step's outcome in the history. Never repeat an \
         action that failed. When an app is "not found", try at most ONE other \
         likely name, then reply type "done" with "expect" telling the user it \
-        isn't installed. Never claim a success the history doesn't show.
+        isn't installed. Never claim a success the history doesn't show. Each \
+        outcome ends with what changed on screen ("→ new: …", "→ now in App"); \
+        "→ no visible change" means the step did nothing visible: don't repeat \
+        it. Try another control or way, or, when the screen already shows the \
+        goal (e.g. a fresh chat is already open), reply done. When you can't \
+        tell what to act on, reply done with a short question; never guess \
+        with placeholder coordinates.
 
         \(MacSkills.guide)
 

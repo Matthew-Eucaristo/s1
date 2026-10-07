@@ -13,6 +13,9 @@ public struct Decision: Codable, Sendable {
     /// Close alternatives to `action` (best first), when the brain isn't sure
     /// which on-screen control was meant. A Judge picks among them.
     public var options: [Option]?
+    /// The grammar knows the user wants to click something but found no
+    /// matching control: the words for it. A Judge can look for it on screen.
+    public var explore: String?
 
     public struct Option: Codable, Sendable, Equatable {
         public var label: String
@@ -21,8 +24,9 @@ public struct Decision: Codable, Sendable {
     }
 
     public init(action: Action?, confidence: Double, rationale: String, rawReply: String? = nil,
-                delegate: [String]? = nil, options: [Option]? = nil) {
+                delegate: [String]? = nil, options: [Option]? = nil, explore: String? = nil) {
         self.delegate = delegate
+        self.explore = explore
         self.options = options
         self.action = action
         self.confidence = confidence

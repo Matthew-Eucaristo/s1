@@ -712,8 +712,12 @@ public struct AXPolicy: Policy {
                 .filter { $0.1 > 0 }
                 .sorted { $0.1 > $1.1 }
             guard let (node, score) = candidates.first else {
+                // Plain clicks can still be found by looking: the Judge
+                // narrows the screen down to the control the words mean.
+                let plain = setValue == nil && !["dclick", "rclick"].contains(intent.verb)
                 return Decision(action: nil, confidence: 0.25,
-                                rationale: "no AX element matches '\(needle)'")
+                                rationale: "no AX element matches '\(needle)'",
+                                explore: plain ? needle : nil)
             }
             // The action that targets one matched element, or nil (no frame).
             func target(_ n: AXNode) -> Action? {
@@ -735,13 +739,15 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "matched \(node.ref) but it has no frame to click")
             }
-            // Ambiguity penalty: second-place close behind → less sure, and
-            // the close calls go along so a Judge can pick the right one.
+            // Ambiguity penalty: second-place close behind → less sure.
             let runnerUp = candidates.dropFirst().first?.1 ?? 0
             let ambiguous = runnerUp > score - 0.15
             let confidence = min(0.95, score * (ambiguous ? 0.75 : 1.0))
-            let options: [Decision.Option]? = ambiguous
-                ? candidates.prefix(5).filter { $0.1 > score - 0.15 }.compactMap { c in
+            // Not an exact hit: the plausible candidates go along as a
+            // distribution, so a Judge chooses (or says none fits) instead of
+            // the grammar committing to its first guess.
+            let options: [Decision.Option]? = ambiguous || confidence < JudgedPolicy.sureAbove
+                ? candidates.prefix(6).filter { $0.1 >= 0.25 }.compactMap { c in
                     target(c.0).map { Decision.Option(label: Self.label(c.0), action: $0) }
                   }
                 : nil
