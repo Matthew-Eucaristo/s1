@@ -248,7 +248,7 @@ public enum FileSearch {
                 p.standardError = FileHandle.nullDevice
                 guard (try? p.run()) != nil else { cont.resume(returning: []); return }
                 DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { if p.isRunning { p.terminate() } }
-                let data = out.fileHandleForReading.readDataToEndOfFile()
+                let data = ((try? out.fileHandleForReading.readToEnd()) ?? Data())
                 p.waitUntilExit()
                 let paths = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
                     .filter { !$0.contains("/Library/") && !$0.contains("/.") }

@@ -138,8 +138,8 @@ public enum CuaInstaller {
         p.executableURL = URL(fileURLWithPath: path); p.arguments = argv
         p.standardOutput = out; p.standardError = err
         guard (try? p.run()) != nil else { return ("", "") }
-        let o = out.fileHandleForReading.readDataToEndOfFile()
-        let e = err.fileHandleForReading.readDataToEndOfFile()
+        let o = ((try? out.fileHandleForReading.readToEnd()) ?? Data())
+        let e = ((try? err.fileHandleForReading.readToEnd()) ?? Data())
         p.waitUntilExit()
         return (String(decoding: o, as: UTF8.self), String(decoding: e, as: UTF8.self))
     }

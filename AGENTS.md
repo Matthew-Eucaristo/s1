@@ -54,6 +54,10 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Accent: `AppModel.accent` (s1 orange `Theme.orange` by default, or the macOS accent via
   Settings → Appearance, UserDefaults `accent`). Use it, never hard-coded colors; `onAccent` for text on it.
 - Every user-facing string is localizable; keep `Sources/S1App/id.lproj/Localizable.strings` in sync.
+- Shared mutable state: `Locked<Value>` / `AtomicFlag` (`S1Core/Util/Sync.swift`, built on
+  `Synchronization.Mutex`/`Atomic`). No new NSLock + `nonisolated(unsafe)` pairs; mutate with
+  `withLock { }` so read-modify-write is atomic. Long-lived logs go through `JSONL.append` (size-capped).
+- Stuck-loop guards apply to model decisions only; grammar steps (`s1:ax`) repeat when the user said so.
 
 ## Verify
 - SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides

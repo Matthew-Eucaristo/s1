@@ -3,9 +3,32 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
-## [Unreleased]
+## [0.3.24] - 2026-10-07
 
 ### Fixed
+- **"press tab 3 times" no longer aborts as a stuck loop.** The guard against
+  a model repeating itself also caught the grammar's deliberate repeats; it now
+  applies to model decisions only.
+- **Lost updates in multi-language listening.** Several recognizer lanes
+  appended errors and confidence scores with a read and a write under separate
+  locks; concurrent lanes could drop one. Now atomic.
+- **No crash on a full disk.** The run log used the legacy `FileHandle.write`,
+  which raises an Objective-C exception instead of throwing; run logs are also
+  private (0600) now.
+- Only a real stop (kill switch, cancelled task) ends a run as "Stopped";
+  other failures surface as errors.
+- `usage.jsonl` and `artifacts/debug.jsonl` no longer grow forever (capped at
+  4 MB and 8 MB, oldest half dropped, never a torn line).
+- Long spoken answers aren't cut off at 30 s; the limit scales with length.
+
+### Changed
+- Modern Swift concurrency: one `Locked<Value>` / `AtomicFlag` on
+  `Synchronization.Mutex` / `Atomic` replaces seven hand-rolled lock classes
+  and three `nonisolated(unsafe)` globals; throwing `FileHandle` APIs
+  throughout; 51 dead `@available(macOS 26, *)` and 4 `#available` checks
+  removed (s1 requires macOS 26). Zero compiler warnings, tests included.
+
+### Fixed (packaging)
 - **No password prompt from Homebrew.** The cask listed s1's launchd labels
   under `uninstall launchctl:`, and brew checks each one in the system domain
   with `sudo` on every upgrade, reinstall and uninstall. s1's optional

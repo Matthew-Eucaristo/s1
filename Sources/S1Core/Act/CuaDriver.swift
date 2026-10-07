@@ -141,8 +141,8 @@ public enum CuaDriver {
         try p.run()
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        let data = ((try? out.fileHandleForReading.readToEnd()) ?? Data())
+        let errData = ((try? err.fileHandleForReading.readToEnd()) ?? Data())
         p.waitUntilExit()
         killer.cancel()
         guard p.terminationStatus == 0 else {

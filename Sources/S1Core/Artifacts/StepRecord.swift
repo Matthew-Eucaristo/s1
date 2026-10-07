@@ -119,12 +119,15 @@ public actor RunLogger {
         // REPLACES the file, so a failed handle would silently truncate the
         // whole evidence trail to this one line.
         if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
+            FileManager.default.createFile(atPath: url.path, contents: nil,
+                                           attributes: [.posixPermissions: 0o600])
         }
+        // Throwing FileHandle API: a full disk is an error to report, not
+        // the legacy write(_:)'s Objective-C exception that kills the app.
         let h = try FileHandle(forWritingTo: url)
-        h.seekToEndOfFile()
-        h.write(Data((line + "\n").utf8))
-        try h.close()
+        defer { try? h.close() }
+        try h.seekToEnd()
+        try h.write(contentsOf: Data((line + "\n").utf8))
         onStep?(record)
     }
 

@@ -45,7 +45,7 @@ public enum ModelPull {
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
         guard (try? proc.run()) != nil else { return [] }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let data = ((try? pipe.fileHandleForReading.readToEnd()) ?? Data())
         proc.waitUntilExit()
         guard proc.terminationStatus == 0 else { return [] }
         return parseOllamaList(String(decoding: data, as: UTF8.self))

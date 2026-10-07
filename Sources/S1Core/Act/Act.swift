@@ -611,7 +611,7 @@ enum AppResolver {
             // patience — enforce the advertised bound.
             let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-            let data = out.fileHandleForReading.readDataToEndOfFile()
+            let data = ((try? out.fileHandleForReading.readToEnd()) ?? Data())
             p.waitUntilExit()
             killer.cancel()
             guard p.terminationStatus == 0, p.terminationReason == .exit else { return [] }
