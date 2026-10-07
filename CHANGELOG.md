@@ -3,6 +3,16 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [Unreleased]
+
+### Fixed
+- **No password prompt from Homebrew.** The cask listed s1's launchd labels
+  under `uninstall launchctl:`, and brew checks each one in the system domain
+  with `sudo` on every upgrade, reinstall and uninstall. s1's optional
+  listener is a per-user agent, so the cask now only quits the app on
+  uninstall; `--zap` boots the agent out as the user. Caveats rewritten for
+  the menu-bar app, and the cask passes `brew style`.
+
 ## [0.3.23] - 2026-10-07
 
 ### Changed

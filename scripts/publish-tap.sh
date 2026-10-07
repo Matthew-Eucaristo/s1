@@ -83,36 +83,46 @@ cask "s1" do
   # The CLI ships inside the bundle (Contents/Resources/s1) — brew links it
   # into HOMEBREW_PREFIX/bin so \`s1\` works on PATH from the same install.
   binary "#{appdir}/S1.app/Contents/Resources/s1"
-  uninstall launchctl: ["com.matthew.s1.serve", "sh.brew.s1"],
-            quit:      ["com.mattheweuc.s1", "com.matthew.s1.app"]
 
-  zap trash: [
-    "~/.s1",
-    "~/Library/Application Scripts/com.mattheweuc.s1",
-    "~/Library/Application Scripts/com.matthew.s1.app",
-    "~/Library/Containers/com.mattheweuc.s1",
-    "~/Library/Containers/com.matthew.s1.app",
-    "~/Library/HTTPStorages/com.mattheweuc.s1",
-    "~/Library/HTTPStorages/com.matthew.s1.app",
-    "~/Library/LaunchAgents/com.matthew.s1.serve.plist",
-    "~/Library/LaunchAgents/sh.brew.s1.plist",
-    "~/Library/Preferences/com.mattheweuc.s1.plist",
-    "~/Library/Preferences/com.matthew.s1.app.plist",
-    "~/Library/Saved Application State/com.mattheweuc.s1.savedState",
-    "~/Library/Saved Application State/com.matthew.s1.app.savedState",
-  ]
+  # No \`launchctl:\` here: brew checks every listed label in the system
+  # domain with sudo (a password prompt on each upgrade), and s1's optional
+  # listener is a per-user agent. Upgrades must leave it running; --zap
+  # boots it out as the user, no sudo.
+  uninstall quit: ["com.mattheweuc.s1", "com.matthew.s1.app"]
+
+  zap script: {
+        executable:   "/bin/launchctl",
+        args:         ["bootout", "gui/#{Process.uid}/com.matthew.s1.serve"],
+        must_succeed: false,
+        print_stderr: false,
+      },
+      trash:  [
+        "~/.s1",
+        "~/Library/Application Scripts/com.matthew.s1.app",
+        "~/Library/Application Scripts/com.mattheweuc.s1",
+        "~/Library/Containers/com.matthew.s1.app",
+        "~/Library/Containers/com.mattheweuc.s1",
+        "~/Library/HTTPStorages/com.matthew.s1.app",
+        "~/Library/HTTPStorages/com.mattheweuc.s1",
+        "~/Library/LaunchAgents/com.matthew.s1.serve.plist",
+        "~/Library/LaunchAgents/sh.brew.s1.plist",
+        "~/Library/Preferences/com.matthew.s1.app.plist",
+        "~/Library/Preferences/com.mattheweuc.s1.plist",
+        "~/Library/Saved Application State/com.matthew.s1.app.savedState",
+        "~/Library/Saved Application State/com.mattheweuc.s1.savedState",
+      ]
 
   caveats <<~EOS
-    Developer-signed but not notarized → Gatekeeper will block the first
-    open. Either install with \`brew install --cask --no-quarantine s1\`,
-    or once:
+    Developer-signed but not notarized, so macOS blocks the first open.
+    Install with \`brew install --cask --no-quarantine s1\`, or once:
       xattr -dr com.apple.quarantine /Applications/S1.app
-    Then open S1 and grant Accessibility + Screen Recording + Microphone
-    when it asks — \`s1 preflight\` shows the score.
+    Then open S1: setup asks for Accessibility (required) and, if you want
+    them, Microphone, Input Monitoring and Screen Recording.
+    S1 lives in the menu bar; ⇧⇧ works anywhere while it runs
+    (Settings → General → Open s1 at login).
 
-      Always-on listener:        s1 serve --install   (launchd agent, armed at login)
-      Local model brain:         brew install ollama && ollama pull gemma3:4b
-      Full reset:                brew uninstall --cask s1 --zap
+      Terminal only, no app:   s1 serve --install   (a per-user launchd listener)
+      Full reset:              brew uninstall --cask s1 --zap
   EOS
 end
 EOF
