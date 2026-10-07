@@ -60,6 +60,7 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Every user-facing string is localizable; keep `Sources/S1App/id.lproj/Localizable.strings` in sync.
 - Paths: always `S1Home.path` (never `NSHomeDirectory() + "/.s1"`); tests get a temp home automatically.
 - Typing: `postKeystrokes` sends real layout key codes (`KeyLayout`), unicode only for the rest.
+  Text Input Sources (TIS/TSM) calls must run on the main queue (macOS 27 traps otherwise).
 - Shared mutable state: `Locked<Value>` / `AtomicFlag` (`S1Core/Util/Sync.swift`, built on
   `Synchronization.Mutex`/`Atomic`). No new NSLock + `nonisolated(unsafe)` pairs; mutate with
   `withLock { }` so read-modify-write is atomic. Long-lived logs go through `JSONL.append` (size-capped).
