@@ -899,7 +899,10 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     /// matches `language` (an English voice reading Indonesian is worse than
     /// the best Indonesian one), otherwise the best installed voice wins.
     public func say(_ text: String, language: String = "id-ID", voice: String? = nil,
-                    timeout: Double = 30) async {
+                    timeout: Double? = nil) async {
+        // ~12 characters a second spoken, plus headroom: a long answer isn't
+        // cut mid-sentence, a wedged synthesizer still can't pin the caller.
+        let timeout = timeout ?? max(30, Double(text.count) / 12 + 10)
         // read-modify-write of the tail under the same lock the continuation
         // slot uses — an atomic pair or two concurrent callers both chain nil.
         let t = lock.withLock {

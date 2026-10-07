@@ -2843,3 +2843,24 @@ private struct ChoosingJudge: DecisionJudge {
     let c = UsageLog.counts(fromUsage: ["prompt_tokens": 10, "cost": 0.002, "prompt_tokens_details": ["cache_write_tokens": 7]])
     #expect(c.cost == 0.002 && c.cacheWrite == 7)
 }
+
+@Test func spokenRepeatsAreNotAStuckLoop() async throws {
+    // "press tab 3 times" is three identical steps by design, not a loop.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: NullPerceiver(),
+                         actuator: DryRunActuator(), gate: SafetyGate())
+    let report = try await loop.run(goal: "press tab 5 times", policy: AXPolicy(), logger: logger)
+    #expect(report.status == .done)
+    #expect(report.steps == 6)          // five presses + done
+}
+
+@Test func jsonLogsDropTheirOldestHalfPastTheCap() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString).jsonl")
+    for i in 0..<200 { JSONL.append(Data("{\"i\":\(i)}\n".utf8), to: url, maxBytes: 1_000) }
+    let text = try String(contentsOf: url, encoding: .utf8)
+    let lines = text.split(separator: "\n")
+    #expect(text.utf8.count < 1_100)
+    #expect(lines.last == "{\"i\":199}")
+    #expect(lines.allSatisfy { $0.hasPrefix("{\"i\":") && $0.hasSuffix("}") })   // no torn lines
+}

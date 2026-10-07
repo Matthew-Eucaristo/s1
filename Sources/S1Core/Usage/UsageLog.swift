@@ -51,16 +51,8 @@ public enum UsageLog {
         guard var line = try? enc.encode(r) else { return }
         line.append(0x0A)
         lock.lock(); defer { lock.unlock() }
-        let fm = FileManager.default
-        try? fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                                withIntermediateDirectories: true)
-        if !fm.fileExists(atPath: path) {
-            fm.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600])
-        }
-        guard let h = FileHandle(forWritingAtPath: path) else { return }
-        defer { try? h.close() }
-        _ = try? h.seekToEnd()
-        try? h.write(contentsOf: line)
+        // ~20k calls; the Usage tab shows 30 days at most.
+        JSONL.append(line, to: URL(fileURLWithPath: path), maxBytes: 4 << 20)
     }
 
     public static func load(path: String = UsageLog.path, since: Date? = nil) -> [UsageRecord] {

@@ -108,9 +108,12 @@ public struct AgentLoop {
                                                   history: history, s1History: sub == nil ? history : subHistory,
                                                   forceS2: forceS2, logger: logger, onPhase: onPhase)
                 forceS2 = nil
-            } catch is S1Error {
-                // A kill-switch abort landing mid-decision ends the run as
-                // aborted — not as an abstention that escalates to S2.
+            } catch {
+                // A stop landing mid-decision (kill switch, cancelled task)
+                // ends the run as aborted; any other failure is reported as one.
+                let stopped = Task.isCancelled
+                    || config.killSwitchPath.map { FileManager.default.fileExists(atPath: $0) } == true
+                guard stopped else { throw error }
                 status = .aborted
                 break
             }
@@ -155,10 +158,14 @@ public struct AgentLoop {
             // S2 was consulted and still couldn't decide — stop instead of
             // burning steps on an unrecoverable abstention.
             if rec.action == nil, rec.escalation != nil { status = .escalatedToS2; break }
-            // Stuck-loop guards: the same action 3× in a row never converges,
-            // and neither does an A-B-A-B oscillation (click, wait, click,
-            // wait…) — both burn steps forever without the check.
-            if history.suffix(3).count == 3,
+            // Stuck-loop guards: a model repeating the same action 3× never
+            // converges, nor does an A-B-A-B oscillation (click, wait, click,
+            // wait…). Grammar steps are exempt: they come from the user's own
+            // words ("press tab 3 times") and end with the command.
+            let modelTail = { (n: Int) in
+                history.suffix(n).count == n && history.suffix(n).allSatisfy { $0.decidedBy != "s1:\(AXPolicy.grammarName)" }
+            }
+            if modelTail(3),
                let a0 = history[history.count - 1].action,
                history.suffix(3).allSatisfy({ $0.action == a0 }) {
                 try await logger.log(record(history.count, obs: nil, by: "system", conf: nil,
@@ -167,7 +174,7 @@ public struct AgentLoop {
                 status = .stuckLoop
                 break
             }
-            if history.suffix(4).count == 4 {
+            if modelTail(4) {
                 let tail = history.suffix(4).compactMap { $0.action }
                 if tail.count == 4, tail[0] == tail[2], tail[1] == tail[3], tail[0] != tail[1] {
                     try await logger.log(record(history.count, obs: nil, by: "system", conf: nil,

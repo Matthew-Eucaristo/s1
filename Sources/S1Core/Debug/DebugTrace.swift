@@ -34,14 +34,7 @@ public enum DebugTrace {
         let url = (runDir ?? root).appendingPathComponent("debug.jsonl")
         lock.lock(); defer { lock.unlock() }
         S1Home.ensurePrivate()
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                 withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil,
-                                           attributes: [.posixPermissions: 0o600])
-        }
-        guard let h = try? FileHandle(forWritingTo: url) else { return }
-        h.seekToEndOfFile(); h.write(line); try? h.close()
+        JSONL.append(line, to: url, maxBytes: 8 << 20)
     }
 
     /// JSON body with base64 blobs collapsed (screenshots would bury the

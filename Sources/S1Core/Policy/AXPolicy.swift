@@ -10,7 +10,9 @@ import Foundation
 /// — the honest baseline every smarter S1 must beat before earning a place
 /// in the loop.
 public struct AXPolicy: Policy {
-    public let name = "ax"
+    /// The deterministic grammar's policy name ("s1:ax" in run logs).
+    public static let grammarName = "ax"
+    public let name = AXPolicy.grammarName
     public var judgeable: Bool { false }
     /// Seconds waited between queued sub-commands; the policy consumes one
     /// intent per step, using history length as its position cursor.
