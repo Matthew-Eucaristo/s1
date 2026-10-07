@@ -1332,17 +1332,24 @@ private func obsWithTree(_ root: AXNode, states: [AppState] = []) -> Snapshot {
 }
 
 @Test func observationTextCapsNodeCount() {
-    // 100-node tree → only ~60 reach the prompt (token budget).
-    let kids = (0..<100).map {
+    // A huge tree → only `maxPromptNodes` labeled nodes reach the prompt;
+    // unlabeled images never spend the budget.
+    let cap = LLMDecisionCodec.maxPromptNodes
+    var kids = (0..<50).map {
+        AXNode(ref: "i\($0)", role: "AXImage", title: nil,
+               desc: nil, help: nil, value: nil, frame: nil, children: [])
+    }
+    kids += (0..<(cap + 50)).map {
         AXNode(ref: "e\($0 + 1)", role: "AXStaticText", title: "n\($0)",
                desc: nil, help: nil, value: nil, frame: nil, children: [])
     }
     let tree = AXNode(ref: "e0", role: "AXApplication", title: "App",
                       desc: nil, help: nil, value: nil, frame: nil, children: kids)
     let t = LLMDecisionCodec.observationText(obsWithTree(tree))
-    // flattened = root + kids → prefix(60) ends at e59; e60 is the first cut.
-    #expect(t.contains("e59 AXStaticText \"n58\""))
-    #expect(!t.contains("e60"))
+    #expect(!t.contains("i0 AXImage"))
+    // root + (cap - 1) texts → the last shown is e\(cap - 1).
+    #expect(t.contains("e\(cap - 1) AXStaticText"))
+    #expect(!t.contains("e\(cap) AXStaticText"))
 }
 
 @Test func observationTextRendersAppStates() {
@@ -3033,4 +3040,47 @@ extension ServeTests {
     #expect(!kinds.contains(.runStart))
     #expect(events.get().filter { $0.kind == .dictating }.map(\.text) == ["on", ""])
 }
+}
+
+@Test func tabsByNumberAndTitle() {
+    func tab(_ ref: String, _ t: String) -> AXNode {
+        AXNode(ref: ref, role: "AXRadioButton", title: t, desc: nil, value: nil, frame: nil, children: [])
+    }
+    let strip = AXNode(ref: "e2", role: "AXTabGroup", title: nil, desc: nil, value: nil, frame: nil,
+                       children: [tab("e3", "Usage"), tab("e4", "TikTok Studio - Part of group videos"),
+                                  tab("e5", "Penolakan Permintaan")])
+    let tree = AXNode(ref: "e0", role: "AXApplication", title: "Google Chrome", desc: nil, value: nil,
+                      frame: nil, children: [strip])
+    let chrome = Snapshot(timestamp: Date(), frontmostApp: "Google Chrome", frontmostPID: 1,
+                          windows: [], axTree: tree, screenshotPath: nil)
+    #expect(AXPolicy.tabDecision("go to tab 3", in: chrome)?.action == .keyCombo(keys: ["cmd", "3"]))
+    #expect(AXPolicy.tabDecision("switch to the third tab", in: chrome)?.action == .keyCombo(keys: ["cmd", "3"]))
+    #expect(AXPolicy.tabDecision("pindah ke tab terakhir", in: chrome)?.action == .keyCombo(keys: ["cmd", "9"]))
+    #expect(AXPolicy.tabDecision("switch to the TikTok tab", in: chrome)?.action == .axPress(ref: "e4"))
+    #expect(AXPolicy.tabDecision("buka tab usage", in: chrome)?.action == .axPress(ref: "e3"))
+    #expect(AXPolicy.tabDecision("click the usage tab", in: chrome)?.action == .axPress(ref: "e3"))
+    #expect(AXPolicy.tabDecision("close tab", in: chrome) == nil)
+    #expect(AXPolicy.tabDecision("new tab", in: chrome) == nil)
+    #expect(AXPolicy.tabDecision("go to the next tab", in: chrome)?.action == .keyCombo(keys: ["ctrl", "tab"]))
+    #expect(AXPolicy.tabDecision("open notes", in: chrome) == nil)
+    // Outside a browser a number means the Nth tab button, if there is one.
+    let other = Snapshot(timestamp: Date(), frontmostApp: "Finder", frontmostPID: 1,
+                         windows: [], axTree: tree, screenshotPath: nil)
+    #expect(AXPolicy.tabDecision("tab 2", in: other)?.action == .axPress(ref: "e4"))
+    #expect(AXPolicy.tabDecision("tab 7", in: other) == nil)
+}
+
+@Test func politeVerbAfterConjunctionSplits() {
+    let parts = AXPolicy.intents(of: "open Notes and then please search for groceries")
+    #expect(parts.first?.verb == "open")
+    #expect(parts.first?.arg == "Notes")
+    #expect(parts.count >= 2)
+}
+
+@Test func bareDoneThatAsksBackSaysSo() {
+    let d = LLMDecisionCodec.parse(#"{"action":{"type":"done"},"confidence":0.9,"rationale":"The request is ambiguous. Asking for clarification."}"#)
+    guard case .done(let summary)? = d?.action else { Issue.record("not done"); return }
+    #expect(summary != "done")
+    let plain = LLMDecisionCodec.parse(#"{"action":{"type":"done"},"confidence":0.9,"rationale":"Chrome is open."}"#)
+    #expect(plain?.action == .done(summary: "done"))
 }

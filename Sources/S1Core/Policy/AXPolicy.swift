@@ -250,6 +250,90 @@ public struct AXPolicy: Policy {
         return "type " + text
     }
 
+    /// "tab 3", "the third tab", "tab terakhir" → ⌘N in a browser; "the
+    /// TikTok tab", "tab tiktok" → press the tab whose title matches.
+    /// nil = not about picking a tab (new/next/previous keep their own rules).
+    static func tabDecision(_ phrase: String, in obs: Snapshot) -> Decision? {
+        var p = phrase.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+        guard p.range(of: #"\btab\b"#, options: .regularExpression) != nil else { return nil }
+        let before = p
+        p = p.replacingOccurrences(
+            of: #"^(?:(?:switch|go|move|jump|change|pindah|ganti|buka|open|select|pilih|click|klik)\s+)?(?:(?:to|ke)\s+)?(?:the\s+|my\s+)?"#,
+            with: "", options: .regularExpression)
+        // "close tab" / "new tab" aren't picks: a title needs a picking verb
+        // ("go to the X tab") or the "tab X" form.
+        let picking = p != before || p.hasPrefix("tab ")
+        let ordinals: [String: Int] = [
+            "first": 1, "1st": 1, "one": 1, "pertama": 1, "second": 2, "2nd": 2, "two": 2, "kedua": 2,
+            "third": 3, "3rd": 3, "three": 3, "ketiga": 3, "fourth": 4, "4th": 4, "four": 4, "keempat": 4,
+            "fifth": 5, "5th": 5, "five": 5, "kelima": 5, "sixth": 6, "6th": 6, "six": 6, "keenam": 6,
+            "seventh": 7, "7th": 7, "seven": 7, "ketujuh": 7, "eighth": 8, "8th": 8, "eight": 8,
+            "kedelapan": 8, "last": 9, "terakhir": 9,
+        ]
+        func capture(_ pattern: String) -> String? {
+            guard let r = p.range(of: pattern, options: .regularExpression) else { return nil }
+            return String(p[r])
+        }
+        var number: Int?, title: String?
+        if let m = capture(#"^tab\s+(?:ke\s*-?\s*|nomor\s+|number\s+)?\d+$"#) {
+            number = Int(m.filter(\.isNumber))
+        } else if let m = capture(#"^\S+\s+tab$"#) {
+            let w = String(m.dropLast(4))
+            if let n = ordinals[w] { number = n } else { title = w }
+        } else if let m = capture(#"^tab\s+\S+$"#), let n = ordinals[String(m.dropFirst(4))] {
+            number = n
+        } else if p.hasSuffix(" tab") {
+            title = String(p.dropLast(4))
+        } else if p.hasPrefix("tab ") {
+            title = String(p.dropFirst(4))
+        }
+        let tabs = tabButtons(in: obs.axTree)
+        if let n = number {
+            if let app = obs.frontmostApp, browsers.contains(app), (1...9).contains(n) {
+                return Decision(action: .keyCombo(keys: ["cmd", String(n)]), confidence: 0.95,
+                                rationale: n == 9 ? "last tab" : "tab \(n)")
+            }
+            guard n >= 1, n <= tabs.count else { return nil }
+            let tab = n == 9 && tabs.count < 9 ? tabs[tabs.count - 1] : tabs[n - 1]
+            return Decision(action: .axPress(ref: tab.ref), confidence: 0.9, rationale: "tab \(n)")
+        }
+        if picking, let t = title {
+            if ["next", "berikutnya", "selanjutnya", "lanjut"].contains(t) {
+                return Decision(action: .keyCombo(keys: ["ctrl", "tab"]), confidence: 0.9, rationale: "next tab")
+            }
+            if ["previous", "prev", "sebelumnya"].contains(t) {
+                return Decision(action: .keyCombo(keys: ["ctrl", "shift", "tab"]), confidence: 0.9,
+                                rationale: "previous tab")
+            }
+        }
+        guard picking, var t = title?.trimmingCharacters(in: .whitespaces), !t.isEmpty,
+              !["new", "baru", "next", "previous", "prev", "berikutnya", "sebelumnya", "lanjut",
+                "this", "ini", "that", "itu", "a", "another"].contains(t) else { return nil }
+        t = t.replacingOccurrences(of: #"^(?:the|my)\s+"#, with: "", options: .regularExpression)
+        let scored = tabs.compactMap { tab -> (AXNode, Double)? in
+            let name = (tab.title ?? tab.desc ?? "").lowercased()
+            guard !name.isEmpty else { return nil }
+            if name.contains(t) { return (tab, 1) }
+            let score = AppResolver.similarity(t, String(name.prefix(max(t.count + 8, 16))))
+            return score >= 0.6 ? (tab, score) : nil
+        }
+        guard let best = scored.max(by: { $0.1 < $1.1 }) else { return nil }
+        return Decision(action: .axPress(ref: best.0.ref), confidence: best.1 >= 1 ? 0.92 : 0.8,
+                        rationale: "switch to tab “\(best.0.title ?? best.0.desc ?? t)”")
+    }
+
+    /// The tab strip's tabs: radio buttons inside a tab group, in order.
+    static func tabButtons(in tree: AXNode?) -> [AXNode] {
+        guard let tree else { return [] }
+        var out: [AXNode] = []
+        func walk(_ n: AXNode, inTabs: Bool) {
+            if inTabs, n.role == "AXRadioButton" { out.append(n) }
+            for c in n.children { walk(c, inTabs: inTabs || n.role == "AXTabGroup") }
+        }
+        walk(tree, inTabs: false)
+        return out
+    }
+
     static func startsWithVerb(_ s: String) -> Bool {
         let first = s.split(separator: " ", maxSplits: 1).first
             .map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) } ?? ""
@@ -315,15 +399,16 @@ public struct AXPolicy: Policy {
         var searchFrom = s.startIndex
         while let r = s.range(of: needle, options: [.regularExpression, .caseInsensitive],
                               range: searchFrom ..< s.endIndex) {
-            let next = s[r.upperBound...]
-                .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
+            // "… and then please search …": politeness before the verb.
+            let rest = stripFillers(String(s[r.upperBound...]))
+            let next = rest.split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
             // Inside a type segment, ordinary dictation words stay literal
             // — "type ready and next" is text; only unambiguous command
             // verbs ("click", "open") still split.
             if (verbs.contains(next) || editVerbs.contains(next))
                && !(typeWords.contains(next) && startsWithTypeVerb(s)) {
                 return splitOnConj(String(s[..<r.lowerBound]), conj: conj) +
-                       splitOnConj(String(s[r.upperBound...]), conj: conj)
+                       splitOnConj(rest, conj: conj)
             }
             searchFrom = r.upperBound
         }
@@ -337,12 +422,12 @@ public struct AXPolicy: Policy {
         var searchFrom = s.startIndex
         while let r = s.range(of: " +(and|dan) +", options: [.regularExpression, .caseInsensitive],
                               range: searchFrom ..< s.endIndex) {
-            let next = s[r.upperBound...]
-                .split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
+            let rest = stripFillers(String(s[r.upperBound...]))
+            let next = rest.split(separator: " ", maxSplits: 1).first?.lowercased() ?? ""
             if (verbs.contains(next) || editVerbs.contains(next))
                && !(typeWords.contains(next) && startsWithTypeVerb(s)) {
                 return splitConjunctions(String(s[..<r.lowerBound])) +
-                       splitConjunctions(String(s[r.upperBound...]))
+                       splitConjunctions(rest)
             }
             searchFrom = r.upperBound
         }
@@ -449,6 +534,8 @@ public struct AXPolicy: Policy {
            let app = Self.runningApp(intent.arg, in: observation) {
             return Decision(action: .quitApp(name: app), confidence: 0.9, rationale: "quit \(app)")
         }
+        // Tabs by number or by title: "go to tab 3", "switch to the TikTok tab".
+        if let d = Self.tabDecision(intent.verb + " " + intent.arg, in: observation) { return d }
         // Mac skills: settings panes, folders, system shortcuts by name.
         if let skill = MacSkills.match(intent.verb + " " + intent.arg) {
             return Decision(action: skill.action, confidence: 0.95, rationale: "Mac skill: \(skill.label)")

@@ -3,6 +3,26 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.32] - 2026-10-08
+
+### Fixed
+- **s1 can see web pages.** In Chrome the page sits 10+ levels deep behind
+  unlabeled wrapper groups, past the 8-level limit, so s1 saw only the toolbar
+  and menus. The tree walk now skips unlabeled wrappers, starts with the
+  focused window, keeps closed menus folded and drops content scrolled out of
+  view. The page and the tab strip now fit the budget.
+- **The Reasoner sees the whole screen it needs**: every labeled or actionable
+  element (up to 220) instead of the first 60 nodes, which in a browser were all
+  toolbar.
+- A Reasoner reply that asked back but forgot the question no longer shows
+  “Done.”
+- “… and then please search …” splits into two commands (politeness before the
+  verb is skipped).
+
+### Added
+- **Tab switching by voice, no model:** “go to tab 3”, “the third tab”, “tab
+  terakhir”, “switch to the TikTok tab”, “buka tab usage”, “next/previous tab”.
+
 ## [0.3.31] - 2026-10-07
 
 ### Fixed

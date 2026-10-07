@@ -225,6 +225,9 @@ to the Reasoner, which reads any language.
   listens for what's next (echo-cancelled, so its own voice doesn't trip it).
 - **Custom words:** add names it misspells; it already learns your installed
   apps, skill names and remembered names.
+- **Browser tabs:** *“go to tab 3”*, *“the last tab”*, *“switch to the TikTok tab”*,
+  *“next tab”*: instant, no model. s1 reads the web page itself too, so *“click Usage”*
+  works on page links and buttons.
 - **Edit by voice:** *“hapus kata ayam”*, *“replace cat with dog”* edit the focused
   text in place (last whole-word match; Undo works).
 - **Dictate anywhere:** hold <kbd>⌃</kbd><kbd>⌥</kbd><kbd>D</kbd>, speak, release;

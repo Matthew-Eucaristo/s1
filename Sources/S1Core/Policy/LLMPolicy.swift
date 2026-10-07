@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 /// Shared prompt plumbing for model-backed policies and the S2 reasoner:
 /// serialize the observation compactly, ask for a JSON decision, parse it.
 enum LLMDecisionCodec {
-    /// Keep prompts small: role/title/value of the first ~60 AX nodes, window
+    static let maxPromptNodes = 220
+
+    /// Keep prompts small: role/title/value of the labeled AX nodes, window
     /// titles, and the app name. Token cost stays low and the model still
     /// grounds actions in real element refs (`e12`).
     static func observationText(_ obs: Snapshot) -> String {
@@ -19,7 +21,15 @@ enum LLMDecisionCodec {
             lines.append(s)
         }
         lines += obs.windows.prefix(8).map { "win \($0.pid): \($0.title ?? "")" }
-        for n in obs.axTree?.flattened.prefix(60) ?? [] {
+        // Everything actionable or labeled, up to a budget — not the first N
+        // nodes: in a browser those are all toolbar, and the page and the
+        // tab strip come later. Unlabeled images and empty text are skipped.
+        let landmarks: Set<String> = ["AXWindow", "AXWebArea", "AXTabGroup", "AXToolbar", "AXSheet", "AXDialog"]
+        let shown = (obs.axTree?.flattened ?? []).filter { n in
+            landmarks.contains(n.role) || AXSemantics.editable.contains(n.role) || AXSemantics.scrollable.contains(n.role)
+                || [n.title, n.desc, n.help, n.value].contains { !($0 ?? "").isEmpty }
+        }
+        for n in shown.prefix(maxPromptNodes) {
             var s = "\(n.ref) \(n.role)"
             s += AXSemantics.markers(for: n.role)
             if let t = n.title, !t.isEmpty { s += " \"\(t)\"" }
@@ -149,6 +159,16 @@ enum LLMDecisionCodec {
         let action: A?; let confidence: Double?; let rationale: String?
     }
 
+    /// A `done` without "expect": when the model's own reasoning says it was
+    /// asking back, say so instead of claiming the task is done.
+    static func bareDone(rationale: String) -> String {
+        let r = rationale.lowercased()
+        let asking = ["clarif", "ambiguous", "unclear", "rephrase", "not sure", "can't identify",
+                      "cannot identify", "which one", "garbled"].contains { r.contains($0) }
+        return asking ? "I'm not sure what you mean. Could you say it another way, naming what to click or open?"
+                      : "done"
+    }
+
     /// Extract the JSON object even when the model wraps it in prose or fences.
     static func parse(_ text: String) -> Decision? {
         guard let s = text.range(of: "{"), let e = text.range(of: "}", options: .backwards),
@@ -166,9 +186,10 @@ enum LLMDecisionCodec {
                             rationale: w.rationale ?? a.rationale ?? "delegate to S1",
                             delegate: goals.isEmpty ? nil : goals)
         }
-        return Decision(action: w.action.flatMap(LLMDecisionCodec.action),
+        let rationale = w.rationale ?? w.action?.rationale ?? ""
+        return Decision(action: w.action.flatMap { LLMDecisionCodec.action($0, rationale: rationale) },
                         confidence: w.confidence ?? w.action?.confidence ?? 0,
-                        rationale: w.rationale ?? w.action?.rationale ?? "")
+                        rationale: rationale)
     }
 
     /// Last-resort field extraction for replies truncated mid-JSON (3B models
@@ -232,7 +253,7 @@ enum LLMDecisionCodec {
     /// Wire type → Action. Unknown types return nil: a model inventing an
     /// action name ("typewrite", "tap") must NOT silently become `done` —
     /// nil counts as abstention and escalates instead.
-    static func action(_ a: Wire.A) -> Action? {
+    static func action(_ a: Wire.A, rationale: String = "") -> Action? {
         if let ref = a.ref, !ref.isEmpty, a.type == "click" { return .axPress(ref: ref) }
         switch a.type {
         // Missing coords must abstain, not act at (0,0) — that's the
@@ -280,7 +301,7 @@ enum LLMDecisionCodec {
         // AX string. An expectation the model didn't give can't be checked.
         case "verify":    guard let e = a.expect, !e.isEmpty else { return nil }
                           return .verify(expectation: e)
-        case "done":      return .done(summary: a.expect ?? a.text ?? "done")
+        case "done":      return .done(summary: a.expect ?? a.text ?? Self.bareDone(rationale: rationale))
         default:          return nil
         }
     }
@@ -383,6 +404,11 @@ public struct LLMReasoner: Reasoner {
         reply done with expect "Say “start dictating”, then talk; say “stop \
         dictating” to finish." (in the Goal's language); never claim you have \
         no microphone.
+
+        Browsers: the tabs are the AXRadioButton items inside the AXTabGroup — \
+        axPress one to switch tabs (or keyCombo cmd+1 … cmd+9, cmd+9 = last). \
+        The page itself is under AXWebArea; its links and buttons are pressable \
+        by ref like any control.
 
         Editing what's already written ("delete the word X", "hapus kata X", \
         "replace X with Y"): {"type":"editText","text":"X","value":"Y"} edits \

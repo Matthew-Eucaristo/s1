@@ -64,6 +64,9 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Shared mutable state: `Locked<Value>` / `AtomicFlag` (`S1Core/Util/Sync.swift`, built on
   `Synchronization.Mutex`/`Atomic`). No new NSLock + `nonisolated(unsafe)` pairs; mutate with
   `withLock { }` so read-modify-write is atomic. Long-lived logs go through `JSONL.append` (size-capped).
+- AX trees come from one traversal, `AXReader.visit` (focused window first, wrappers skipped,
+  closed menus folded, off-window content pruned); refs are its pre-order indices, so snapshots
+  and `AXReader.element` must both use it. Prompts list labeled/actionable nodes, not the first N.
 - Stuck-loop guards apply to model decisions only; grammar steps (`s1:ax`) repeat when the user said so.
 
 ## Verify

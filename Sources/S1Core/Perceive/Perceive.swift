@@ -173,8 +173,12 @@ public struct SystemPerceiver: Perceiver {
 /// Thin AXUIElement reader — builds the condensed AXNode tree. Depth- and
 /// count-limited so a huge app can't stall the loop.
 public enum AXReader {
-    public static let maxNodes = 400
-    public static let maxDepth = 8
+    public static let maxNodes = 500
+    /// Counted in kept nodes: unlabeled wrapper groups don't use it up, so
+    /// a web page 10+ raw levels inside Chrome is still reached.
+    public static let maxDepth = 12
+    /// Hard stop on raw nesting (wrappers included) against cyclic trees.
+    static let maxRawDepth = 48
 
     /// Bound every AX round-trip so a wedged or unresponsive app can't
     /// stall the loop indefinitely: a healthy app answers in single-digit
@@ -189,8 +193,83 @@ public enum AXReader {
     public static func snapshotTree(pid: pid_t) -> AXNode? {
         let app = AXUIElementCreateApplication(pid)
         bindTimeout(app)
-        var counter = 0
-        return walk(app, depth: 0, counter: &counter)
+        let entries = visit(app)
+        guard !entries.isEmpty else { return nil }
+        // Rebuild the tree bottom-up from the pre-order list; the ref is the
+        // pre-order index, so `flattened[i].ref == "e\(i)"`.
+        var nodes = entries.enumerated().map { i, e in
+            AXNode(ref: "e\(i)", role: e.role, title: e.title, desc: e.desc, help: e.help,
+                   value: e.value, frame: e.frame.map(CGRectCodable.init), children: [])
+        }
+        for i in entries.indices.reversed() {
+            if let p = entries[i].parent { nodes[p].children.insert(nodes[i], at: 0) }
+        }
+        return nodes[0]
+    }
+
+    /// One kept element of the walk, in pre-order.
+    struct Entry {
+        var el: AXUIElement
+        var parent: Int?
+        var role: String, title: String?, desc: String?, help: String?, value: String?
+        var frame: CGRect?
+    }
+
+    /// The single traversal behind snapshots AND ref re-resolution (refs
+    /// are its pre-order indices, so both must walk identically):
+    /// - the focused window comes first, then other windows, the menu bar last;
+    /// - closed menus aren't opened up (hundreds of items nobody sees);
+    /// - unlabeled wrapper groups are skipped, their children kept, so deep
+    ///   web pages (Chrome, Electron) fit the depth and node budget;
+    /// - content scrolled outside its window is left out.
+    static func visit(_ app: AXUIElement) -> [Entry] {
+        var out: [Entry] = []
+        func add(_ el: AXUIElement, parent: Int?, depth: Int, raw: Int, clip: CGRect?) {
+            guard out.count < maxNodes, depth < maxDepth, raw < maxRawDepth else { return }
+            let a = nodeAttrs(el)
+            var clip = clip
+            if a.role == "AXWindow" { clip = a.frame }
+            if let c = clip, let f = a.frame, f.width > 0, f.height > 0, !f.intersects(c) { return }
+            let labeled = [a.title, a.desc, a.help, a.value].contains { !($0 ?? "").isEmpty }
+            let wrapper = !labeled && parent != nil && ["AXGroup", "AXUnknown", "AXSplitGroup"].contains(a.role)
+            var me = parent
+            if !wrapper {
+                out.append(Entry(el: el, parent: parent, role: a.role, title: a.title, desc: a.desc,
+                                 help: a.help, value: a.value, frame: a.frame))
+                me = out.count - 1
+            }
+            // A closed menu's items are noise; an open one (selected title) is the UI.
+            if a.role == "AXMenuBarItem", copyBool(el, kAXSelectedAttribute) != true { return }
+            for k in children(of: el, role: a.role) {
+                add(k, parent: me, depth: wrapper ? depth : depth + 1, raw: raw + 1, clip: clip)
+            }
+        }
+        add(app, parent: nil, depth: 0, raw: 0, clip: nil)
+        return out
+    }
+
+    private static func children(of el: AXUIElement, role: String) -> [AXUIElement] {
+        var kids: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
+              var arr = kids as? [AXUIElement] else { return [] }
+        guard role == "AXApplication" else { return arr }
+        var focused: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+           let f = focused, CFGetTypeID(f) == AXUIElementGetTypeID(),
+           let i = arr.firstIndex(where: { CFEqual($0, f) }) {
+            arr.insert(arr.remove(at: i), at: 0)
+        }
+        // Menu bar last: the window is what the user is looking at.
+        if let i = arr.firstIndex(where: { attr($0, kAXRoleAttribute) == "AXMenuBar" }) {
+            arr.append(arr.remove(at: i))
+        }
+        return arr
+    }
+
+    private static func copyBool(_ el: AXUIElement, _ name: String) -> Bool? {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, name as CFString, &v) == .success else { return nil }
+        return (v as? Bool) ?? (v as? NSNumber)?.boolValue
     }
 
     /// All scalar attributes fetched in ONE IPC round-trip per node via
@@ -236,23 +315,6 @@ public enum AXReader {
         // (Some hosts expose the raw text via AXValue despite the role.)
         if role == "AXSecureTextField" { value = nil }
         return (role, title, desc, help, value, frame)
-    }
-
-    static func walk(_ el: AXUIElement, depth: Int, counter: inout Int) -> AXNode? {
-        guard depth < maxDepth, counter < maxNodes else { return nil }
-        let ref = "e\(counter)"; counter += 1
-
-        let a = nodeAttrs(el)
-        var node = AXNode(ref: ref, role: a.role, title: a.title, desc: a.desc,
-                          help: a.help, value: a.value,
-                          frame: a.frame.map(CGRectCodable.init), children: [])
-
-        var kids: CFTypeRef?
-        if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
-           let arr = kids as? [AXUIElement] {
-            node.children = arr.compactMap { walk($0, depth: depth + 1, counter: &counter) }
-        }
-        return node
     }
 
     /// kAXValueAttribute can be a String, NSNumber, AXValue, or garbage —
@@ -381,9 +443,7 @@ public enum AXReader {
         // One walk that keeps (element, role, title, desc, help, frame) per
         // node — help joins identity so tooltip-named controls re-resolve
         // on drift instead of trusting a stale index.
-        var entries: [(el: AXUIElement, role: String, title: String?, desc: String?, help: String?, frame: CGRect?)] = []
-        var counter = 0
-        collect(app, counter: &counter, depth: 0, into: &entries)
+        let entries = visit(app)
 
         let orig = treeStore.get(pid)?.flattened
         let o = orig.flatMap { target < $0.count ? $0[target] : nil }
@@ -419,17 +479,5 @@ public enum AXReader {
         // now sitting at the stale index is a DIFFERENT control. Failing the
         // action beats pressing a wrong (possibly destructive) target.
         return best?.0
-    }
-
-    static func collect(_ el: AXUIElement, counter: inout Int, depth: Int,
-                        into entries: inout [(el: AXUIElement, role: String, title: String?, desc: String?, help: String?, frame: CGRect?)]) {
-        guard depth < maxDepth, counter < maxNodes else { return }
-        counter += 1
-        let a = nodeAttrs(el)
-        entries.append((el, a.role, a.title, a.desc, a.help, a.frame))
-        var kids: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
-              let arr = kids as? [AXUIElement] else { return }
-        for k in arr { collect(k, counter: &counter, depth: depth + 1, into: &entries) }
     }
 }
