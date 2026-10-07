@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Assembles the contextual-strings list for STT: the user's own words
@@ -10,12 +11,12 @@ public enum Vocabulary {
     /// Command-grammar words — the agent's own domain vocabulary. Without
     /// these, dictation spells them wrong ("buka"→"Buku", "ketik"→"ketek")
     /// and a perfectly heard sentence fails to parse.
+    /// Indonesian only: English command words ("open", "type") are common
+    /// enough that a hint slot is better spent on an app name.
     static let grammarWords = [
         "buka", "ketik", "klik", "tulis", "tunggu", "gulir", "geser",
         "tangkap", "tangkapan", "cek", "pastikan", "selesai", "tekan", "isi",
-        "spasi", "panah", "hapus",
-        "lalu", "kemudian", "terus", "open", "type", "click", "write",
-        "wait", "scroll", "screenshot", "verify", "done", "press", "key",
+        "spasi", "panah", "hapus", "lalu", "kemudian", "terus",
     ]
 
     /// Words s1 already knows the user says: saved skill names + triggers,
@@ -39,10 +40,12 @@ public enum Vocabulary {
     /// names. Case-insensitive dedup preserves the first-seen casing.
     public static func assemble(custom: [String],
                                 learned: () -> [String] = Vocabulary.learned,
-                                appNames: () -> [String] = InstalledApps.names) -> [String] {
+                                appNames: () -> [String] = InstalledApps.ranked) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for w in ["s1"] + custom + learned() + grammarWords + appNames() {
+        // App names before grammar words: with 100 slots, "Chrome" being
+        // heard right matters more than biasing "buka".
+        for w in ["s1"] + custom + learned() + appNames() + grammarWords {
             let t = w.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !t.isEmpty else { continue }
             guard seen.insert(t.lowercased()).inserted else { continue }
@@ -63,6 +66,36 @@ public enum InstalledApps {
         "/Applications/Utilities",
         NSHomeDirectory() + "/Applications",
     ]
+
+    /// Hint order for the recognizer's 100 slots: apps running now, then
+    /// ones the user installed, then Apple's — each with its everyday short
+    /// form ("Google Chrome" → also "Chrome").
+    public static func ranked() -> [String] {
+        let running = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }.compactMap(\.localizedName)
+        let byDir = Dictionary(grouping: names(withDir: true), by: \.dir).mapValues { $0.map(\.name) }
+        let user = (byDir["/Applications"] ?? []) + (byDir[NSHomeDirectory() + "/Applications"] ?? [])
+        let apple = (byDir["/System/Applications"] ?? []) + (byDir["/Applications/Utilities"] ?? [])
+            + (byDir["/System/Applications/Utilities"] ?? [])
+        return (running + user + apple).flatMap { [$0] + [shortForm($0)].compactMap { $0 } }
+    }
+
+    /// "Google Chrome" → "Chrome", "Microsoft Word" → "Word"; nil when the
+    /// last word is generic ("Player", "Studio") or the name is one word.
+    static func shortForm(_ name: String) -> String? {
+        let words = name.split(separator: " ").map(String.init)
+        guard words.count >= 2, let last = words.last, last.count >= 4,
+              !["player", "studio", "editor", "viewer", "settings", "center", "utility",
+                "assistant", "app", "manager", "preview"].contains(last.lowercased()) else { return nil }
+        return last
+    }
+
+    static func names(withDir: Bool) -> [(dir: String, name: String)] {
+        appDirs.flatMap { dir in
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+                .filter { $0.hasSuffix(".app") }.sorted().map { (dir, String($0.dropLast(4))) }
+        }
+    }
 
     public static func names() -> [String] {
         var out: [String] = []

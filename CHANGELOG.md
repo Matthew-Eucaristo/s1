@@ -3,6 +3,21 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.27] - 2026-10-07
+
+### Fixed
+- **App names are heard right.** Apple allows 100 recognizer hints; s1 spent
+  ~35 on command words and filled the rest with Apple's own apps first, so
+  user-installed apps (Google Chrome → "Microme") never made the list. Hints
+  now go: your words, apps running now, apps you installed (plus short forms:
+  "Chrome", "Word"), Apple's apps, then Indonesian command words.
+- **Pausing mid-sentence no longer cuts you off.** When the words so far end
+  on something a sentence can't end on ("open my…", "the", "and", "uh",
+  "buka", "yang"), the listener waits ~1.3 s more for the rest.
+- **Finishing your sentence isn't an interruption.** Talking within 3 s of s1
+  starting on a request joins the new words onto it ("Please open Microme" +
+  "browser please" → one request) instead of a "Stopped" plus a fragment.
+
 ## [0.3.26] - 2026-10-07
 
 ### Fixed

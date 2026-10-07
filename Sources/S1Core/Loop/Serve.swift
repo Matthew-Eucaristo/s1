@@ -120,6 +120,11 @@ public final class Serve: @unchecked Sendable {
     private let onEvent: @Sendable (ServeEvent) -> Void
     private var hotkey: Hotkey?
     private var listenTask: Task<Void, Never>?
+    /// A request the user kept talking over within `continuationWindow` of
+    /// it starting: they weren't interrupting, they hadn't finished. The next
+    /// utterance is joined onto it instead of becoming a fresh command.
+    private var pendingPrefix: (text: String, at: Date)?
+    static let continuationWindow: TimeInterval = 3
     private let sayLanguage: String
     /// ~/.s1/serve-state.json — external observability for `s1 status`.
     /// Best-effort: a daemon should never fail because telemetry can't write.
@@ -281,7 +286,12 @@ public final class Serve: @unchecked Sendable {
                     continue
                 }
                 silentTurns = 0
-                emit(.heard, trimmed)
+                var goal = trimmed
+                if let p = pendingPrefix, Date().timeIntervalSince(p.at) < 15 {
+                    goal = Self.join(p.text, trimmed)
+                }
+                pendingPrefix = nil
+                emit(.heard, goal)
                 if await config.isBusy() {
                     // Another run owns the screen — drop this utterance and
                     // keep listening instead of starting a competing agent.
@@ -289,7 +299,7 @@ public final class Serve: @unchecked Sendable {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     continue
                 }
-                if await run(goal: trimmed) {
+                if await run(goal: goal) {
                     runErrors = 0
                 } else {
                     // A broken endpoint (or a run that keeps failing) must
@@ -326,9 +336,12 @@ public final class Serve: @unchecked Sendable {
         // is energy-only (near-free); voice processing's AEC keeps our own
         // TTS from tripping it.
         let barged = AtomicFlag()
+        let started = Date()
+        let bargedEarly = AtomicFlag()
         var barge: BargeMonitor?
         if config.voiceInterrupt {
             barge = BargeMonitor { [weak self] in
+                if Date().timeIntervalSince(started) < Self.continuationWindow { bargedEarly.set() }
                 barged.set()
                 self?.interrupted()
             }
@@ -386,6 +399,8 @@ public final class Serve: @unchecked Sendable {
             ok = false
             emit(.error, error.localizedDescription)
         }
+        // Talked over within the first seconds: still the same request.
+        if bargedEarly.get { pendingPrefix = (goal, Date()) }
         if state == .running {
             setState(.listening)
             // Publish the transition — the app's badge tracks events, so a
@@ -394,6 +409,11 @@ public final class Serve: @unchecked Sendable {
             emit(.listening, "")
         }
         return ok
+    }
+
+    /// "Please open Microme." + "browser please" → one request.
+    static func join(_ first: String, _ rest: String) -> String {
+        first.trimmingCharacters(in: CharacterSet(charactersIn: ".!?, ").union(.whitespaces)) + " " + rest
     }
 
     /// Barge-in callback (audio monitor queue): abort the in-flight run at

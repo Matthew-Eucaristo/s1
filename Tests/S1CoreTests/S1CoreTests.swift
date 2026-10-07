@@ -1077,17 +1077,17 @@ func serveRunUsesConfiguredPolicy() async throws {
 }
 
 @Test func vocabularyIncludesGrammarWords() {
-    // The command-grammar verbs ride along so dictation spells them right —
-    // custom words still outrank them, app names fill the rest.
+    // Indonesian command words ride along so dictation spells them right;
+    // custom words and app names outrank them (a misheard app name breaks
+    // more commands than a misheard "buka").
     let apps = { ["Finder", "TextEdit"] }
-    let v = Vocabulary.assemble(custom: ["Warp"], appNames: apps)
+    let v = Vocabulary.assemble(custom: ["Warp"], learned: { [] }, appNames: apps)
     #expect(v.first == "s1")
     #expect(v[1] == "Warp")
     #expect(v.contains("buka"))
     #expect(v.contains("ketik"))
-    #expect(v.contains("open"))
-    #expect(v.contains("Finder"))
-    #expect(v.firstIndex(of: "buka")! < v.firstIndex(of: "Finder")!)
+    #expect(!v.contains("open"))                     // common English: no slot spent
+    #expect(v.firstIndex(of: "Finder")! < v.firstIndex(of: "buka")!)
 }
 
 @Test func configVocabularyRoundTrips() throws {
@@ -2909,4 +2909,22 @@ private struct ChoosingJudge: DecisionJudge {
     // Not running → the notification it probably means.
     obs.appStates = []; obs.frontmostApp = "Finder"
     #expect(try await act("close my reminder") == .dismissNotification(all: false))
+}
+
+@Test func unfinishedSentencesWaitForTheRest() {
+    #expect(TurnEnd.looksUnfinished("Uh, can you open my?"))
+    #expect(TurnEnd.looksUnfinished("tolong buka yang"))
+    #expect(TurnEnd.looksUnfinished("open the"))
+    #expect(!TurnEnd.looksUnfinished("Please open Google Chrome."))
+    #expect(!TurnEnd.looksUnfinished("buka notes"))
+    #expect(Serve.join("Please open Microme.", "browser please") == "Please open Microme browser please")
+}
+
+@Test func speechHintsPutAppsFirstWithShortForms() {
+    #expect(InstalledApps.shortForm("Google Chrome") == "Chrome")
+    #expect(InstalledApps.shortForm("Microsoft Word") == "Word")
+    #expect(InstalledApps.shortForm("QuickTime Player") == nil)
+    #expect(InstalledApps.shortForm("Safari") == nil)
+    let v = Vocabulary.assemble(custom: [], learned: { [] }, appNames: { ["Google Chrome", "Chrome"] })
+    #expect(Array(v.prefix(3)) == ["s1", "Google Chrome", "Chrome"])     // apps before command words
 }

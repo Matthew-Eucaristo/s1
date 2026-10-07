@@ -671,6 +671,7 @@ public struct SpeechToText: Sendable {
         let leader = Locked<[Double]>(Array(repeating: -1, count: lanes.count))
         let speechEnded = AtomicFlag()
         let lastText = Locked<Date?>(nil)
+        let heardSoFar = Locked<String>("")
         // VAD: speechDetected true→false means the utterance is over —
         // close the turn promptly even when the final segment lags.
         // `.energy` mode has no detector — the stream just never runs.
@@ -695,6 +696,7 @@ public struct SpeechToText: Sendable {
                         await collected.append(text, confidence: Self.confidence(of: result.text))
                         let mean = await collected.meanConfidence ?? 0
                         leader.withLock { $0[i] = mean }
+                        if i == 0 { heardSoFar.value = await collected.value }
                     } else {
                         // Volatile best-guess of the in-flight segment — only
                         // the currently most confident language streams to
@@ -703,7 +705,9 @@ public struct SpeechToText: Sendable {
                         let lead = scores.indices.max { scores[$0] < scores[$1] || (scores[$0] == scores[$1] && $0 > $1) } ?? 0
                         guard lead == i else { continue }
                         let soFar = await collected.value
-                        onPartial?(soFar.isEmpty ? text : soFar + " " + text)
+                        let line = soFar.isEmpty ? text : soFar + " " + text
+                        heardSoFar.value = line
+                        onPartial?(line)
                     }
                 }
             })
@@ -712,6 +716,8 @@ public struct SpeechToText: Sendable {
             let stream = streams[i].0
             inputTasks.append(Task { try await a.start(inputSequence: stream) })
         }
+        var extendUntil: Date?
+        var extensions = 0
         // End the turn on speech, not on the clock: VAD (SpeechDetector or
         // the energy endpointer) says the utterance ended, or once a final
         // segment has landed a short grace catches
@@ -725,15 +731,35 @@ public struct SpeechToText: Sendable {
             if control?.stopped == true { endReason = "released"; break }
             // Hold-to-talk: the key, not the VAD, ends the turn.
             if control?.holding == true { continue }
-            if speechEnded.get { endReason = "speechDetector"; break }
-            if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
-            // The recognizer is a VAD too: words stopped changing → turn over.
-            if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle { endReason = "textSettle"; break }
+            // Mid-thought pause ("open my…"): wait a little longer once or
+            // twice, and end as soon as the words stop changing again.
+            if let until = extendUntil {
+                let quiet = lastText.value.map { Date().timeIntervalSince($0) >= 1.0 } ?? true
+                if Date() < until || !quiet { continue }
+                if extensions < 2, TurnEnd.looksUnfinished(heardSoFar.value), lastText.value.map({ $0 > until.addingTimeInterval(-TurnEnd.extraWait) }) == true {
+                    extensions += 1; extendUntil = Date().addingTimeInterval(TurnEnd.extraWait); continue
+                }
+                endReason = "unfinished+wait"; break
+            }
+            let ended: String? = speechEnded.get ? "speechDetector"
+                : endpointer.isDone ? "endpointer:\(endpointer.state)"
+                : lastText.value.map({ Date().timeIntervalSince($0) > Self.textSettle }) == true ? "textSettle" : nil
+            if let ended {
+                if extensions == 0, TurnEnd.looksUnfinished(heardSoFar.value) {
+                    extensions = 1; extendUntil = Date().addingTimeInterval(TurnEnd.extraWait); continue
+                }
+                endReason = ended; break
+            }
             var settled = false
             for c in collectors {
                 if await c.hasContent, await c.idleFor(0.9) { settled = true; break }
             }
-            if settled { endReason = "collectorIdle"; break }
+            if settled {
+                if extensions == 0, TurnEnd.looksUnfinished(heardSoFar.value) {
+                    extensions = 1; extendUntil = Date().addingTimeInterval(TurnEnd.extraWait); continue
+                }
+                endReason = "collectorIdle"; break
+            }
         }
         DebugTrace.event("voice", ["path": "analyzer", "end": endReason, "seconds": waited,
                                    "lanes": collectors.count])
