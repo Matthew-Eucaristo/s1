@@ -3,6 +3,17 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.37] - 2026-10-11
+
+### Fixed
+- **Typing goes where you asked, or nowhere.** If you switch to another
+  window, another app, or a different field (say ⌘F opens Find) while a task
+  waits or the Reasoner thinks, s1 stops and tells you the focus moved,
+  instead of typing into the new place and saying Done. Key combos and menu
+  commands get the same check; replayed runs stop there too. A window still
+  opening after a launch doesn't count as a move. Found by an external QA
+  pass (Roger Intelligence), 3/3 on both paths.
+
 ## [0.3.36] - 2026-10-08
 
 ### Added
