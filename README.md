@@ -139,6 +139,7 @@ brew uninstall --cask s1 --zap       # app + ~/.s1 + Library traces
   picking targets. It can also answer questions directly.
 - **The gate** classifies every action (`read`, `reversible`, `irreversible`),
   blocks credentials and payments outright, and stops on secure text fields.
+  If you move the focus while a task waits, it asks instead of typing in the new place.
 
 In the app, each step carries a tag: **S1** for the fast path (grammar, checked
 by the Judge when one is set), **S2** for the Reasoner.

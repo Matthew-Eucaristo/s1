@@ -6,9 +6,14 @@ import ApplicationServices
 
 public protocol Perceiver: Sendable {
     func observe(wantScreenshot: Bool) async throws -> Snapshot
+    /// Where keystrokes would land right now — a cheap read taken just
+    /// before acting. nil = unknown (the focus check is skipped).
+    func focus() async -> FocusMark?
 }
 
 extension Perceiver {
+    public func focus() async -> FocusMark? { nil }
+
     /// A screenshot when one can be taken, else the accessibility view alone.
     /// Models that see are a bonus: a missing Screen Recording grant must
     /// never stop a command the AX tree can handle.
@@ -54,6 +59,7 @@ public struct SystemPerceiver: Perceiver {
             var secure: Bool
             var tree: AXNode?
             var menus: [MenuCommand] = []
+            var focus: FocusMark?
         }
         let m = await MainActor.run { () -> OnMain in
             var o = OnMain(windows: Self.windowList(), appName: nil, appPID: nil,
@@ -62,6 +68,7 @@ public struct SystemPerceiver: Perceiver {
                 o.appName = app.localizedName
                 o.appPID = app.processIdentifier
                 o.secure = AXReader.focusedElementIsSecure(pid: app.processIdentifier)
+                o.focus = AXReader.focusMark(pid: app.processIdentifier, app: app.localizedName)
                 if let tree = AXReader.snapshotTree(pid: app.processIdentifier) {
                     o.tree = tree
                 }
@@ -75,6 +82,7 @@ public struct SystemPerceiver: Perceiver {
             windows: m.windows,
             axTree: m.tree, screenshotPath: nil)
         obs.secureTextFocused = m.secure
+        obs.focus = m.focus
         obs.menus = m.menus
         if let tree = m.tree, let pid = m.appPID {
             AXReader.noteTree(tree, pid: pid)
@@ -89,6 +97,13 @@ public struct SystemPerceiver: Perceiver {
             obs.screenshotPath = try await screenshotSink(image)
         }
         return obs
+    }
+
+    public func focus() async -> FocusMark? {
+        await MainActor.run {
+            guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+            return AXReader.focusMark(pid: app.processIdentifier, app: app.localizedName)
+        }
     }
 
     public static func windowList() -> [WindowInfo] {
@@ -433,6 +448,30 @@ public enum AXReader {
         else { return false }
         let role = attr(el as! AXUIElement, kAXRoleAttribute)
         return role == "AXSecureTextField"
+    }
+
+    /// The frontmost app's focused window and element, as a `FocusMark`.
+    public static func focusMark(pid: pid_t, app name: String?) -> FocusMark {
+        let app = AXUIElementCreateApplication(pid)
+        bindTimeout(app)
+        func element(_ owner: AXUIElement, _ key: String) -> AXUIElement? {
+            var v: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(owner, key as CFString, &v) == .success,
+                  let e = v, CFGetTypeID(e) == AXUIElementGetTypeID() else { return nil }
+            return (e as! AXUIElement)
+        }
+        var mark = FocusMark(pid: pid, app: name)
+        if let w = element(app, kAXFocusedWindowAttribute) {
+            mark.window = Int(bitPattern: CFHash(w))
+            mark.windowTitle = attr(w, kAXTitleAttribute)
+        }
+        if let e = element(app, kAXFocusedUIElementAttribute) {
+            mark.element = Int(bitPattern: CFHash(e))
+            mark.role = attr(e, kAXRoleAttribute)
+            mark.label = [kAXTitleAttribute, kAXDescriptionAttribute, "AXPlaceholderValue"]
+                .lazy.compactMap { attr(e, $0) }.first { !$0.isEmpty }
+        }
+        return mark
     }
 
     /// Live element lookup behind a ref (`e<n>` = walk-order index in the

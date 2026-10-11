@@ -66,6 +66,9 @@ public struct AgentLoop {
         var forceS2: String?
         var escalations = 0
         var status: RunStatus = .maxStepsReached
+        // Where the run's keys were aimed before steps that leave focus
+        // alone (a wait, a search): typing after them must still go there.
+        var aimed: FocusMark?
 
         for i in 0..<config.maxSteps {
             // A cancelled owner task ends the run even when no kill-switch
@@ -106,7 +109,7 @@ public struct AgentLoop {
             do {
                 (rec, delegated) = try await step(i, goal: goal, s1Goal: sub ?? goal, policy: policy, obs: obs,
                                                   history: history, s1History: sub == nil ? history : subHistory,
-                                                  forceS2: forceS2, logger: logger, onPhase: onPhase)
+                                                  forceS2: forceS2, aimed: aimed, logger: logger, onPhase: onPhase)
                 forceS2 = nil
             } catch {
                 // A stop landing mid-decision (kill switch, cancelled task)
@@ -118,6 +121,7 @@ public struct AgentLoop {
                 break
             }
             if rec.escalation != nil { escalations += 1 }
+            aimed = FocusGuard.keepsFocus(rec.action) ? (aimed ?? obs.focus) : nil
 
             if let delegated {
                 history.append(rec)
@@ -191,7 +195,7 @@ public struct AgentLoop {
 
     private func step(_ i: Int, goal: String, s1Goal: String, policy: any Policy, obs input: Snapshot,
                       history: [StepRecord], s1History: [StepRecord], forceS2: String?,
-                      logger: RunLogger,
+                      aimed: FocusMark?, logger: RunLogger,
                       onPhase: (@Sendable (String) -> Void)?) async throws -> (StepRecord, [String]?) {
         var obs = input
         // A throwing policy counts as abstention — logged like any other
@@ -365,6 +369,18 @@ public struct AgentLoop {
             }
             if let payload, case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
                 verdict = .needsHuman(reason: r)
+            }
+        }
+        // Keys land wherever focus is when they're sent. Check it's still
+        // where the run aimed: before the wait(s) that led here, else where
+        // it was when this step decided, if deciding took long enough for
+        // the user to click elsewhere (a grammar step decides in ms, and a
+        // window still opening from the last step isn't the user's doing).
+        if case .allow = verdict, FocusGuard.depth(action) != nil {
+            let target = aimed ?? (Date().timeIntervalSince(obs.timestamp) > 1 ? obs.focus : nil)
+            let now = await perceiver.focus() ?? obs.focus
+            if let why = FocusGuard.check(action, aimed: target, now: now) {
+                verdict = .needsHuman(reason: why)
             }
         }
         var outcome = "blocked"
