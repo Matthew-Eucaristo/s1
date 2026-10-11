@@ -3309,14 +3309,15 @@ private final class FocusScript: Perceiver, @unchecked Sendable {
     let n = Locked(0)
     init(_ marks: [FocusMark?]) { self.marks = marks }
     func observe(wantScreenshot: Bool) async throws -> Snapshot {
-        let k = n.withLock { (v: inout Int) -> Int in v += 1; return v - 1 }
+        var k = 0
+        n.mutate { k = $0; $0 += 1 }
         var s = Snapshot(timestamp: Date(), frontmostApp: "TextEdit", frontmostPID: 7,
                          windows: [], axTree: nil, screenshotPath: nil)
         s.focus = marks[min(k, marks.count - 1)]
         return s
     }
     func focus() async -> FocusMark? {
-        let k = n.withLock { $0 }
+        let k = n.get()
         return marks[min(max(k - 1, 0), marks.count - 1)]
     }
 }
