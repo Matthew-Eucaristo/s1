@@ -188,6 +188,9 @@ public struct Snapshot: Codable, Sendable {
     public var secureTextFocused: Bool = false
     /// The frontmost app's menu commands — its own list of what it can do.
     public var menus: [MenuCommand] = []
+    /// Where keystrokes would land when this was observed — the loop
+    /// compares it with the focus at act time (`FocusGuard`).
+    public var focus: FocusMark?
 
     /// One-line digest for the step log.
     public var summary: String {

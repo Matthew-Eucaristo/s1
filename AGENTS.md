@@ -65,6 +65,10 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - The safety gate runs before every action. The Judge lowers confidence on grammar steps; it raises it
   only by choosing among the grammar's own candidates or finding a control in `explore`, capped at
   `JudgedPolicy.pickedCap` (0.85), so exact grammar hits stay the only near-certain steps.
+- Keys go where the run aimed (`FocusGuard`): typing, key combos and menu commands compare the live focus
+  (app, window, focused element) with the focus before the waits that led to them, or with what the step
+  saw when its decision took > 1 s. Moved → needs the user, never typed elsewhere and reported done.
+  Unreadable focus (a window still opening) counts as unchanged.
 - Screenshots are optional evidence: perception uses `observe(preferScreenshot:)` so a missing Screen
   Recording grant degrades to the AX tree; only an explicit `.captureScreenshot` action requires it.
 - Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save).

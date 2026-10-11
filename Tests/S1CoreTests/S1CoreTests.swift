@@ -3295,3 +3295,105 @@ private func menuSnapshot(_ menus: [MenuCommand] = musicMenus) -> Snapshot {
         .decide(observation: menuSnapshot(), goal: "click the shuffle thing", history: [])
     #expect(d.action == .menuItem(path: ["Controls", "Shuffle", "On"]))
 }
+
+// MARK: - focus guard (keys go where the run aimed, or back to the user)
+
+private let docA = FocusMark(pid: 7, app: "TextEdit", window: 1, windowTitle: "A", element: 10, role: "AXTextArea")
+private let docB = FocusMark(pid: 7, app: "TextEdit", window: 2, windowTitle: "B", element: 20, role: "AXTextArea")
+private let findInA = FocusMark(pid: 7, app: "TextEdit", window: 1, windowTitle: "A", element: 11,
+                                role: "AXTextField", label: "Find")
+
+/// One focus per observation (the last repeats); `focus()` is the latest.
+private final class FocusScript: Perceiver, @unchecked Sendable {
+    let marks: [FocusMark?]
+    let n = Locked(0)
+    init(_ marks: [FocusMark?]) { self.marks = marks }
+    func observe(wantScreenshot: Bool) async throws -> Snapshot {
+        var k = 0
+        n.mutate { k = $0; $0 += 1 }
+        var s = Snapshot(timestamp: Date(), frontmostApp: "TextEdit", frontmostPID: 7,
+                         windows: [], axTree: nil, screenshotPath: nil)
+        s.focus = marks[min(k, marks.count - 1)]
+        return s
+    }
+    func focus() async -> FocusMark? {
+        let k = n.get()
+        return marks[min(max(k - 1, 0), marks.count - 1)]
+    }
+}
+
+private func runScript(_ marks: [FocusMark?], _ steps: [Action]) async throws -> (RunReport, String) {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("s1test-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let logger = try RunLogger(goal: "test", root: dir, config: [:])
+    let loop = AgentLoop(config: LoopConfig(), perceiver: FocusScript(marks), actuator: DryRunActuator(),
+                         gate: SafetyGate())
+    let report = try await loop.run(goal: "g", policy: ScriptedPolicy(steps: steps.map { .init(action: $0) }),
+                                    logger: logger)
+    let lines = try String(contentsOf: logger.runDir.appendingPathComponent("steps.jsonl"), encoding: .utf8)
+    return (report, lines)
+}
+
+@Test func focusDriftNamesWhatMoved() {
+    #expect(docA.drift(to: docA) == nil)
+    #expect(docA.drift(to: docB) == "the focus moved to the “B” window")
+    #expect(docA.drift(to: findInA) == "the focus moved to a text field “Find”")
+    // A menu command follows the window, not the field.
+    #expect(docA.drift(to: findInA, element: false) == nil)
+    var safari = docB; safari.pid = 9; safari.app = "Safari"
+    #expect(docA.drift(to: safari) == "Safari came to the front")
+    // A window still opening (unreadable before) isn't a move.
+    let launching = FocusMark(pid: 7, app: "TextEdit")
+    #expect(launching.drift(to: docB) == nil)
+}
+
+@Test func typingAfterWaitStopsWhenUserSwitchedWindows() async throws {
+    // QA scenario 1: open TextEdit, wait, type — the user focused another
+    // document meanwhile. The text must not land there and the run isn't done.
+    let (report, lines) = try await runScript([docA, docB],
+                                              [.wait(seconds: 30), .typeText("SWITCHR5"), .done(summary: "ok")])
+    #expect(report.status == .needsHuman)
+    #expect(lines.contains("the “B” window"))
+    #expect(!lines.contains("[dry-run] typeText"))
+}
+
+@Test func typingAfterWaitStopsWhenFindTookFocus() async throws {
+    // QA scenario 2: same window, but ⌘F moved focus into Find.
+    let (report, lines) = try await runScript([docA, findInA],
+                                              [.wait(seconds: 30), .typeText("UISTATEONE"), .done(summary: "ok")])
+    #expect(report.status == .needsHuman)
+    #expect(lines.contains("Find"))
+}
+
+@Test func typingAfterWaitGoesAheadWhenFocusStayed() async throws {
+    let (same, _) = try await runScript([docA], [.wait(seconds: 30), .typeText("hi"), .done(summary: "ok")])
+    #expect(same.status == .done)
+    // The window appeared during the wait (cold launch): nothing to compare.
+    let (launch, _) = try await runScript([FocusMark(pid: 7, app: "TextEdit"), docA],
+                                          [.wait(seconds: 3), .typeText("hi"), .done(summary: "ok")])
+    #expect(launch.status == .done)
+    // Unknown focus (no AX) never blocks.
+    let (unknown, _) = try await runScript([nil], [.wait(seconds: 3), .typeText("hi"), .done(summary: "ok")])
+    #expect(unknown.status == .done)
+}
+
+@Test func focusMovingRightAfterAnActionIsTheRunsOwn() async throws {
+    // A click moves focus on purpose; the next typing aims at the new place.
+    let (report, _) = try await runScript([docA, docB],
+                                          [.click(x: 5, y: 5), .typeText("hi"), .done(summary: "ok")])
+    #expect(report.status == .done)
+}
+
+@Test func menuCommandAfterWaitFollowsTheWindow() async throws {
+    let (find, _) = try await runScript([docA, findInA],
+                                        [.wait(seconds: 3), .menuItem(path: ["View", "Show Ruler"]), .done(summary: "ok")])
+    #expect(find.status == .done)
+    let (other, _) = try await runScript([docA, docB],
+                                         [.wait(seconds: 3), .menuItem(path: ["View", "Show Ruler"]), .done(summary: "ok")])
+    #expect(other.status == .needsHuman)
+}
+
+@Test func mediaKeysIgnoreFocus() {
+    #expect(FocusGuard.check(.keyCombo(keys: ["playpause"]), aimed: docA, now: docB) == nil)
+    #expect(FocusGuard.check(.keyCombo(keys: ["cmd", "a"]), aimed: docA, now: docB) != nil)
+}

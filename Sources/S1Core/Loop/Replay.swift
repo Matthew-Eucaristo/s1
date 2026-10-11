@@ -63,6 +63,8 @@ public enum RunReader {
                               killSwitchPath: String? = nil) async throws -> Int {
         let recs = try steps(in: runDir)
         var i = 0
+        // Focus before a replayed wait: keys after it must still go there.
+        var aimed: FocusMark?
         for rec in recs {
             if Task.isCancelled || (killSwitchPath.map { FileManager.default.fileExists(atPath: $0) } ?? false) {
                 try await logger.log(StepRecord(index: i, time: Date(),
@@ -87,7 +89,7 @@ public enum RunReader {
                 // guards, replaying the loop's password-box protection.
                 let needsObs: Bool = switch action {
                 case .axPress, .axSetValue, .axAction, .axSetAttribute,
-                     .typeText, .keyCombo: true
+                     .typeText, .keyCombo, .editText, .menuItem: true
                 default: false
                 }
                 let liveObs = needsObs
@@ -123,9 +125,18 @@ public enum RunReader {
                         verdict = .needsHuman(reason: r)
                     }
                 }
+                // Same focus guard as the live loop: the user moving focus
+                // during a replayed wait stops the keys meant for before.
+                var moved = false
+                if case .allow = verdict,
+                   let why = FocusGuard.check(action, aimed: aimed, now: liveObs?.focus) {
+                    verdict = .needsHuman(reason: why)
+                    moved = true
+                }
                 var outcome = "blocked"
                 if case .allow = verdict {
                     if case .wait(let s) = action {
+                        if aimed == nil { aimed = await SystemPerceiver().focus() }
                         if actuator is DryRunActuator {
                             // A dry-run previews without touching the machine
                             // — burning a real 60s recorded wait defeats that.
@@ -151,6 +162,9 @@ public enum RunReader {
                     confidence: nil, rationale: rec.rationale, modelReply: nil, action: action,
                     gate: verdict.label, outcome: outcome,
                     verified: nil, escalation: nil))
+                if !FocusGuard.keepsFocus(action) { aimed = nil }
+                // The rest of the recording was aimed at the old focus too.
+                if moved { i += 1; break }
             }
             i += 1
         }
