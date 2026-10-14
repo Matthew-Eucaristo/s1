@@ -15,7 +15,7 @@ struct S1: AsyncParsableCommand {
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, MenusCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
-                      TasksCmd.self, SkillsCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
+                      TasksCmd.self, SkillsCmd.self, MCPCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
                       ProvidersCmd.self, ConnectCmd.self, DisconnectCmd.self, UseCmd.self,
                       ModelsCmd.self, PullCmd.self, DecideCmd.self,
                       UsageCmd.self, SetupCmd.self, DoctorCmd.self])
@@ -383,11 +383,33 @@ struct AXCmd: AsyncParsableCommand {
 /// delete one. The files themselves live in ~/.s1/skills/.
 struct SkillsCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "skills",
-        abstract: "List saved skills (say a skill's name to run it), or delete one.")
+        abstract: "List saved skills (say a skill's name to run it), delete one, or move skills to and from the open Agent Skills format (SKILL.md).")
     @Option(help: "Delete the skill with this name.")
     var delete: String?
+    @Option(help: "Export this skill as an Agent Skills folder (SKILL.md).")
+    var export: String?
+    @Option(help: "Where --export writes (default: ~/.agents/skills, shared with other agents).")
+    var to: String?
+    @Option(name: .customLong("import"), help: "Import an Agent Skills folder (one with a SKILL.md).")
+    var importFolder: String?
 
     func run() async throws {
+        if let export {
+            guard let s = Skills.match(export, in: Skills.load()) else {
+                print("no skill called “\(export.terminalSafe)”"); throw ExitCode(1)
+            }
+            let parent = URL(fileURLWithPath: to ?? NSHomeDirectory() + "/.agents/skills", isDirectory: true)
+            let folder = try AgentFiles.export(s, to: parent)
+            print("exported “\(s.name.terminalSafe)” → \(folder.path)")
+            return
+        }
+        if let importFolder {
+            let s = try AgentFiles.importSkill(from: URL(fileURLWithPath: importFolder, isDirectory: true))
+            try Skills.save(s)
+            print("imported “\(s.name.terminalSafe)” — \(s.steps.count) step\(s.steps.count == 1 ? "" : "s")"
+                  + (s.recording.map { ", \($0.count) recorded actions" } ?? "") + "; say its name to run it")
+            return
+        }
         if let delete {
             guard let removed = try Skills.delete(delete) else {
                 print("no skill called “\(delete.terminalSafe)”"); throw ExitCode(1)
@@ -406,6 +428,45 @@ struct SkillsCmd: AsyncParsableCommand {
             for step in s.steps { print("    · \(step.terminalSafe)") }
         }
         print("files: \(Skills.dir.path)")
+    }
+}
+
+/// `s1 mcp` — s1 over the Model Context Protocol (stdio), so other agents
+/// can read this Mac's screen and hand it goals; `--check` instead starts
+/// the MCP servers s1's Reasoner uses (config `mcpServers`) and lists them.
+struct MCPCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "mcp",
+        abstract: "Serve s1 to other agents over MCP (stdio), or --check the MCP servers s1 uses.",
+        discussion: """
+            Register in an MCP client:  {"mcpServers": {"s1": {"command": "s1", "args": ["mcp"]}}}
+            Steps s1's safety gate stops are never approved by the calling agent: the run ends "needs you".
+            """)
+    @Flag(help: "Start the servers in config.json → mcpServers and list their tools.")
+    var check = false
+
+    func run() async throws {
+        if check {
+            let servers = MCPTools.configured()
+            guard !servers.isEmpty else {
+                print("no MCP servers configured — add them under \"mcpServers\" in \(S1Config.path)")
+                return
+            }
+            let (ok, failed) = await MCPTools.shared.status()
+            for (name, n) in ok.sorted(by: { $0.key < $1.key }) { print("✓ \(name) — \(n) tool\(n == 1 ? "" : "s")") }
+            for (name, why) in failed.sorted(by: { $0.key < $1.key }) { print("✗ \(name) — \(why.terminalSafe)") }
+            if !failed.isEmpty { throw ExitCode(1) }
+            return
+        }
+        // stdout carries MCP messages only: keep a private copy of it and
+        // send every other print (run logs) to stderr.
+        let out = FileHandle(fileDescriptor: dup(STDOUT_FILENO), closeOnDealloc: true)
+        dup2(STDERR_FILENO, STDOUT_FILENO)
+        let server = MCPServer()
+        for try await line in FileHandle.standardInput.bytes.lines where !line.isEmpty {
+            if let reply = await server.handle(line) {
+                try out.write(contentsOf: Data((reply + "\n").utf8))
+            }
+        }
     }
 }
 

@@ -278,6 +278,38 @@ Ways to extend it today:
   launcher snippets, or drive s1 from Siri and Shortcuts.
 - **Scripts.** The `s1` CLI runs, inspects and replays everything the app does.
 
+### Open standards
+
+Everything here is off until you turn it on in `~/.s1/config.json`, except
+structured output.
+
+- **Structured output.** The Reasoner is asked for JSON-schema replies where the
+  provider supports it; providers that don't are detected once and skipped
+  (`"structuredOutput": false` to turn it off).
+- **AGENTS.md and Agent Skills.** With `"agentFiles": true`, the Reasoner reads
+  `~/.s1/AGENTS.md` and `~/.agents/AGENTS.md`, lists your Agent Skills (`SKILL.md`
+  in `~/.agents/skills`, `~/.claude/skills`, `~/.s1/agent-skills`) and loads the
+  one a goal is about. `s1 skills --export <name>` / `--import <folder>` move s1
+  skills to and from the format. s1 never runs a skill's scripts.
+- **MCP client.** Give the Reasoner tools from MCP servers, in the same shape other
+  MCP clients use. Read-only tools run directly; any other tool asks you first.
+  Check them with `s1 mcp --check`.
+
+  ```json
+  "mcpServers": { "files": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"] } }
+  ```
+- **MCP server.** `s1 mcp` lets other agents read this Mac's screen and hand s1
+  goals (`read_screen`, `list_menus`, `list_skills`, `run_goal`, `run_skill`).
+  Register it as `{"command": "s1", "args": ["mcp"]}`. Steps that need you are
+  never approved by the calling agent.
+- **Wyoming.** Use Whisper and Piper servers from Home Assistant's voice stack:
+  `s1 connect wyoming` (Whisper, `tcp://localhost:10300`), a second copy for Piper
+  (`s1 connect wyoming --id wyoming-piper --url tcp://localhost:10200`), then
+  `s1 use transcribe wyoming/faster-whisper` and `s1 use speak wyoming-piper/<voice>`.
+- **OpenTelemetry.** `"telemetry": {"endpoint": "http://localhost:4318"}` (or
+  `S1_OTEL=on` with `OTEL_EXPORTER_OTLP_ENDPOINT`) exports one trace per run with
+  the GenAI conventions. Goals and outcomes stay out unless `"content": true`.
+
 A plugin system for new actions, providers and skills is on the roadmap; the
 provider catalog and role design are built so plugins slot in without changing
 how you configure s1.

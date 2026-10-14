@@ -22,6 +22,7 @@ public struct ConfirmRequest: Sendable {
         case .typeText(let t): return "type “\(t.prefix(60))”"
         case .shell(let c): return "run `\(c.prefix(60))`"
         case .axPress(let r): return "press \(r)"
+        case .mcpCall(let s, let t, let a): return "use \(t) from \(s) with \(a.prefix(80))"
         default: return LLMDecisionCodec.describe(action)
         }
     }

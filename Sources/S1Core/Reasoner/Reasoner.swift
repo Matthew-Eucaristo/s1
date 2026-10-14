@@ -79,9 +79,14 @@ public struct ChatClient: Sendable {
         return m.range(of: #"^o\d"#, options: .regularExpression) != nil
     }
 
+    /// Endpoints (base URL + model) that rejected `response_format`: asked
+    /// once, then never again in this process.
+    static let noStructuredOutput = Locked<Set<String>>([])
+
     static func requestBody(endpoint: Endpoint, messages: [ChatMessage], maxTokens: Int,
                             temperature: Double?, extras: Bool = true,
-                            tools: [[String: Any]] = []) -> [String: Any] {
+                            tools: [[String: Any]] = [],
+                            responseFormat: [String: Any]? = nil) -> [String: Any] {
         // Messages go out in order: stable system prompt first, volatile
         // screen/state last — the prefix providers cache automatically.
         let wire: [[String: Any]] = messages.map { m in
@@ -101,6 +106,7 @@ public struct ChatClient: Sendable {
         let reasoning = !endpoint.isLocal && isReasoningModel(endpoint.model)
         if let temperature, !reasoning { body["temperature"] = temperature }
         if !tools.isEmpty { body["tools"] = tools }
+        if let responseFormat { body["response_format"] = responseFormat }
         if endpoint.isLocal {
             // Ollama knobs: skip reasoning traces for fast decisions and
             // pin the KV window — strict remote specs reject these keys.
@@ -145,7 +151,8 @@ public struct ChatClient: Sendable {
     /// set on a message it is sent as an OpenAI vision `image_url` part.
     /// Every call is metered to the usage log (numbers only, no content).
     public func chat(_ messages: [ChatMessage], maxTokens: Int = 1024,
-                     temperature: Double = 0.0, tools: [[String: Any]] = []) async throws -> String {
+                     temperature: Double = 0.0, tools: [[String: Any]] = [],
+                     responseFormat: [String: Any]? = nil) async throws -> String {
         guard let url = URL(string: "\(endpoint.baseURL)/chat/completions") else {
             throw S1Error.aborted("invalid endpoint base URL '\(endpoint.baseURL)' — check config")
         }
@@ -171,10 +178,13 @@ public struct ChatClient: Sendable {
         let withExtras = !endpoint.isLocal && !Self.providerExtras(model: endpoint.model).isEmpty
         var attempt = 0
         var sendTemperature = true
+        let formatKey = endpoint.baseURL + "|" + endpoint.model
+        var sendFormat = responseFormat != nil && !Self.noStructuredOutput.value.contains(formatKey)
         while true {
             let body = Self.requestBody(endpoint: endpoint, messages: messages, maxTokens: maxTokens,
                                         temperature: sendTemperature ? temperature : nil,
-                                        extras: attempt == 0, tools: tools)
+                                        extras: attempt == 0, tools: tools,
+                                        responseFormat: sendFormat ? responseFormat : nil)
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             let data: Data, resp: URLResponse
             let sent = Date()
@@ -187,6 +197,16 @@ public struct ChatClient: Sendable {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             DebugTrace.http(role: role, url: url, status: code, ms: Int(Date().timeIntervalSince(sent) * 1000),
                             request: req.httpBody, response: data)
+            // A provider without JSON-schema output (DeepSeek, older local
+            // servers) gets one retry without it, and isn't asked again.
+            if (400 ... 422).contains(code), sendFormat {
+                let body = String(decoding: data.prefix(2000), as: UTF8.self).lowercased()
+                if ["response_format", "json_schema", "schema", "structured"].contains(where: body.contains) {
+                    sendFormat = false
+                    Self.noStructuredOutput.withLock { $0.insert(formatKey) }
+                    continue
+                }
+            }
             // A model that only takes its default temperature (one this
             // list doesn't know yet) gets one retry without it.
             if code == 400, sendTemperature,

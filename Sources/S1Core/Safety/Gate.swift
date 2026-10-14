@@ -136,6 +136,11 @@ public struct SafetyGate: Sendable {
         return (.allow, false)
     }
 
+    /// The needsHuman reason for an MCP tool that isn't known to be safe.
+    public static func mcpReason(_ server: String, _ tool: String) -> String {
+        "the “\(tool)” tool on \(server) may change things outside the screen"
+    }
+
     static let terminalAlwaysHuman: Set<String> = [
         "privilege escalation via terminal", "automation scripting via terminal",
         "permission database tamper", "Gatekeeper flag removal via terminal",
@@ -217,6 +222,18 @@ public struct SafetyGate: Sendable {
             if opt && !ctrl && !cmd && !ks.isDisjoint(with: ["space", "spacebar"]) {
                 return (.needsHuman(reason: "⌥Space is s1's launcher hotkey — it would steal focus mid-run"), false)
             }
+        }
+        // Deny-listed arguments (a password, a purchase) outrank everything;
+        // otherwise an MCP tool can do anything its server can, outside the
+        // screen — the user approves it, unless the loop finds it
+        // read-only or auto-approved (`mcpReason` marks this case).
+        if case .mcpCall(let server, let tool, _) = action {
+            for payload in action.textPayloads {
+                for rule in Self.denyPatterns where payload.range(of: rule.regex, options: .regularExpression) != nil {
+                    return (.needsHuman(reason: "denylist: \(rule.why)"), !Self.alwaysHuman.contains(rule.why))
+                }
+            }
+            return (.needsHuman(reason: Self.mcpReason(server, tool)), true)
         }
         // Menu commands that destroy or end something wait for the user,
         // whoever asked: deleting, erasing, logging out, shutting down.

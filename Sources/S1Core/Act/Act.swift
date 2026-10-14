@@ -356,6 +356,8 @@ public struct CGEventActuator: Actuator {
 
         case .custom(let n, _):
             throw S1Error.aborted("custom action '\(n)' has no actuator implementation")
+        case .mcpCall:
+            throw S1Error.aborted("MCP tools are called by the run, not on screen")
         }
     }
 

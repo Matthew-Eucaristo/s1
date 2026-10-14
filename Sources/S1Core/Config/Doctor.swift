@@ -21,6 +21,7 @@ public enum Doctor {
         "providers", "models", "cloudVoice", "vision", "locale", "speak", "vocabulary", "recent",
         "notchHUD", "voice", "executor", "memory", "sandbox", "onboarded",
         "voiceInterrupt", "vad", "vadSensitivity", "webSearch",
+        "structuredOutput", "agentFiles", "mcpServers", "telemetry",
     ]
 
     /// Key presence for the sweep, never the secret itself: a Keychain read

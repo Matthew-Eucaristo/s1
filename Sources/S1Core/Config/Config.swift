@@ -30,6 +30,17 @@ public struct S1Config: Codable, Sendable {
     public var vision: Bool?
     /// Let the Reasoner search the web when its provider or model can (nil = on).
     public var webSearch: Bool?
+    /// Ask the Reasoner for JSON-schema output where the provider has it
+    /// (nil = on; providers without it are detected and skipped).
+    public var structuredOutput: Bool?
+    /// Give the Reasoner the user's agent files: AGENTS.md and Agent Skills
+    /// (SKILL.md) from ~/.s1, ~/.agents and ~/.claude (nil = off).
+    public var agentFiles: Bool?
+    /// MCP servers whose tools the Reasoner may use, by name — the same
+    /// shape MCP clients use (`command` + `args` + `env`). nil = none.
+    public var mcpServers: [String: MCPServerConfig]?
+    /// OpenTelemetry trace export (nil = off).
+    public var telemetry: TelemetryConfig?
 
     public var locale: String?
     public var speak: Bool?

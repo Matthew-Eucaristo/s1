@@ -330,7 +330,9 @@ public struct Skill: Codable, Sendable, Equatable {
             if let o = r.outcome, o.hasPrefix("error:") || o.hasPrefix("blocked") || o.hasPrefix("[dry-run]")
                 || o.hasPrefix("interrupted") { return false }
             switch a {
-            case .done, .verify, .captureScreenshot, .webSearch: return false
+            // Lookups and tool calls aren't clicks to replay: their results
+            // belong to the moment they ran.
+            case .done, .verify, .captureScreenshot, .webSearch, .mcpCall: return false
             default: return true
             }
         }

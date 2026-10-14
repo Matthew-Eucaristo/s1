@@ -20,6 +20,9 @@ public enum Action: Codable, Sendable, Equatable {
     /// Look something up on the web (the Reasoner's provider runs the
     /// search); the results become this step's outcome.
     case webSearch(query: String)
+    /// Call a tool on a configured MCP server (`arguments` = a JSON object).
+    /// The loop runs it, not the screen; the result becomes the outcome.
+    case mcpCall(server: String, tool: String, arguments: String)
     // reversible
     case moveMouse(x: Double, y: Double)
     case click(x: Double, y: Double)
@@ -96,6 +99,7 @@ public enum Action: Codable, Sendable, Equatable {
         case .editText(let f, let r): return [f, r]
         case .openURL(let u): return [u]
         case .webSearch(let q): return [q]
+        case .mcpCall(let s, let t, let a): return [s + " " + t, a]
         case .axSetValue(_, let v): return [v]
         case .keyCombo(let k): return k
         case .shell(let c): return [c]

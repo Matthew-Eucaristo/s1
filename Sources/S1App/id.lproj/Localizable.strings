@@ -445,3 +445,4 @@
 "Needs you: %@" = "Perlu izinmu: %@";
 "Delete this skill" = "Hapus skill ini";
 "^[%lld recorded action](inflect: true)" = "%lld aksi terekam";
+"Use %@ from %@" = "Pakai %@ dari %@";

@@ -72,6 +72,10 @@ public enum CloudSpeech {
     /// from Apple's detection — it improves Whisper accuracy and latency.
     public static func transcribe(_ wav: URL, endpoint ep: Endpoint, language: String?,
                                   vocabulary: [String]) async throws -> String {
+        // A Wyoming server (tcp://host:port): Home Assistant's local voice protocol.
+        if Wyoming.address(ep.baseURL) != nil {
+            return try await Wyoming.transcribe(wav, base: ep.baseURL, language: language, model: ep.model)
+        }
         guard let url = sttURL(ep.baseURL) else { throw S1Error.aborted("bad STT URL") }
         let boundary = "s1-\(UUID().uuidString)"
         var fields = [("model", ep.model), ("response_format", "json"), ("temperature", "0")]
@@ -93,6 +97,10 @@ public enum CloudSpeech {
 
     /// Synthesize speech as WAV bytes.
     public static func synthesize(_ text: String, endpoint ep: Endpoint, voice: String) async throws -> Data {
+        if Wyoming.address(ep.baseURL) != nil {
+            // The model id names the Piper voice unless a voice name is set.
+            return try await Wyoming.synthesize(text, base: ep.baseURL, voice: voice == "default" ? ep.model : voice)
+        }
         guard let url = ttsURL(ep.baseURL) else { throw S1Error.aborted("bad TTS URL") }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -118,6 +126,7 @@ public enum CloudSpeech {
     }
 
     public static func defaultVoice(for ep: Endpoint) -> String {
+        if Wyoming.address(ep.baseURL) != nil { return "default" }
         let host = URL(string: ep.baseURL)?.host ?? ""
         return host.contains("groq") ? "troy" : "alloy"
     }

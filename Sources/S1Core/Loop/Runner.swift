@@ -276,6 +276,8 @@ public enum S1Runner {
             await logger.finish(report)
             return (report, logger)
         }
+        // Off unless trace export is configured (telemetry / S1_OTEL).
+        let telemetry = Telemetry.begin()
         let skill = Skills.match(goal, in: Skills.load())
         let loopGoal = skill.map { "\($0.name): " + $0.steps.joined(separator: " → ") } ?? goal
         if let skill { onPhase?("skill: \(skill.name)") }
@@ -308,11 +310,15 @@ public enum S1Runner {
         }
         let report: RunReport
         if let replayed { report = replayed } else {
-            report = try await DebugTrace.$runDir.withValue(logger.runDir) {
-                try await loop.run(goal: loopGoal, policy: policy, logger: logger,
-                                   plan: skill?.steps ?? [], onPhase: onPhase)
+            report = try await Telemetry.$current.withValue(telemetry) {
+                try await DebugTrace.$runDir.withValue(logger.runDir) {
+                    try await loop.run(goal: loopGoal, policy: policy, logger: logger,
+                                       plan: skill?.steps ?? [], onPhase: onPhase)
+                }
             }
         }
+        Telemetry.end(telemetry, goal: goal, report: report,
+                      steps: (try? RunReader.steps(in: logger.runDir)) ?? [])
         await logger.finish(report)
         let did = ((try? RunReader.steps(in: logger.runDir)) ?? []).compactMap(Conversation.digest)
         let outcome = report.answer ?? ([report.status.rawValue] + did.suffix(4)).joined(separator: "; ")

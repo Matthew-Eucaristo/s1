@@ -45,6 +45,7 @@ public enum UsageLog {
     private static let lock = NSLock()
 
     public static func append(_ r: UsageRecord, path: String = UsageLog.path) {
+        Telemetry.modelCall(r)   // a no-op unless trace export is on
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = .sortedKeys

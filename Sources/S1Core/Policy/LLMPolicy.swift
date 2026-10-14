@@ -72,6 +72,7 @@ enum LLMDecisionCodec {
         case .quitApp(let n): return "quitApp(\(n))"
         case .menuItem(let p): return "menu(\(p.joined(separator: " › ")))"
         case .webSearch(let q): return "webSearch(\(q.prefix(40)))"
+        case .mcpCall(let s, let t, _): return "mcp(\(s)/\(t))"
         case .typeText(let t): return "type(\(t.prefix(20)))"
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
         case .axPress(let r): return "axPress(\(r))"
@@ -93,6 +94,40 @@ enum LLMDecisionCodec {
         case .shell(let c): return "shell(\(c.prefix(20)))"
         case .custom(let n, _): return "custom(\(n))"
         }
+    }
+
+    /// The reply shape as JSON Schema, for providers with structured
+    /// output (`response_format: json_schema`): the model can't wander off
+    /// into prose or a second object. Not strict — each action type uses a
+    /// different subset of the fields.
+    static var responseFormat: [String: Any] {
+        let str: [String: Any] = ["type": "string"], num: [String: Any] = ["type": "number"]
+        let types = ["click", "rightClick", "doubleClick", "drag", "moveMouse", "axPress", "axSetValue", "axAction",
+                     "axSetAttribute", "typeText", "keyCombo", "scroll", "openApp", "quitApp", "menu", "wait",
+                     "verify", "captureScreenshot", "editText", "webSearch", "delegate", "done", "mcp"]
+        let action: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "type": ["type": "string", "enum": types],
+                "x": num, "y": num, "toX": num, "toY": num, "dx": num, "dy": num, "ms": num,
+                "ref": str, "value": str, "text": str, "app": str, "keys": str, "expect": str,
+                "name": str, "attr": str, "server": str, "tool": str, "arguments": ["type": "object"],
+                "goals": ["type": "array", "items": str],
+            ],
+            "required": ["type"],
+        ]
+        return ["type": "json_schema", "json_schema": [
+            "name": "s1_decision", "strict": false,
+            "schema": [
+                "type": "object",
+                "properties": [
+                    "action": action,
+                    "confidence": ["type": "number", "minimum": 0, "maximum": 1],
+                    "rationale": str,
+                ],
+                "required": ["action", "confidence", "rationale"],
+            ] as [String: Any],
+        ] as [String: Any]]
     }
 
     static let decisionFormat = """
@@ -198,6 +233,18 @@ enum LLMDecisionCodec {
             return salvage(text)
         }
         let json = text[s.lowerBound ..< e.upperBound]
+        // An MCP call carries free-form arguments the typed wire can't hold.
+        if let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+           let a = obj["action"] as? [String: Any], (a["type"] as? String) == "mcp" {
+            guard let server = a["server"] as? String, let tool = a["tool"] as? String,
+                  !server.isEmpty, !tool.isEmpty else { return nil }
+            let args = (a["arguments"] as? [String: Any]) ?? [:]
+            let argJSON = (try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]))
+                .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+            let conf = (obj["confidence"] as? Double) ?? (obj["confidence"] as? NSNumber)?.doubleValue ?? 0
+            return Decision(action: .mcpCall(server: server, tool: tool, arguments: argJSON),
+                            confidence: conf, rationale: (obj["rationale"] as? String) ?? "")
+        }
         guard let w = try? JSONDecoder().decode(Wire.self, from: Data(json.utf8)) else {
             return salvage(text)
         }
@@ -503,9 +550,13 @@ public struct LLMReasoner: Reasoner {
     static func userPrompt(observation: Snapshot, goal: String, history: [StepRecord],
                            reason: String, conversation: [Conversation.Turn] = [],
                            compacted: String? = nil,
-                           memory: [String] = []) -> String {
+                           memory: [String] = [],
+                           agentFiles: String? = nil,
+                           mcpTools: String? = nil) -> String {
         let remembered = memory.isEmpty ? "" : "What the user asked you to remember:\n"
             + memory.map { "- \($0)" }.joined(separator: "\n") + "\n\n"
+        let agent = agentFiles.map { $0 + "\n\n" } ?? ""
+        let tools = mcpTools.map { $0 + "\n\n" } ?? ""
         let earlier = conversation.isEmpty ? "" : "Earlier in this conversation:\n"
             + conversation.map { "- \($0.goal) → \($0.outcome)" }.joined(separator: "\n") + "\n\n"
         // Sliding-window compaction: when turns get evicted from the char
@@ -514,7 +565,7 @@ public struct LLMReasoner: Reasoner {
             "Older turns, compacted: \($0)\n\n"
         } ?? ""
         return """
-        \(remembered)\(earlier)\(older)Goal: \(goal)
+        \(agent)\(tools)\(remembered)\(earlier)\(older)Goal: \(goal)
         System 1 was unsure: \(reason)
 
         \(LLMDecisionCodec.historyText(history))
@@ -528,13 +579,16 @@ public struct LLMReasoner: Reasoner {
         var prompt = Self.userPrompt(
             observation: observation, goal: goal, history: history, reason: reason,
             conversation: ctx.turns, compacted: ctx.summary,
-            memory: Memory.enabled() ? Memory.recent() : [])
+            memory: Memory.enabled() ? Memory.recent() : [],
+            agentFiles: AgentFiles.enabled() ? AgentFiles.context(goal: goal) : nil,
+            mcpTools: await MCPTools.shared.promptSection())
         let image = vision ? observation.screenshotPath.flatMap { ScreenImage.downscaledJPEG(path: $0) } : nil
         if image != nil { prompt += "\n\n" + Self.screenshotNote(ScreenImage.mainDisplaySize) }
         let reply = try await client.chat([
             ChatMessage(role: "system", content: Self.systemPrompt + (canSearchWeb ? Self.webOn : Self.webOff)),
             ChatMessage(role: "user", content: prompt, imageBase64: image),
-        ], maxTokens: endpointIsLocal ? 1024 : 2048)
+        ], maxTokens: endpointIsLocal ? 1024 : 2048,
+           responseFormat: StructuredOutput.enabled() ? LLMDecisionCodec.responseFormat : nil)
         var d = LLMDecisionCodec.parse(reply)
             ?? Decision(action: nil, confidence: 0, rationale: "unparseable S2 reply")
         d.rawReply = String(reply.prefix(800))

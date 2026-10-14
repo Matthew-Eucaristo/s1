@@ -107,6 +107,14 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   allowed actions + targets; never when typed text looks secret). Saying the name replays the recording
   through the gate (`RunReader.replay(records:…confirm:stopOnError:)`); nothing found and nothing run →
   plan `steps` instead. One skill system: extend it, don't add a parallel "commands" store.
+- Open standards, all opt-in except structured output (README → Open standards):
+  `LLMDecisionCodec.responseFormat` (JSON schema; `ChatClient.noStructuredOutput` caches providers that
+  reject it); `AgentFiles` (AGENTS.md + SKILL.md into the Reasoner prompt within a budget, export/import,
+  never run scripts); MCP in `S1Core/MCP` — dual-era (2026-07-28 `_meta` + `server/discover`, legacy
+  `initialize`), client tools reach the Reasoner as `.mcpCall` (gate: needsHuman confirmable unless
+  read-only/autoApprove; deny-listed args human-only), server `s1 mcp` never approves gated steps and keeps
+  stdout for protocol only; Wyoming = any speech endpoint `tcp://host:port`; `Telemetry` OTLP/HTTP JSON,
+  off unless configured, no content unless `telemetry.content`.
 - Gated steps may be approved one at a time (`AgentLoop.confirm`, a `ConfirmHandler`): only verdicts
   `SafetyGate.assess` marks confirmable (destructive menus, ⌘Q/⌘⌫, irreversible with --allow-irreversible,
   most terminal commands). Never approvable: credentials, payments, self-running script, s1's own hotkeys,

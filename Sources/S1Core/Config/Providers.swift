@@ -255,6 +255,16 @@ public enum ProviderCatalog {
                 .init("gpt-oss:20b", roles: [.reasoner], vision: false, size: "13 GB", note: "text only, needs the RAM"),
               ],
               listsModels: true, symbol: "desktopcomputer"),
+        .init(id: "wyoming", name: "Wyoming (local voice)", kind: .local,
+              summary: "Whisper and Piper on this Mac or your network — Home Assistant's open voice protocol",
+              audio: "tcp://localhost:10300",
+              models: [
+                .init("faster-whisper", name: "Whisper (Wyoming)", roles: [.transcribe], recommended: [.transcribe],
+                      note: "wyoming-faster-whisper, port 10300"),
+                .init("piper", name: "Piper voice (Wyoming)", roles: [.speak],
+                      note: "wyoming-piper, port 10200: connect a second copy with that address"),
+              ],
+              symbol: "waveform"),
         .init(id: "lmstudio", name: "LM Studio", kind: .local,
               summary: "Any model loaded in LM Studio's local server",
               chat: "http://localhost:1234/v1", listsModels: true, symbol: "macwindow"),
@@ -313,7 +323,10 @@ public struct Provider: Sendable, Equatable, Identifiable {
         let raw: String? = switch api {
         case .chat: config.chat ?? template.chat
         case .systemOne: config.systemOne ?? template.systemOne
-        case .audio: config.audio ?? template.audio ?? config.chat ?? template.chat
+        // An address the user set beats the template's default: for an
+        // audio-only provider (Wyoming) that's the one `--url` writes.
+        case .audio: config.audio ?? (template.chat == nil ? config.chat : nil)
+            ?? template.audio ?? config.chat ?? template.chat
         }
         guard var url = raw?.trimmingCharacters(in: .whitespaces), !url.isEmpty else { return nil }
         for f in template.fields {
@@ -540,8 +553,10 @@ public enum Models {
         var m = config.models ?? [:]
         m[role.rawValue] = ref?.description
         config.models = m.isEmpty ? nil : m
-        if role == .speak, let ref, let v = provider(ref.provider, config: config)?.option(ref.model)?.voice {
-            config.cloudVoice = v
+        // Voice names are per provider: a new voice model brings its own
+        // (or none — then the model's default), never the last one's "troy".
+        if role == .speak, let ref {
+            config.cloudVoice = provider(ref.provider, config: config)?.option(ref.model)?.voice
         }
     }
 
@@ -613,6 +628,10 @@ public enum ProviderCheck {
         let started = Date()
         func ms() -> String { "\(Int(Date().timeIntervalSince(started) * 1000)) ms" }
         if p.needsKey, (key ?? "").isEmpty { return .failed("needs an API key") }
+        if let audio = p.base(.audio), Wyoming.address(audio) != nil, p.template.chat == nil {
+            do { return .ok(try await Wyoming.describe(base: audio) + " · \(ms())") }
+            catch { return .failed(error.localizedDescription) }
+        }
         // Only servers that list models get asked to: Cloudflare's
         // OpenAI-compatible API has no /models, so its check is a Judge
         // question instead.

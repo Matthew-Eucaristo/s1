@@ -339,7 +339,14 @@ public struct AgentLoop {
             catch { captureError = error.localizedDescription }
         }
 
-        let assessed = gate.assess(action)
+        var assessed = gate.assess(action)
+        // An MCP tool the server marks read-only, or the user auto-approved,
+        // runs without asking (deny-listed arguments still stop it).
+        if case .mcpCall(let server, let tool, _) = action,
+           case .needsHuman(let why) = assessed.verdict, why == SafetyGate.mcpReason(server, tool),
+           await MCPTools.shared.trusted(server: server, tool: tool) {
+            assessed = (.allow, false)
+        }
         var verdict = assessed.verdict
         // Whether the user may approve this step. Every guard below that
         // stops a step for its own reason makes it human-only: a password
@@ -446,7 +453,17 @@ public struct AgentLoop {
 
         switch verdict {
         case .allow:
-            if case .webSearch(let q) = action {
+            if case .mcpCall(let server, let tool, let args) = action {
+                if actuator is DryRunActuator {
+                    outcome = "[dry-run] mcp \(server)/\(tool)"
+                } else {
+                    onPhase?("Asking \(server): \(tool)…")
+                    do {
+                        let r = try await MCPTools.shared.call(server: server, tool: tool, argumentsJSON: args)
+                        outcome = "mcp result: " + String(r.prefix(4000))
+                    } catch { outcome = "error: \(error.localizedDescription)" }
+                }
+            } else if case .webSearch(let q) = action {
                 // Searching is the Reasoner's provider's job, not the screen's.
                 if let s2, s2.canSearchWeb, !(actuator is DryRunActuator) {
                     onPhase?("Searching the web for “\(q.prefix(60))”…")

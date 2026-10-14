@@ -77,7 +77,7 @@ public enum FocusGuard {
     /// still stands after them (a wait, a search, a decision with no action).
     public static func keepsFocus(_ a: Action?) -> Bool {
         switch a {
-        case nil, .wait?, .webSearch?, .captureScreenshot?, .verify?: return true
+        case nil, .wait?, .webSearch?, .mcpCall?, .captureScreenshot?, .verify?: return true
         default: return false
         }
     }
