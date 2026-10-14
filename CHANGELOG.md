@@ -3,6 +3,23 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.39] - 2026-10-15
+
+### Added
+- **Say yes to a step that needs you.** When the safety gate stops a step you
+  may approve — a menu command that deletes, ⌘Q, a terminal command — s1 now
+  asks instead of ending the task: Allow/Cancel in the notch pill and above
+  the composer, out loud to the companion ("yes" / "ya", "no" / "nggak"), or
+  y/N in `s1 run`. A yes runs exactly that one step. Passwords, payments,
+  scripts that run themselves, password fields and a moved focus still always
+  stop, and silence after 30 seconds is a no.
+- **Skills replay what actually worked.** "Save that as a skill called
+  weekly report" now keeps the run's own clicks and keys; saying "weekly
+  report" plays them back (no model, same result), finding each button on
+  screen again. If the screen changed, s1 plans the steps again as before.
+  "List my skills", "delete the skill …", `s1 skills`, and a list in
+  Settings → General.
+
 ## [0.3.38] - 2026-10-15
 
 ### Fixed
