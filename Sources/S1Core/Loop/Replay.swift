@@ -54,16 +54,42 @@ public enum RunReader {
         return m
     }
 
+    /// What a replay did: how many records it went through, how many
+    /// actions actually ran, and why it stopped early (nil = played to the end).
+    public struct Result: Sendable {
+        public var steps: Int
+        public var executed: Int
+        public var stopped: String?
+        /// Stopped at a recorded element it couldn't find before anything ran
+        /// — the screen isn't the one recorded, so re-planning may still work.
+        public var lostBeforeActing: Bool
+    }
+
     /// Re-execute the recorded actions through the real actuator + gate.
-    /// Read-only steps are logged and skipped. Returns the new run dir.
+    /// Read-only steps are logged and skipped. Returns the steps gone through.
     /// The kill switch and task cancellation are honored per step — a
     /// replayed run must be as interruptible as a live one.
     public static func replay(runDir: URL, into logger: RunLogger,
                               actuator: any Actuator, gate: SafetyGate,
                               killSwitchPath: String? = nil,
                               perceiver: any Perceiver = SystemPerceiver()) async throws -> Int {
-        let recs = try steps(in: runDir)
-        var i = 0
+        try await replay(records: steps(in: runDir), into: logger, actuator: actuator, gate: gate,
+                         killSwitchPath: killSwitchPath, perceiver: perceiver).steps
+    }
+
+    /// Replay `records`. `confirm` asks the user about a gated step the gate
+    /// marks confirmable (as the live loop does); `stopOnError` ends the
+    /// replay at the first failed action — a saved skill's later steps
+    /// assume the earlier ones worked.
+    public static func replay(records recs: [StepRecord], into logger: RunLogger,
+                              actuator: any Actuator, gate: SafetyGate,
+                              killSwitchPath: String? = nil,
+                              perceiver: any Perceiver = SystemPerceiver(),
+                              confirm: ConfirmHandler? = nil,
+                              stopOnError: Bool = false) async throws -> Result {
+        var i = 0, executed = 0
+        var stopped: String?
+        var lostBeforeActing = false
         // Focus before a replayed wait: keys after it must still go there.
         var aimed: FocusMark?
         steps: for rec in recs {
@@ -73,6 +99,7 @@ public enum RunReader {
                     confidence: nil, rationale: Task.isCancelled ? "task cancelled" : "kill switch",
                     modelReply: nil, action: nil, gate: "-", outcome: "aborted",
                     verified: nil, escalation: nil))
+                stopped = "stopped"
                 break steps
             }
             guard var action = rec.action else { continue }
@@ -109,8 +136,12 @@ public enum RunReader {
                             : "the recorded element (\(rec.target?.label ?? rec.target?.role ?? ref)) isn't on screen"
                     }
                 }
-                var verdict = gate.evaluate(action)
-                if let lost { verdict = .needsHuman(reason: lost) }
+                let assessed = gate.assess(action)
+                var verdict = assessed.verdict
+                // Only the gate's own confirmable stops may be approved; the
+                // guards below are human-only, as in the live loop.
+                var confirmable = assessed.confirmable
+                if let lost { verdict = .needsHuman(reason: lost); confirmable = false }
                 // Keys, text and menu commands go wherever focus is: a
                 // password box (typing, paste, Edit › Paste) never gets
                 // them, and an unreadable screen is no proof it isn't one.
@@ -122,6 +153,7 @@ public enum RunReader {
                     verdict = .needsHuman(reason: liveObs == nil
                         ? "couldn't read the screen to check the focused field"
                         : "focused field is a secure text field")
+                    confirmable = false
                 }
                 // Same secure-field coverage as the live loop: any targeted
                 // write/perform on a password box escalates.
@@ -129,9 +161,9 @@ public enum RunReader {
                 case .axPress(let ref), .axSetValue(let ref, _), .axAction(let ref, _),
                      .axSetAttribute(let ref, _, _):
                     if liveObs == nil {
-                        verdict = .needsHuman(reason: "couldn't read the screen to find \(ref)")
+                        verdict = .needsHuman(reason: "couldn't read the screen to find \(ref)"); confirmable = false
                     } else if S1SecureField.isSecure(ref, in: liveObs?.axTree) {
-                        verdict = .needsHuman(reason: "target is a secure text field")
+                        verdict = .needsHuman(reason: "target is a secure text field"); confirmable = false
                     }
                 default: break
                 }
@@ -143,17 +175,37 @@ public enum RunReader {
                     case .axSetValue(_, let v): v
                     default: nil
                     }
-                    if let payload, case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
-                        verdict = .needsHuman(reason: r)
+                    if let payload {
+                        let t = SafetyGate.assessTerminalPayload(payload)
+                        if case .needsHuman(let r) = t.verdict {
+                            if case .allow = verdict { confirmable = t.confirmable } else { confirmable = confirmable && t.confirmable }
+                            verdict = .needsHuman(reason: r)
+                        }
                     }
                 }
                 // Same focus guard as the live loop: the user moving focus
                 // during a replayed wait stops the keys meant for before.
-                var moved = false
                 if case .allow = verdict,
                    let why = FocusGuard.check(action, aimed: aimed, now: liveObs?.focus) {
-                    verdict = .needsHuman(reason: why)
-                    moved = true
+                    verdict = .needsHuman(reason: why); confirmable = false
+                }
+                // A step the user may approve, asked the way the live loop asks.
+                var gateLabel: String?
+                if case .needsHuman(let why) = verdict, confirmable, let confirm, !(actuator is DryRunActuator) {
+                    let request = ConfirmRequest(action: action, reason: why, app: liveObs?.frontmostApp)
+                    let yes = try await S1Runner.racingKillSwitch(killSwitchPath) {
+                        await Confirmation.bounded { await confirm(request) }
+                    }
+                    if Task.isCancelled { throw CancellationError() }
+                    if !yes {
+                        verdict = .needsHuman(reason: "\(why) — you said no")
+                    } else if let moved = FocusGuard.check(action, aimed: aimed ?? liveObs?.focus,
+                                                           now: await perceiver.focus() ?? liveObs?.focus) {
+                        verdict = .needsHuman(reason: moved)
+                    } else {
+                        verdict = .allow
+                        gateLabel = "allow(you approved: \(why))"
+                    }
                 }
                 var outcome = "blocked"
                 if case .allow = verdict {
@@ -174,6 +226,7 @@ public enum RunReader {
                     } else {
                         do {
                             outcome = try await actuator.perform(action, frontmostPID: liveObs?.frontmostPID)
+                            executed += 1
                         } catch {
                             outcome = "error: \(error.localizedDescription)"
                         }
@@ -183,18 +236,26 @@ public enum RunReader {
                 try await logger.log(StepRecord(index: i, time: Date(),
                     observation: "replay", decidedBy: "replay",
                     confidence: nil, rationale: rec.rationale, modelReply: nil, action: action,
-                    gate: verdict.label, outcome: outcome,
+                    gate: gateLabel ?? verdict.label, outcome: outcome,
                     verified: nil, escalation: nil, target: rec.target))
                 if !FocusGuard.keepsFocus(action) { aimed = nil }
                 // A step that needs the user ends the replay, as it ends a
                 // live run: the steps after it (a Return after blocked
                 // typing, keys aimed at a focus that moved) assumed it ran.
-                var needsHuman = moved
-                if case .needsHuman = verdict { needsHuman = true }
-                if needsHuman { i += 1; break steps }
+                if case .needsHuman(let why) = verdict {
+                    stopped = why
+                    lostBeforeActing = lost != nil && executed == 0
+                    i += 1
+                    break steps
+                }
+                if stopOnError, outcome.hasPrefix("error:") {
+                    stopped = outcome
+                    i += 1
+                    break steps
+                }
             }
             i += 1
         }
-        return i
+        return Result(steps: i, executed: executed, stopped: stopped, lostBeforeActing: lostBeforeActing)
     }
 }

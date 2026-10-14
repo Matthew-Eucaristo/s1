@@ -40,14 +40,18 @@ public struct AgentLoop {
     public var actuator: any Actuator
     public var gate: SafetyGate
     public var s2: (any Reasoner)?
+    /// Asks the user about a gated step the gate marks confirmable; nil =
+    /// every needsHuman step ends the run (scripts, tests, no UI).
+    public var confirm: ConfirmHandler?
 
     public init(config: LoopConfig, perceiver: any Perceiver, actuator: any Actuator,
-                gate: SafetyGate, s2: (any Reasoner)? = nil) {
+                gate: SafetyGate, s2: (any Reasoner)? = nil, confirm: ConfirmHandler? = nil) {
         self.config = config
         self.perceiver = perceiver
         self.actuator = actuator
         self.gate = gate
         self.s2 = s2
+        self.confirm = confirm
     }
 
     /// `onPhase` narrates each step's phase ("observing", "thinking",
@@ -335,26 +339,31 @@ public struct AgentLoop {
             catch { captureError = error.localizedDescription }
         }
 
-        var verdict = gate.evaluate(action)
-        if let captureError { verdict = .needsHuman(reason: captureError) }
+        let assessed = gate.assess(action)
+        var verdict = assessed.verdict
+        // Whether the user may approve this step. Every guard below that
+        // stops a step for its own reason makes it human-only: a password
+        // box, a moved focus or a missing grant are never "yes, go ahead".
+        var confirmable = assessed.confirmable
+        if let captureError { verdict = .needsHuman(reason: captureError); confirmable = false }
         // Secure-field guard: a password box must never be filled by an
         // agent — not by raw keystrokes (focus check) nor a targeted AX
         // write (ref's role check). Escalates to a human, same as the
         // deny list.
         if case .typeText = action, obs.secureTextFocused {
-            verdict = .needsHuman(reason: "focused field is a secure text field")
+            verdict = .needsHuman(reason: "focused field is a secure text field"); confirmable = false
         }
         // Paste (Cmd+V) lands in a password box without a keystroke —
         // keyCombo gets the same guard.
         if case .editText = action, obs.secureTextFocused {
-            verdict = .needsHuman(reason: "focused field is a secure text field")
+            verdict = .needsHuman(reason: "focused field is a secure text field"); confirmable = false
         }
         if case .keyCombo = action, obs.secureTextFocused {
-            verdict = .needsHuman(reason: "focused field is a secure text field")
+            verdict = .needsHuman(reason: "focused field is a secure text field"); confirmable = false
         }
         // Edit › Paste (or AutoFill) from the menu reaches it the same way.
         if case .menuItem = action, obs.secureTextFocused {
-            verdict = .needsHuman(reason: "focused field is a secure text field")
+            verdict = .needsHuman(reason: "focused field is a secure text field"); confirmable = false
         }
         // Any targeted write/perform on a secure field escalates too — not
         // just the text-carrying axSetValue.
@@ -362,7 +371,7 @@ public struct AgentLoop {
         case .axPress(let ref), .axSetValue(let ref, _), .axAction(let ref, _),
              .axSetAttribute(let ref, _, _):
             if isSecureField(ref, in: obs.axTree) {
-                verdict = .needsHuman(reason: "target is a secure text field")
+                verdict = .needsHuman(reason: "target is a secure text field"); confirmable = false
             }
         default: break
         }
@@ -375,8 +384,12 @@ public struct AgentLoop {
             case .axSetValue(_, let v): v
             default: nil
             }
-            if let payload, case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
-                verdict = .needsHuman(reason: r)
+            if let payload {
+                let t = SafetyGate.assessTerminalPayload(payload)
+                if case .needsHuman(let r) = t.verdict {
+                    if case .allow = verdict { confirmable = t.confirmable } else { confirmable = confirmable && t.confirmable }
+                    verdict = .needsHuman(reason: r)
+                }
             }
         }
         // Keys land wherever focus is when they're sent. Check it's still
@@ -388,7 +401,44 @@ public struct AgentLoop {
             let target = aimed ?? (Date().timeIntervalSince(obs.timestamp) > 1 ? obs.focus : nil)
             let now = await perceiver.focus() ?? obs.focus
             if let why = FocusGuard.check(action, aimed: target, now: now) {
-                verdict = .needsHuman(reason: why)
+                verdict = .needsHuman(reason: why); confirmable = false
+            }
+        }
+        // A step the user may approve: ask, and on a yes run exactly this
+        // one action. Silence, a no, a timeout or a stop all end the run as
+        // before. Dry runs act on nothing, so there's nothing to approve.
+        var gateLabel: String?
+        if case .needsHuman(let why) = verdict, confirmable, let confirm, !(actuator is DryRunActuator) {
+            onPhase?("waiting for you…")
+            let request = ConfirmRequest(action: action, reason: why, app: obs.frontmostApp)
+            let yes: Bool
+            do {
+                yes = try await S1Runner.racingKillSwitch(config.killSwitchPath) {
+                    await Confirmation.bounded { await confirm(request) }
+                }
+                // Stop pressed while asking reads as a stop, not as "no".
+                if Task.isCancelled { throw CancellationError() }
+                if !yes, let k = config.killSwitchPath, FileManager.default.fileExists(atPath: k) {
+                    throw S1Error.aborted("kill switch")
+                }
+            } catch {
+                try await logger.log(record(i, obs: obs, by: decidedBy, conf: decision.confidence,
+                                            rat: decision.rationale, action: action,
+                                            gate: verdict.label, out: "stopped while waiting for you",
+                                            ver: nil, esc: esc, reply: decision.rawReply))
+                throw error
+            }
+            if yes {
+                // Answering took time: keys must still go where the run aimed.
+                let now = await perceiver.focus() ?? obs.focus
+                if let moved = FocusGuard.check(action, aimed: aimed ?? obs.focus, now: now) {
+                    verdict = .needsHuman(reason: moved)
+                } else {
+                    verdict = .allow
+                    gateLabel = "allow(you approved: \(why))"
+                }
+            } else {
+                verdict = .needsHuman(reason: "\(why) — you said no")
             }
         }
         var outcome = "blocked"
@@ -450,7 +500,7 @@ public struct AgentLoop {
 
         let r = record(i, obs: obs, by: decidedBy, conf: decision.confidence,
                        rat: decision.rationale, action: action,
-                       gate: verdict.label, out: outcome, ver: verified, esc: esc,
+                       gate: gateLabel ?? verdict.label, out: outcome, ver: verified, esc: esc,
                        reply: decision.rawReply)
         try await logger.log(r)
         return (r, nil)

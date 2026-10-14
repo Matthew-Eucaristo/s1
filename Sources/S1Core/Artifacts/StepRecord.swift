@@ -27,7 +27,7 @@ public struct StepRecord: Codable, Sendable {
         public var reason: String
     }
 
-    public struct Target: Codable, Sendable {
+    public struct Target: Codable, Sendable, Equatable {
         public var role: String
         public var label: String?
         public var frame: CGRectCodable?

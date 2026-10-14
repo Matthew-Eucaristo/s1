@@ -18,6 +18,10 @@ public struct ServeEvent: Sendable {
         case listenError
         /// The agent run itself threw.
         case runError
+        /// A gated step waits for the user (text = the question asked).
+        case confirm
+        /// The user answered (text = "yes" / "no").
+        case confirmDone
     }
     public var kind: Kind
     public var text: String
@@ -83,6 +87,9 @@ public final class Serve: @unchecked Sendable {
         /// app's own listen or dictation): waking would open a second audio
         /// engine on the same input.
         public var micBusy: @Sendable () -> Bool
+        /// The host's own way to answer a gated step (the app's Allow/Cancel
+        /// buttons). Raced against the spoken answer; nil = voice only.
+        public var confirm: ConfirmHandler?
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -106,8 +113,10 @@ public final class Serve: @unchecked Sendable {
                             .typeText(text),
                             frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
                     },
-                    micBusy: @escaping @Sendable () -> Bool = { false }) {
+                    micBusy: @escaping @Sendable () -> Bool = { false },
+                    confirm: ConfirmHandler? = nil) {
             self.micBusy = micBusy
+            self.confirm = confirm
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -401,6 +410,10 @@ public final class Serve: @unchecked Sendable {
         let barged = AtomicFlag()
         let started = Date()
         let bargedEarly = AtomicFlag()
+        // The reply language, known up front: a gated step asks in it too.
+        let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
+        let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
+        let code = SpokenLanguage.code(Locale(identifier: lang))
         var barge: BargeMonitor?
         if config.voiceInterrupt {
             barge = BargeMonitor { [weak self] in
@@ -421,12 +434,16 @@ public final class Serve: @unchecked Sendable {
             }
         }
         var ok = true
+        let bargeNow = barge
+        let ask: ConfirmHandler = { [weak self] req in
+            await self?.ask(req, language: lang, code: code, barge: bargeNow) ?? false
+        }
         do {
             let (report, logger) = try await S1Runner.run(
                 goal: goal, policy: config.makePolicy(), artifacts: config.artifacts,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: config.killSwitch,
-                s2: config.s2,
+                s2: config.s2, confirm: ask,
                 onStep: { [onEvent] rec in
                     // The full digest (decider, conf, action → outcome) —
                     // the daemon's log should tell the whole story per step.
@@ -444,9 +461,6 @@ public final class Serve: @unchecked Sendable {
             if config.speak && !barged.get
                && !FileManager.default.fileExists(atPath: config.killSwitch) {
                 // Speak the truth: "done" is only said when it actually is.
-                let langs = config.languages.isEmpty ? [Locale(identifier: sayLanguage)] : config.languages
-                let lang = SpokenLanguage.detect(goal, among: langs)?.identifier ?? sayLanguage
-                let code = SpokenLanguage.code(Locale(identifier: lang))
                 let reply: String = if let answer = report.answer { answer } else {
                     switch report.status {
                     case .done: SpokenLanguage.reply(.done, languageCode: code)
@@ -476,6 +490,56 @@ public final class Serve: @unchecked Sendable {
             emit(.listening, "")
         }
         return ok
+    }
+
+    /// A gated step the user may approve: ask out loud and listen for the
+    /// answer, while the host's own control (the app's Allow/Cancel) can
+    /// answer too — whichever comes first. Talking is the answer here, so
+    /// the barge-in monitor (which would abort the run) is paused meanwhile.
+    private func ask(_ req: ConfirmRequest, language: String, code: String,
+                     barge: BargeMonitor?) async -> Bool {
+        barge?.stop()
+        defer { barge?.start() }
+        let question = Self.question(req, code: code)
+        emit(.confirm, question)
+        let yes: Bool = await withTaskGroup(of: Bool?.self) { group in
+            if let host = config.confirm { group.addTask { await host(req) } }
+            group.addTask { [weak self] in await self?.voiceAnswer(question, language: language, code: code) ?? nil }
+            for await answer in group {
+                if let answer { group.cancelAll(); return answer }
+            }
+            return false
+        }
+        speaker.stop()   // the question may still be playing when a button answered
+        emit(.confirmDone, yes ? "yes" : "no")
+        return yes
+    }
+
+    /// Speak the question, then hear "yes"/"no" (two tries); nil = no clear answer.
+    private func voiceAnswer(_ question: String, language: String, code: String) async -> Bool? {
+        if config.speak { await speaker.say(Self.speakable(question), language: language, voice: config.voice) }
+        for attempt in 0 ..< 2 {
+            if Task.isCancelled { return nil }
+            guard let heard = try? await config.transcribe({ _ in }) else { return nil }
+            if let a = Confirmation.answer(heard) { return a }
+            if attempt == 0, config.speak, !Task.isCancelled {
+                await speaker.say(code == "id" ? "Ya atau tidak?" : "Yes or no?", language: language, voice: config.voice)
+            }
+        }
+        return nil
+    }
+
+    static func question(_ req: ConfirmRequest, code: String) -> String {
+        code == "id"
+            ? "Ini perlu izinmu: \(req.reason). Lanjutkan? Jawab ya atau tidak."
+            : "This needs you: \(req.reason). Should I go ahead? Say yes or no."
+    }
+
+    /// Key glyphs and path arrows read as words.
+    static func speakable(_ s: String) -> String {
+        [("⌘", "command "), ("⌥", "option "), ("⌃", "control "), ("⇧", "shift "), ("⌫", "delete"),
+         ("⎋", "escape"), (" › ", ", "), ("“", ""), ("”", "")]
+            .reduce(s) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
     }
 
     /// "Please open Microme." + "browser please" → one request.

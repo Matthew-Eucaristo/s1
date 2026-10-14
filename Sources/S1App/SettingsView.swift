@@ -27,6 +27,7 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @Bindable var model: AppModel
     @State private var confirmClear = false
+    @State private var skills: [Skill] = []
 
     var body: some View {
         Form {
@@ -102,6 +103,24 @@ private struct GeneralSettings: View {
                         Button("Clear Memory…", role: .destructive) { confirmClear = true }
                     }
                 }
+                ForEach(skills, id: \.name) { skill in
+                    LabeledContent {
+                        Button(role: .destructive) {
+                            _ = try? Skills.delete(skill.name)
+                            skills = Skills.load()
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .help("Delete this skill")
+                        .accessibilityLabel("Delete this skill")
+                    } label: {
+                        Text(skill.name)
+                        if let r = skill.recording {
+                            Text("^[\(r.count) recorded action](inflect: true)")
+                        } else {
+                            Text("^[\(skill.steps.count) step](inflect: true)")
+                        }
+                    }
+                }
             } header: {
                 Text("Memory")
             } footer: {
@@ -109,6 +128,7 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { skills = Skills.load() }
         .confirmationDialog("Clear everything s1 remembers?", isPresented: $confirmClear) {
             Button("Clear Memory", role: .destructive) { try? Memory.clear() }
         } message: {

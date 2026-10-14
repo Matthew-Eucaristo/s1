@@ -120,7 +120,7 @@ public struct WindowInfo: Codable, Sendable {
     public var bounds: CGRectCodable
 }
 
-public struct CGRectCodable: Codable, Sendable {
+public struct CGRectCodable: Codable, Sendable, Equatable {
     public var x, y, w, h: Double
     public init(_ r: CGRect) { x = r.origin.x; y = r.origin.y; w = r.size.width; h = r.size.height }
 }

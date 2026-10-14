@@ -429,7 +429,8 @@ final class AppModel {
                 },
                 languages: langs, voice: ttsVoice.isEmpty ? nil : ttsVoice,
                 voiceInterrupt: voiceInterrupt,
-                micBusy: { [micInUse] in micInUse.value }),
+                micBusy: { [micInUse] in micInUse.value },
+                confirm: confirmHandler),
             locale: langs[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in
@@ -500,6 +501,8 @@ final class AppModel {
             // One unheard turn is normal (noise, a rejected guess); only a
             // streak that puts the listener to sleep is worth a banner.
             lastListenError = ev.text
+        case .confirm, .confirmDone:
+            break   // the Allow/Cancel prompt comes from `confirmHandler`
         case .runError:
             show(String(localized: "Last run failed: \(ev.text)"))
             updateCurrent { $0.state = .failed; $0.reply = ev.text; $0.finished = Date() }
@@ -538,6 +541,59 @@ final class AppModel {
     var companionRunning: Bool { serve?.state == .running }
     /// A command is in flight — typed or spoken to the companion.
     var commandInFlight: Bool { running || serveState == .running }
+
+    // MARK: - gated steps
+
+    /// A step the safety gate stopped that you may approve (Allow/Cancel in
+    /// the notch pill and above the composer). One at a time.
+    struct PendingConfirm: Identifiable {
+        let id = UUID()
+        let symbol: String
+        /// The step in words ("Choose File › Move to Trash").
+        let step: String
+        /// Why it needs you, from the gate.
+        let reason: String
+    }
+    private(set) var pendingConfirm: PendingConfirm? { didSet { syncHUD() } }
+    @ObservationIgnored private var confirmAnswer: CheckedContinuation<Bool, Never>?
+
+    /// What runs and the companion call for a gated step.
+    var confirmHandler: ConfirmHandler {
+        { [weak self] req in await self?.ask(req) ?? false }
+    }
+
+    private func ask(_ req: ConfirmRequest) async -> Bool {
+        answerConfirm(false)   // never two questions at once
+        // The app the step acts in: Allow clicked in this window brings s1
+        // forward, and the step's keys must not land here.
+        let target = NSWorkspace.shared.frontmostApplication
+        let (symbol, step) = StepPresentation.describe(req.action)
+        pendingConfirm = PendingConfirm(symbol: symbol, step: step, reason: req.reason)
+        let yes = await withTaskCancellationHandler {
+            await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+                if Task.isCancelled { c.resume(returning: false) } else { confirmAnswer = c }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.answerConfirm(false) }
+        }
+        pendingConfirm = nil
+        if yes, let target, target.processIdentifier != getpid(),
+           NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
+            target.activate()
+            for _ in 0 ..< 20 where NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        return yes
+    }
+
+    /// Allow (true) or Cancel (false) the pending step.
+    func answerConfirm(_ yes: Bool) {
+        guard let c = confirmAnswer else { return }
+        confirmAnswer = nil
+        pendingConfirm = nil
+        c.resume(returning: yes)
+    }
 
     func toggleLoginItem() {
         do {
@@ -677,6 +733,7 @@ final class AppModel {
                 goal: goalText, policy: Brain.policy(), artifacts: artifactsRoot,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
                 allowIrreversible: false, killSwitch: killPath, clearStaleStop: true, s2: Brain.reasoner(),
+                confirm: confirmHandler,
                 onStep: { [weak self] rec in
                     Task { @MainActor [weak self] in self?.updateCurrent { $0.steps.append(rec); $0.phase = nil } }
                 },
@@ -734,10 +791,12 @@ final class AppModel {
     }
 
     func stop() {
+        // Stop files first, then the open question: it ends as a stop.
         try? "stop".write(toFile: killPath, atomically: true, encoding: .utf8)
         // A command the companion is running stops the companion: it sleeps
         // (its run aborts on its own stop file) instead of reopening the mic.
         if serve?.state == .running { serve?.sleep() }
+        answerConfirm(false)
         // An in-flight listen doesn't check the kill file — cancel it too.
         listenTask?.cancel()
         listenTask = nil
@@ -947,6 +1006,10 @@ final class AppModel {
     /// Priority: listening > running > a brief outcome flash > hidden.
     private func syncHUD() {
         guard notchHUD, !booting, !DemoContent.enabled else { return }
+        if let c = pendingConfirm {
+            hud.show(.confirm(c.step, c.reason))
+            return
+        }
         if dictatingHandsFree {
             hud.show(.dictating(transcript))
             return

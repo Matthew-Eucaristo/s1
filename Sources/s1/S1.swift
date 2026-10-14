@@ -15,7 +15,7 @@ struct S1: AsyncParsableCommand {
         subcommands: [PreflightCmd.self, RunCmd.self, DemoCmd.self, CaptureCmd.self,
                       AXCmd.self, MenusCmd.self, TranscribeCmd.self, SayCmd.self, ListenCmd.self,
                       ServeCmd.self, MetricsCmd.self, ReplayCmd.self, ConfigCmd.self,
-                      TasksCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
+                      TasksCmd.self, SkillsCmd.self, StatusCmd.self, StopCmd.self, CleanCmd.self,
                       ProvidersCmd.self, ConnectCmd.self, DisconnectCmd.self, UseCmd.self,
                       ModelsCmd.self, PullCmd.self, DecideCmd.self,
                       UsageCmd.self, SetupCmd.self, DoctorCmd.self])
@@ -134,7 +134,7 @@ struct RunCmd: AsyncParsableCommand {
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
                                allowIrreversible: allowIrreversible, killSwitch: killSwitch,
-                               clearStaleStop: true, s2: s2,
+                               clearStaleStop: true, s2: s2, confirm: terminalConfirm(),
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
@@ -271,6 +271,7 @@ struct ListenCmd: AsyncParsableCommand {
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
                                killSwitch: kill, clearStaleStop: true, s2: reasoner,
+                               confirm: terminalConfirm(),
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak ?? S1Config.load().speak ?? false {
@@ -375,6 +376,36 @@ struct AXCmd: AsyncParsableCommand {
         if let exact = running.first(where: {
             $0.localizedName?.caseInsensitiveCompare(target) == .orderedSame }) { return exact }
         return running.first { $0.localizedName?.localizedCaseInsensitiveContains(target) ?? false }
+    }
+}
+
+/// `s1 skills` — what "save that as a skill called …" saved, and a way to
+/// delete one. The files themselves live in ~/.s1/skills/.
+struct SkillsCmd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "skills",
+        abstract: "List saved skills (say a skill's name to run it), or delete one.")
+    @Option(help: "Delete the skill with this name.")
+    var delete: String?
+
+    func run() async throws {
+        if let delete {
+            guard let removed = try Skills.delete(delete) else {
+                print("no skill called “\(delete.terminalSafe)”"); throw ExitCode(1)
+            }
+            print("deleted “\(removed.terminalSafe)”")
+            return
+        }
+        let all = Skills.load()
+        guard !all.isEmpty else {
+            print("no skills yet — after something works, say “save that as a skill called …”")
+            return
+        }
+        for s in all {
+            let how = s.recording.map { "\($0.count) recorded action\($0.count == 1 ? "" : "s")" } ?? "planned each time"
+            print("\(s.name.terminalSafe) — \(s.steps.count) step\(s.steps.count == 1 ? "" : "s"), \(how)")
+            for step in s.steps { print("    · \(step.terminalSafe)") }
+        }
+        print("files: \(Skills.dir.path)")
     }
 }
 

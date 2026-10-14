@@ -120,13 +120,34 @@ public struct SafetyGate: Sendable {
     /// Static — the actuator re-checks at act time too, since the frontmost
     /// app can flip to a terminal between observe and the keystroke landing.
     public static func evaluateTerminalPayload(_ text: String) -> GateVerdict {
+        assessTerminalPayload(text).verdict
+    }
+
+    /// The terminal scan plus whether the user's "yes" may let it run.
+    /// Privilege escalation (a password prompt s1 would type into),
+    /// automation side channels and permission/Gatekeeper tampering stay
+    /// human-only.
+    public static func assessTerminalPayload(_ text: String) -> (verdict: GateVerdict, confirmable: Bool) {
         for rule in Self.terminalDenyPatterns {
             if text.range(of: rule.regex, options: .regularExpression) != nil {
-                return .needsHuman(reason: "terminal: \(rule.why)")
+                return (.needsHuman(reason: "terminal: \(rule.why)"), !terminalAlwaysHuman.contains(rule.why))
             }
         }
-        return .allow
+        return (.allow, false)
     }
+
+    static let terminalAlwaysHuman: Set<String> = [
+        "privilege escalation via terminal", "automation scripting via terminal",
+        "permission database tamper", "Gatekeeper flag removal via terminal",
+    ]
+
+    /// Deny-list reasons a "yes" can't wave through: credentials and
+    /// payments are always yours, and script that runs itself isn't a
+    /// step anyone can check by reading a one-line question.
+    static let alwaysHuman: Set<String> = [
+        "credential-like content", "possible purchase", "executable URL scheme",
+        "AppleScript shell escape", "remote script piped to shell", "remote script piped to interpreter",
+    ]
 
     public init(allowReversible: Bool = true, allowIrreversible: Bool = false) {
         self.allowReversible = allowReversible
@@ -138,7 +159,19 @@ public struct SafetyGate: Sendable {
     static let destructiveMenu =
         #"\b(delete|erase|empty trash|move to (the )?(trash|bin)|empty bin|remove|discard|revert|clear (all|history)|log ?out|sign ?out|restart|shut ?down|reset|uninstall|format|burn|hapus|buang|tong sampah|kosongkan|mulai ulang|matikan|atur ulang|copot)\b"#
 
-    public func evaluate(_ action: Action) -> GateVerdict {
+    public func evaluate(_ action: Action) -> GateVerdict { assess(action).verdict }
+
+    /// Whether a needsHuman verdict for `action` may be approved by the
+    /// user for this one step (false for allow and deny verdicts).
+    public func confirmable(_ action: Action) -> Bool { assess(action).confirmable }
+
+    /// The verdict, and whether the user may approve it (needsHuman only).
+    public func assess(_ action: Action) -> (verdict: GateVerdict, confirmable: Bool) {
+        let v = classify(action)
+        return (v.verdict, { if case .needsHuman = v.verdict { return v.confirmable }; return false }())
+    }
+
+    private func classify(_ action: Action) -> (verdict: GateVerdict, confirmable: Bool) {
         // Deny-list first: it applies to every class.
         if case .keyCombo(let keys) = action {
             // Destructive shortcuts a model can emit with two tokens: ⌘Q
@@ -152,61 +185,61 @@ public struct SafetyGate: Sendable {
             // ⌃⌘Q locks the screen instantly — a run that locks the
             // screen can't observe or act afterwards: self-stalling.
             if cmd && ctrl && ks.contains("q") {
-                return .needsHuman(reason: "⌃⌘Q locks the screen — a locked screen stalls the agent")
+                return (.needsHuman(reason: "⌃⌘Q locks the screen — a locked screen stalls the agent"), false)
             }
             if cmd && ks.contains("q") {
                 // ⇧⌘Q logs the user OUT entirely — quitting the frontmost
                 // app is reversible-ish, ending the session is not.
                 if !ks.isDisjoint(with: ["shift"]) {
-                    return .needsHuman(reason: "⇧⌘Q logs out — it would end the whole session")
+                    return (.needsHuman(reason: "⇧⌘Q logs out — it would end the whole session"), true)
                 }
-                return .needsHuman(reason: "⌘Q quits the app — possible unsaved-work loss")
+                return (.needsHuman(reason: "⌘Q quits the app — possible unsaved-work loss"), true)
             }
             // Key aliases matter: "escape" posts the same keyCode as "esc".
             if cmd && opt && !ks.isDisjoint(with: ["esc", "escape"]) {
-                return .needsHuman(reason: "⌘⌥⎋ opens Force Quit")
+                return (.needsHuman(reason: "⌘⌥⎋ opens Force Quit"), true)
             }
             // ⌘⌫ moves the selection to the Trash (Finder, Photos, Mail);
             // ⌥⇧⌘⌫ empties the Trash with no confirmation — the same
             // commands the destructive-menu rule sends to the user.
             if cmd && !ks.isDisjoint(with: ["delete", "backspace", "del", "forwarddelete", "fwddelete"]) {
-                return .needsHuman(reason: "⌘⌫ deletes the selection — it may not be undoable")
+                return (.needsHuman(reason: "⌘⌫ deletes the selection — it may not be undoable"), true)
             }
             // ⌃⌥Space is s1's own wake chord — a model posting it toggles
             // the agent's listener mid-run: self-disruption, not the goal.
             if ctrl && opt && !ks.isDisjoint(with: ["space", "spacebar"]) {
-                return .needsHuman(
-                    reason: "⌃⌥Space is s1's own wake hotkey — it would toggle the agent's listener")
+                return (.needsHuman(
+                    reason: "⌃⌥Space is s1's own wake hotkey — it would toggle the agent's listener"), false)
             }
             if ctrl && opt && ks.contains("d") {
-                return .needsHuman(reason: "⌃⌥D is s1's dictation hotkey — it would open the mic mid-run")
+                return (.needsHuman(reason: "⌃⌥D is s1's dictation hotkey — it would open the mic mid-run"), false)
             }
             if opt && !ctrl && !cmd && !ks.isDisjoint(with: ["space", "spacebar"]) {
-                return .needsHuman(reason: "⌥Space is s1's launcher hotkey — it would steal focus mid-run")
+                return (.needsHuman(reason: "⌥Space is s1's launcher hotkey — it would steal focus mid-run"), false)
             }
         }
         // Menu commands that destroy or end something wait for the user,
         // whoever asked: deleting, erasing, logging out, shutting down.
         if case .menuItem(let path) = action, let title = path.last,
            title.range(of: Self.destructiveMenu, options: [.regularExpression, .caseInsensitive]) != nil {
-            return .needsHuman(reason: "“\(path.joined(separator: " › "))” can't be undone")
+            return (.needsHuman(reason: "“\(path.joined(separator: " › "))” can't be undone"), true)
         }
         for payload in action.textPayloads {
             for rule in Self.denyPatterns {
                 if payload.range(of: rule.regex, options: .regularExpression) != nil {
-                    return .needsHuman(reason: "denylist: \(rule.why)")
+                    return (.needsHuman(reason: "denylist: \(rule.why)"), !Self.alwaysHuman.contains(rule.why))
                 }
             }
         }
         switch action.actionClass {
         case .read:
-            return .allow
+            return (.allow, false)
         case .reversible:
-            return allowReversible ? .allow : .deny(reason: "reversible actions disabled")
+            return (allowReversible ? .allow : .deny(reason: "reversible actions disabled"), false)
         case .irreversible:
-            return allowIrreversible
+            return (allowIrreversible
                 ? .needsHuman(reason: "irreversible requires human confirmation")
-                : .deny(reason: "irreversible not allowed (pass --allow-irreversible to queue for confirmation)")
+                : .deny(reason: "irreversible not allowed (pass --allow-irreversible to queue for confirmation)"), true)
         }
     }
 }

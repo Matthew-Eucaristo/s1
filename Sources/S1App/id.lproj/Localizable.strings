@@ -441,3 +441,7 @@
 "Design reference: event stream, text-file skills" = "Referensi desain: event stream, skill berbentuk file teks";
 "Design reference: hold-to-talk, live notch transcript" = "Referensi desain: tahan-untuk-bicara, transkrip notch langsung";
 "Currency rates (ECB reference data)" = "Kurs mata uang (data referensi ECB)";
+"Allow" = "Izinkan";
+"Needs you: %@" = "Perlu izinmu: %@";
+"Delete this skill" = "Hapus skill ini";
+"^[%lld recorded action](inflect: true)" = "%lld aksi terekam";

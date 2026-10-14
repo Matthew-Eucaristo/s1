@@ -293,17 +293,67 @@ public enum Memory {
     }
 }
 
-/// A saved shortcut: a name (and extra trigger phrases) that replays a list
-/// of S1 subgoals. Each step still goes through grammar/Jev and the safety
-/// gate — a skill is a plan, never a bypass. JSON in ~/.s1/skills/.
+/// A saved shortcut: a name (and extra trigger phrases) for something that
+/// worked. `recording` is the run's own actions with the elements they hit:
+/// saying the name replays them (no model, the same clicks), re-finding each
+/// element on screen. When the screen isn't the recorded one, `steps` (the
+/// goals) are planned again through grammar/Judge/Reasoner. Either way every
+/// action goes through the safety gate — a skill is never a bypass.
+/// JSON in ~/.s1/skills/, editable by hand.
 public struct Skill: Codable, Sendable, Equatable {
     public var name: String
     public var triggers: [String]
     public var steps: [String]
     public var created: Date?
+    public var recording: [Recorded]?
 
-    public init(name: String, triggers: [String] = [], steps: [String], created: Date? = Date()) {
+    /// One recorded action and the element it aimed at.
+    public struct Recorded: Codable, Sendable, Equatable {
+        public var action: Action
+        public var target: StepRecord.Target?
+        public init(action: Action, target: StepRecord.Target? = nil) { self.action = action; self.target = target }
+    }
+
+    public init(name: String, triggers: [String] = [], steps: [String], created: Date? = Date(),
+                recording: [Recorded]? = nil) {
         self.name = name; self.triggers = triggers; self.steps = steps; self.created = created
+        self.recording = recording
+    }
+
+    /// The actions worth replaying from a run's log: ones that ran (allowed,
+    /// approved, not failed, not a dry run), minus read-only steps. nil when
+    /// nothing acted, or when typed text looks like a secret — a skill file
+    /// must never hold a password.
+    public static func recording(from records: [StepRecord]) -> [Recorded]? {
+        let acted = records.filter { r in
+            guard let a = r.action, r.gate.hasPrefix("allow"), r.decidedBy != "system" else { return false }
+            if let o = r.outcome, o.hasPrefix("error:") || o.hasPrefix("blocked") || o.hasPrefix("[dry-run]")
+                || o.hasPrefix("interrupted") { return false }
+            switch a {
+            case .done, .verify, .captureScreenshot, .webSearch: return false
+            default: return true
+            }
+        }
+        guard !acted.isEmpty else { return nil }
+        let texts: [String] = acted.compactMap {
+            switch $0.action {
+            case .typeText(let t)?: t
+            case .axSetValue(_, let v)?: v
+            case .editText(_, let r)?: r
+            default: nil
+            }
+        }
+        guard !texts.contains(where: Memory.looksSecret) else { return nil }
+        return acted.compactMap { r in r.action.map { Recorded(action: $0, target: r.target) } }
+    }
+
+    /// The recording as log records, ready for `RunReader.replay`.
+    var replayRecords: [StepRecord] {
+        (recording ?? []).enumerated().map { i, r in
+            StepRecord(index: i, time: Date(), observation: "skill", decidedBy: "skill", confidence: nil,
+                       rationale: name, modelReply: nil, action: r.action, gate: "allow", outcome: nil,
+                       verified: nil, escalation: nil, target: r.target)
+        }
     }
 }
 
@@ -328,9 +378,22 @@ public enum Skills {
         try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         enc.dateEncodingStrategy = .iso8601
-        let slug = normalize(s.name).replacingOccurrences(of: " ", with: "-")
-        try enc.encode(s).write(to: d.appendingPathComponent((slug.isEmpty ? "skill" : slug) + ".json"),
-                                options: .atomic)
+        // Owner-only, like the rest of ~/.s1: a recording holds typed text.
+        try enc.encode(s).write(to: file(for: s.name, in: d), options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file(for: s.name, in: d).path)
+    }
+
+    static func file(for name: String, in d: URL = dir) -> URL {
+        let slug = normalize(name).replacingOccurrences(of: " ", with: "-")
+        return d.appendingPathComponent((slug.isEmpty ? "skill" : slug) + ".json")
+    }
+
+    /// Remove the skill a name (or trigger) means; its name, or nil if none.
+    @discardableResult
+    public static func delete(_ name: String, in d: URL = dir) throws -> String? {
+        guard let s = match(name, in: load(from: d)) else { return nil }
+        try FileManager.default.removeItem(at: file(for: s.name, in: d))
+        return s.name
     }
 
     /// "morning setup", "run morning setup", "jalankan morning setup".
@@ -349,6 +412,8 @@ public enum MetaCommand: Equatable, Sendable {
     case remember(String)
     case forget
     case saveSkill(String)
+    case listSkills
+    case deleteSkill(String)
     /// A personal question memory can answer ("what's my editor?").
     case recall(String)
 
@@ -357,9 +422,15 @@ public enum MetaCommand: Equatable, Sendable {
             .trimmingCharacters(in: CharacterSet(charactersIn: ".!"))
         if (try? /^(?:forget everything|forget (?:all|my) memor(?:y|ies)|clear (?:my )?memory|lupakan semua(?:nya)?)$/
             .ignoresCase().wholeMatch(in: g)) != nil { return .forget }
-        if let m = try? /^(?:please\s+)?(?:save|simpan)\s+(?:that|this|it|ini|itu)?\s*(?:as|sebagai)\s+(?:a\s+)?(?:skill|shortcut)\s+(?:called\s+|named\s+|bernama\s+)?(.+)$/
+        if let m = try? /^(?:please\s+)?(?:save|simpan)\s+(?:that|this|it|ini|itu)?\s*(?:as|sebagai)\s+(?:a\s+)?(?:skill|shortcut|command|perintah)\s+(?:called\s+|named\s+|bernama\s+)?(.+)$/
             .ignoresCase().wholeMatch(in: g) {
             return .saveSkill(String(m.1).trimmingCharacters(in: CharacterSet(charactersIn: "\"'“” ")))
+        }
+        if (try? /^(?:list|show)\s+(?:my\s+|all\s+)?(?:skills|shortcuts|saved commands)|what (?:skills|shortcuts) do i have\??|(?:daftar|tampilkan)\s+(?:semua\s+)?(?:skill|shortcut|perintah)(?:ku| saya)?|(?:skill|shortcut) apa saja\??$/
+            .ignoresCase().wholeMatch(in: g)) != nil { return .listSkills }
+        if let m = try? /^(?:please\s+)?(?:delete|remove|forget|hapus|buang)\s+(?:the\s+)?(?:skill|shortcut|saved command|perintah)\s+(?:called\s+|named\s+|bernama\s+)?(.+)$/
+            .ignoresCase().wholeMatch(in: g) {
+            return .deleteSkill(String(m.1).trimmingCharacters(in: CharacterSet(charactersIn: "\"'“” ")))
         }
         if let answer = MacSkills.answer(g) ?? Memory.recall(g) { return .recall(answer) }
         if let m = try? /^(?:please\s+)?(?:remember|ingat(?:lah)?)\s+(?:that\s+|bahwa\s+)?(.+)$/
@@ -370,7 +441,10 @@ public enum MetaCommand: Equatable, Sendable {
     }
 
     public var kind: String {
-        switch self { case .remember: "remember"; case .forget: "forget"; case .saveSkill: "saveSkill"; case .recall: "recall" }
+        switch self {
+        case .remember: "remember"; case .forget: "forget"; case .saveSkill: "saveSkill"; case .recall: "recall"
+        case .listSkills: "listSkills"; case .deleteSkill: "deleteSkill"
+        }
     }
 
     /// Runs the command; the reply is shown and spoken.
@@ -394,10 +468,24 @@ public enum MetaCommand: Equatable, Sendable {
                 return "Nothing to save yet. Run something first, then say “save that as a skill called …”."
             }
             let steps = t.steps.isEmpty ? [t.goal] : t.steps
+            // The run's own actions too: saying the name replays them.
+            let recording = t.runDir
+                .flatMap { try? RunReader.steps(in: URL(fileURLWithPath: $0)) }
+                .flatMap(Skill.recording(from:))
             do {
-                try Skills.save(Skill(name: name, steps: steps))
-                return "Saved skill “\(name)” (\(steps.count) step\(steps.count == 1 ? "" : "s")). Say “\(name)” to run it."
+                try Skills.save(Skill(name: name, steps: steps, recording: recording))
+                let how = recording.map { " — \($0.count) recorded action\($0.count == 1 ? "" : "s"), replayed as they were" } ?? ""
+                return "Saved skill “\(name)” (\(steps.count) step\(steps.count == 1 ? "" : "s")\(how)). Say “\(name)” to run it."
             } catch { return "Couldn't save skill: \(error.localizedDescription)" }
+        case .listSkills:
+            let all = Skills.load()
+            guard !all.isEmpty else { return "No skills yet. After something works, say “save that as a skill called …”." }
+            return "Your skills: " + all.map(\.name).joined(separator: ", ") + "."
+        case .deleteSkill(let name):
+            do {
+                guard let removed = try Skills.delete(name) else { return "There's no skill called “\(name)”." }
+                return "Deleted the skill “\(removed)”."
+            } catch { return "Couldn't delete the skill: \(error.localizedDescription)" }
         }
     }
 }

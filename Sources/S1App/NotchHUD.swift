@@ -17,6 +17,8 @@ final class NotchHUDController {
         case dictating(String)
         case working(String)
         case finished(Turn.State, String)
+        /// A gated step waits for you: the step, and why.
+        case confirm(String, String)
     }
 
     private var panel: NSPanel?
@@ -111,7 +113,21 @@ struct NotchHUDView: View {
                     .frame(width: 52, height: 18)
                     .accessibilityHidden(true)
             }
-            if !isFinished {
+            if isConfirm {
+                // Clicks here don't activate s1 (non-activating panel), so
+                // the step's app keeps the focus it needs.
+                Button("Cancel") { AppModel.shared.answerConfirm(false) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                Button("Allow") { AppModel.shared.answerConfirm(true) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppModel.shared.onAccent)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .glassEffect(.regular.interactive().tint(AppModel.shared.accent), in: .capsule)
+            } else if !isFinished {
                 Button {
                     AppModel.shared.hudStopTapped()
                 } label: {
@@ -131,7 +147,8 @@ struct NotchHUDView: View {
         .glassEffect(.regular, in: .capsule)
         .padding(4)
         .tint(AppModel.shared.accent)
-        .accessibilityElement(children: .combine)
+        // Combined into one summary — except Allow/Cancel, which must stay buttons.
+        .accessibilityElement(children: isConfirm ? .contain : .combine)
         .accessibilityLabel("s1, \(title)\(detail.isEmpty ? "" : ", \(detail)")")
     }
 
@@ -139,6 +156,7 @@ struct NotchHUDView: View {
         switch content { case .listening, .dictating: true; default: false }
     }
     private var isFinished: Bool { if case .finished = content { return true }; return false }
+    private var isConfirm: Bool { if case .confirm = content { return true }; return false }
 
     @ViewBuilder
     private var leading: some View {
@@ -155,6 +173,11 @@ struct NotchHUDView: View {
                 .symbolEffect(.pulse, isActive: true)
         case .working:
             ProgressView().controlSize(.small)
+        case .confirm:
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .symbolEffect(.pulse, isActive: true)
         case .finished(let state, _):
             Image(systemName: state.symbol)
                 .font(.system(size: 14, weight: .semibold))
@@ -169,6 +192,7 @@ struct NotchHUDView: View {
         case .dictating: String(localized: "Dictating")
         case .working: String(localized: "Working")
         case .finished(let state, _): state.labelText
+        case .confirm(let step, _): step
         }
     }
 
@@ -177,6 +201,7 @@ struct NotchHUDView: View {
         case .listening(let t), .dictating(let t): t
         case .working(let t): t
         case .finished(_, let r): r
+        case .confirm(_, let why): why
         }
     }
 }

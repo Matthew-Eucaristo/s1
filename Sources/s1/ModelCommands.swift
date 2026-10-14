@@ -22,6 +22,19 @@ func makePolicy(_ name: String) throws -> any Policy {
     }
 }
 
+/// A gated step the user may approve, asked on the terminal ("allow this
+/// one step? [y/N]") — only when a person is at stdin to answer; scripts
+/// and pipes get nil, so those steps end the run as before.
+func terminalConfirm() -> ConfirmHandler? {
+    guard isatty(STDIN_FILENO) != 0 else { return nil }
+    return { req in
+        FileHandle.standardError.write(Data(
+            "\n⚠ needs you: \(req.reason.terminalSafe)\n  \(req.summary.terminalSafe) — allow this one step? [y/N] ".utf8))
+        let line = await Task.detached { readLine() }.value
+        return Confirmation.answer(line ?? "") == true
+    }
+}
+
 /// S2 for a CLI command: the assigned reasoner, unless `--no-s2`. Says why
 /// when a reasoner is assigned but can't answer.
 func cliReasoner(_ enabled: Bool) -> (any Reasoner)? {

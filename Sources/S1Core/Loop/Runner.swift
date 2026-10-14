@@ -214,6 +214,7 @@ public enum S1Runner {
                            allowIrreversible: Bool, killSwitch: String?,
                            clearStaleStop: Bool = false,
                            s2: (any Reasoner)? = nil,
+                           confirm: ConfirmHandler? = nil,
                            onStep: (@Sendable (StepRecord) -> Void)? = nil,
                            onPhase: (@Sendable (String) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
         if !dryRun {
@@ -263,7 +264,7 @@ public enum S1Runner {
 
         let gate = SafetyGate(allowReversible: true, allowIrreversible: allowIrreversible)
         let loop = AgentLoop(config: config, perceiver: perceiver, actuator: actuator,
-                             gate: gate, s2: s2)
+                             gate: gate, s2: s2, confirm: confirm)
 
         print("run dir: \(logger.runDir.path)")
         // "remember …", "forget everything", "save that as a skill called …".
@@ -280,15 +281,44 @@ public enum S1Runner {
         if let skill { onPhase?("skill: \(skill.name)") }
         DebugTrace.event("run", ["goal": goal, "skill": skill?.name ?? "", "policy": policy.name, "s2": s2?.name ?? "none",
                                  "session": Conversation.shared.sessionID(), "dir": logger.runDir.path])
-        let report = try await DebugTrace.$runDir.withValue(logger.runDir) {
-            try await loop.run(goal: loopGoal, policy: policy, logger: logger,
-                               plan: skill?.steps ?? [], onPhase: onPhase)
+        // A recorded skill replays its own actions — no model, the same
+        // clicks — through the gate, re-finding each element. A screen that
+        // isn't the recorded one (nothing could be found, nothing ran) falls
+        // back to planning the skill's steps.
+        var replayed: RunReport?
+        if let skill, let recording = skill.recording, !recording.isEmpty {
+            onPhase?("skill: \(skill.name) — replaying \(recording.count) recorded actions")
+            let r = try await DebugTrace.$runDir.withValue(logger.runDir) {
+                try await RunReader.replay(records: skill.replayRecords, into: logger, actuator: actuator,
+                                           gate: gate, killSwitchPath: config.killSwitchPath,
+                                           perceiver: perceiver, confirm: dryRun ? nil : confirm, stopOnError: true)
+            }
+            let stoppedByUser = config.killSwitchPath.map { FileManager.default.fileExists(atPath: $0) } == true
+                || Task.isCancelled
+            if r.stopped == nil {
+                replayed = RunReport(status: .done, steps: r.steps, runDir: logger.runDir.path, escalations: 0,
+                                     summary: "done", subgoals: skill.steps)
+            } else if stoppedByUser {
+                replayed = RunReport(status: .aborted, steps: r.steps, runDir: logger.runDir.path, escalations: 0)
+            } else if !r.lostBeforeActing {
+                replayed = RunReport(status: .needsHuman, steps: r.steps, runDir: logger.runDir.path, escalations: 0)
+            } else {
+                onPhase?("skill: \(skill.name) — the screen changed, planning it again")
+            }
+        }
+        let report: RunReport
+        if let replayed { report = replayed } else {
+            report = try await DebugTrace.$runDir.withValue(logger.runDir) {
+                try await loop.run(goal: loopGoal, policy: policy, logger: logger,
+                                   plan: skill?.steps ?? [], onPhase: onPhase)
+            }
         }
         await logger.finish(report)
         let did = ((try? RunReader.steps(in: logger.runDir)) ?? []).compactMap(Conversation.digest)
         let outcome = report.answer ?? ([report.status.rawValue] + did.suffix(4)).joined(separator: "; ")
         Conversation.shared.record(goal: goal, outcome: outcome,
-                                   steps: report.subgoals, ok: report.status == .done)
+                                   steps: report.subgoals, ok: report.status == .done,
+                                   runDir: logger.runDir.path)
         DebugTrace.$runDir.withValue(logger.runDir) {
             DebugTrace.event("runEnd", ["status": report.status.rawValue, "steps": report.steps,
                                         "answer": report.answer ?? ""])

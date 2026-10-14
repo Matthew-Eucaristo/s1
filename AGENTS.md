@@ -103,6 +103,18 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   run is in flight; a Serve run stopped from outside puts the listener to sleep. The run lock is not
   re-entrant (one run per process); listener/mic locks are.
 - AX-ref actions record their target (`StepRecord.target`); replay re-finds it by identity or asks the user.
+- Skills (~/.s1/skills/*.json, 0600) keep the goal `steps` and, when the run acted, a `recording` (its
+  allowed actions + targets; never when typed text looks secret). Saying the name replays the recording
+  through the gate (`RunReader.replay(records:…confirm:stopOnError:)`); nothing found and nothing run →
+  plan `steps` instead. One skill system: extend it, don't add a parallel "commands" store.
+- Gated steps may be approved one at a time (`AgentLoop.confirm`, a `ConfirmHandler`): only verdicts
+  `SafetyGate.assess` marks confirmable (destructive menus, ⌘Q/⌘⌫, irreversible with --allow-irreversible,
+  most terminal commands). Never approvable: credentials, payments, self-running script, s1's own hotkeys,
+  the lock screen, sudo/osascript/TCC/Gatekeeper in a terminal, password fields, a moved focus, missing
+  grants. Silence/timeout (`Confirmation.timeout`), "no", Stop and dry runs never run the step; after a yes
+  the focus is re-checked. The app asks in the HUD + above the composer (no Return shortcut on Allow; Allow
+  re-activates the step's app), the companion also asks by voice with barge-in paused, `s1 run`/`listen`
+  ask on a TTY.
 
 ## Verify
 - SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides

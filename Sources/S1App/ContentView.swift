@@ -358,6 +358,42 @@ private struct ActivityCard: View {
     }
 }
 
+// MARK: - gated step
+
+/// "This needs you": the step the safety gate stopped, why, and Allow /
+/// Cancel. Allow runs that one step only.
+private struct ConfirmPrompt: View {
+    let model: AppModel
+    let confirm: AppModel.PendingConfirm
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(model.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Needs you: \(confirm.step)")
+                    .font(.callout.weight(.semibold))
+                Text(confirm.reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Button("Cancel") { model.answerConfirm(false) }
+                .keyboardShortcut(.cancelAction)
+            // No Return shortcut: a Return meant for the composer must
+            // never approve a step that deletes or quits something.
+            Button("Allow") { model.answerConfirm(true) }
+                .tint(model.accent)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+}
+
 // MARK: - composer
 
 private struct Composer: View {
@@ -369,6 +405,10 @@ private struct Composer: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            if let c = model.pendingConfirm {
+                ConfirmPrompt(model: model, confirm: c)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if let notice = model.notice {
                 Text(notice)
                     .font(.callout)

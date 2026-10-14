@@ -11,6 +11,9 @@ public final class Conversation: @unchecked Sendable {
         /// S1 subgoals that ran (delegated or skill steps) — "save that as a skill".
         public var steps: [String] = []
         public var ok: Bool = true
+        /// The run's artifacts folder — its recorded actions become a
+        /// skill's recording.
+        public var runDir: String? = nil
     }
 
     public static let shared = Conversation()
@@ -71,11 +74,11 @@ public final class Conversation: @unchecked Sendable {
     }
 
     public func record(goal: String, outcome: String, steps: [String] = [], ok: Bool = true,
-                       now: Date = Date()) {
+                       runDir: String? = nil, now: Date = Date()) {
         lock.lock(); defer { lock.unlock() }
         rotateIfIdle(now)
         turns.append(Turn(goal: String(goal.prefix(300)), outcome: String(outcome.prefix(400)),
-                          steps: steps.prefix(12).map { String($0.prefix(200)) }, ok: ok))
+                          steps: steps.prefix(12).map { String($0.prefix(200)) }, ok: ok, runDir: runDir))
         // Sliding window: the store keeps the newest 200 turns. Turns that
         // fall off are compacted into terse digest lines — the model still
         // knows what happened earlier in the session instead of the oldest
