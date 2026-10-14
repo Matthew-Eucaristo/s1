@@ -3,6 +3,27 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.40] - 2026-10-15
+
+### Added
+Open standards — everything off until you turn it on in `~/.s1/config.json`,
+except structured output. README → Open standards has the details.
+- **Structured output.** The Reasoner asks for JSON-schema replies where the
+  provider supports it, so fewer replies come back unreadable.
+- **AGENTS.md and Agent Skills.** `"agentFiles": true` gives the Reasoner your
+  AGENTS.md and your `SKILL.md` skills (the one a goal is about in full).
+  `s1 skills --export` / `--import` move s1 skills to and from the format.
+- **MCP.** `"mcpServers"` gives the Reasoner tools from MCP servers (read-only
+  ones run, others ask you first); `s1 mcp` lets other agents read this Mac's
+  screen and hand s1 goals. Both speak the 2026-07-28 spec and older servers.
+- **Wyoming.** Whisper and Piper from Home Assistant's voice stack as
+  transcription and voice (`s1 connect wyoming`).
+- **OpenTelemetry.** `"telemetry": {"endpoint": …}` exports a trace per run;
+  your words stay out unless you ask.
+
+### Fixed
+- Choosing a different voice model no longer keeps the old provider's voice name.
+
 ## [0.3.39] - 2026-10-15
 
 ### Added
