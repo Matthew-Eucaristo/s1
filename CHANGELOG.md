@@ -3,6 +3,39 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [0.3.38] - 2026-10-15
+
+### Fixed
+A full audit of the codebase, start to end.
+- **Password boxes are protected again.** s1 now recognizes password fields
+  the way macOS reports them, so it never types or pastes into one — not by
+  keys, not through Edit › Paste.
+- **Terminals are recognized by name, whatever the casing** (Ghostty,
+  Alacritty): commands typed there get the terminal safety checks.
+- **Shortcuts follow your keyboard layout.** On AZERTY and other layouts ⌘A
+  presses A (it could press ⌘Q); ⌘⌫ asks you first; media keys work.
+- **Replays are safe to re-run.** A replay stops at the first step that needs
+  you, and finds the recorded button again instead of pressing whatever sits
+  at the old position.
+- **Companion and window runs don't stop each other.** The companion has its
+  own stop file; Stop on a spoken command puts the companion to sleep; a new
+  command no longer overlaps one whose reply is still being spoken; changing
+  a setting mid-command waits for it to finish.
+- **config.json with a typo is never wiped** — s1 says what's wrong instead
+  of replacing it with an empty config.
+- **OpenAI GPT-5 Reasoners work** (they reject a custom temperature).
+- Voice: turns end in a noisy room nobody speaks in; an empty audio file no
+  longer hangs; Stop silences a cloud voice reply; long speakers get more
+  patience, not slow starters.
+- Grammar: "wait 500 ms.", "type thank you", "press delete", "last tab",
+  "scroll down to supplies", "close this window" do what they say; two tabs
+  matching your words go to the Judge.
+- Launcher: copied conversions are plain numbers in every locale; `{isodate}`
+  is today's local date; dates and phone numbers aren't calculated.
+- CLI: `s1 connect` checks a key before saving it; `s1 menus <app>` never acts
+  on another app; the launch agent honors `S1_HOME` and steps aside when the
+  app is listening; release scripts refuse ad-hoc builds.
+
 ## [0.3.37] - 2026-10-11
 
 ### Fixed
