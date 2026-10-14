@@ -98,8 +98,21 @@ struct ConnectCmd: AsyncParsableCommand {
         guard let t = ProviderCatalog.template(provider) else {
             throw ValidationError("unknown provider \(provider) — `s1 providers` lists them")
         }
-        var cfg = S1Config.load()
+        let cfg = try S1Config.loadForWriting()
         let instance = id ?? (t.kind == .custom ? Models.slug(name ?? "custom") : provider)
+        // An instance id is one path segment of `provider/model`, and owns a
+        // Keychain item: it must be a slug, and can't take over another kind.
+        // Derived ids too: `--name groq` on a custom server would otherwise
+        // edit Groq's entry and replace its key.
+        if let id, Models.slug(id) != id {
+            throw ValidationError("--id must be lowercase letters, digits and dashes (e.g. \(Models.slug(id)))")
+        }
+        if let other = cfg.providers?.first(where: { $0.id == instance }), (other.template ?? other.id) != t.id {
+            throw ValidationError("\(instance) is already connected as \(other.template ?? other.id) — pick another --id")
+        }
+        if instance != t.id, ProviderCatalog.template(instance) != nil {
+            throw ValidationError("\(instance) is a provider name — pick another --id")
+        }
         var entry = cfg.providers?.first { $0.id == instance }
             ?? ProviderConfig(id: instance, template: instance == t.id ? nil : t.id)
         if let name { entry.name = name }
@@ -113,28 +126,34 @@ struct ConnectCmd: AsyncParsableCommand {
         }
 
         let p = Provider(template: t, config: entry)
+        var newKey: String?
         if p.needsKey || t.kind == .custom {
             let have = SecretStore.has(account: p.keyAccount)
             let prompt = "\(p.name) API key\(have ? " (Enter keeps the saved one)" : t.kind == .custom ? " (optional)" : "")"
                 + (t.keyURL.map { " — \($0)" } ?? "") + ": "
-            if let key = readSecret(prompt) {
-                try SecretStore.set(key, account: p.keyAccount)
-            } else if p.needsKey && !have {
+            newKey = readSecret(prompt)
+            if newKey == nil, p.needsKey, !have {
                 throw ValidationError("\(p.name) needs an API key")
             }
         }
+        // Check before saving anything: a mistyped key must not replace the
+        // working one in the Keychain.
         if !noCheck {
-            let outcome = await ProviderCheck.run(p, key: Models.keychain(p))
+            let outcome = await ProviderCheck.run(p, key: newKey ?? Models.keychain(p))
             print("\(outcome.ok ? "✓" : "✗") \(p.name): \(outcome.message)")
             if !outcome.ok { throw ExitCode(1) }
         }
-        let took = Models.connect(entry, in: &cfg)
-        try cfg.save()
+        if let newKey { try SecretStore.set(newKey, account: p.keyAccount) }
+        // Written through `update` (re-read now): the app may have saved
+        // config.json while the key prompt or the check was waiting.
+        var took: [ModelRole] = []
+        try S1Config.update { took = Models.connect(entry, in: &$0) }
+        let cfgNow = S1Config.load()
         print("connected \(instance)")
         for r in took {
-            print("  \(roleLabel(r)) → \(Models.assignment(r, config: cfg, env: [:])?.description ?? "")")
+            print("  \(roleLabel(r)) → \(Models.assignment(r, config: cfgNow, env: [:])?.description ?? "")")
         }
-        if took.isEmpty, Models.roles(of: instance, config: cfg).isEmpty {
+        if took.isEmpty, Models.roles(of: instance, config: cfgNow).isEmpty {
             print("  assign it with `s1 use <role> \(instance)/<model>` — `s1 models` lists choices")
         }
     }
@@ -146,13 +165,12 @@ struct DisconnectCmd: AsyncParsableCommand {
     @Argument(help: "Provider instance id.") var provider: String
 
     func run() async throws {
-        var cfg = S1Config.load()
+        let cfg = try S1Config.loadForWriting()
         guard cfg.providers?.contains(where: { $0.id == provider }) == true else {
             throw ValidationError("\(provider) isn't connected")
         }
         let roles = Models.roles(of: provider, config: cfg)
-        Models.disconnect(provider, in: &cfg)
-        try cfg.save()
+        try S1Config.update { Models.disconnect(provider, in: &$0) }
         SecretStore.delete(account: provider)
         print("disconnected \(provider)" + (roles.isEmpty ? "" : " — now off: \(roles.map(\.rawValue).joined(separator: ", "))"))
     }
@@ -171,10 +189,9 @@ struct UseCmd: AsyncParsableCommand {
             throw ValidationError("roles: \(ModelRole.allCases.map(\.rawValue).joined(separator: ", "))")
         }
         guard let model else { throw ValidationError("pass provider/model or off") }
-        var cfg = S1Config.load()
+        let cfg = try S1Config.loadForWriting()
         if model == "off" {
-            Models.assign(r, nil, in: &cfg)
-            try cfg.save()
+            try S1Config.update { Models.assign(r, nil, in: &$0) }
             print("\(r.rawValue) → off")
             return
         }
@@ -183,10 +200,9 @@ struct UseCmd: AsyncParsableCommand {
             throw ValidationError("\(ref.provider) isn't connected — `s1 connect \(ref.provider)` first")
         }
         guard p.supports(r) else { throw ValidationError("\(p.name) can't serve the \(r.rawValue) role") }
-        Models.assign(r, ref, in: &cfg)
-        try cfg.save()
+        try S1Config.update { Models.assign(r, ref, in: &$0) }
         print("\(r.rawValue) → \(ref)")
-        if case .failure(let why)? = Models.resolve(r, config: cfg) { print("  ⚠ \(why)") }
+        if case .failure(let why)? = Models.resolve(r, config: S1Config.load()) { print("  ⚠ \(why)") }
     }
 
     private func printAssignments() {
@@ -259,7 +275,9 @@ struct ConfigCmd: AsyncParsableCommand {
             }
         }
         print("\nscreen sharing \(Models.visionEnabled(config: cfg) ? "on — models that can see get screenshots" : "off — accessibility tree only")")
-        print("locale \(cfg.locale ?? SpokenLanguage.auto) · speak \(cfg.speak ?? true) · notch pill \(cfg.notchHUD ?? true)")
+        // Unset, the two surfaces differ: the app speaks, the CLI doesn't.
+        let speak = cfg.speak.map(String.init) ?? "unset (app: on, CLI: off)"
+        print("locale \(cfg.locale ?? SpokenLanguage.auto) · speak \(speak) · notch pill \(cfg.notchHUD ?? true)")
         let vocab = Vocabulary.assemble(custom: cfg.vocabulary ?? [])
         print("vocabulary \(cfg.vocabulary?.count ?? 0) custom + \(vocab.count - (cfg.vocabulary?.count ?? 0)) learned")
         print("\nenv overrides: S1_<ROLE>=provider/model|off (e.g. S1_REASONER), S1_<PROVIDER>_KEY (e.g. S1_GROQ_KEY), S1_VISION=off, S1_NUM_CTX")

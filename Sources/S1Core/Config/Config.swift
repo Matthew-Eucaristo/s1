@@ -89,10 +89,38 @@ public struct S1Config: Codable, Sendable {
         try enc.encode(self).write(to: url, options: .atomic)
     }
 
+    /// Like `load`, but a file that exists and doesn't parse is an error,
+    /// not an empty config — anything that saves must not replace a
+    /// hand-edited file with a typo by `{}` (every provider and role gone).
+    /// Missing or blank = empty config.
+    public static func loadForWriting(from path: String = S1Config.path) throws -> S1Config {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              !String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return S1Config() }
+        do { return try JSONDecoder().decode(S1Config.self, from: data) } catch {
+            throw S1Error.actionFailed(
+                "\(path) isn't valid (\(Self.decodeProblem(error))) — fix it by hand or move it away; s1 left it as it is")
+        }
+    }
+
+    /// Where a decode failed, in a few words ("vision: expected a Bool").
+    static func decodeProblem(_ error: Error) -> String {
+        switch error as? DecodingError {
+        case .typeMismatch(let t, let c)?, .valueNotFound(let t, let c)?:
+            let at = c.codingPath.map(\.stringValue).joined(separator: ".")
+            return "\(at.isEmpty ? "top level" : at): expected \(t)"
+        case .dataCorrupted(let c)?:
+            return c.underlyingError.map { ($0 as NSError).localizedDescription } ?? c.debugDescription
+        default:
+            return error.localizedDescription
+        }
+    }
+
     /// Load → mutate → save in one step, so concurrent writers (app panes,
-    /// CLI) only ever touch the keys they own.
+    /// CLI) only ever touch the keys they own. Throws, saving nothing, when
+    /// the file on disk can't be read.
     public static func update(at path: String = S1Config.path, _ body: (inout S1Config) -> Void) throws {
-        var c = load(from: path)
+        var c = try loadForWriting(from: path)
         body(&c)
         try c.save(to: path)
     }

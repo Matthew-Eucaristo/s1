@@ -301,8 +301,10 @@ public enum DecisionContext {
 /// - the grammar is unsure (fuzzy match) → it scores the step;
 /// - the run says it's done after touching the UI → it checks the goal
 ///   really happened.
-/// It can only make a step MORE cautious: a low score lowers confidence,
-/// which the loop routes to the Reasoner. The safety gate runs after it.
+/// A score only ever lowers confidence (the loop routes low ones to the
+/// Reasoner); a pick among the grammar's own candidates, or a control
+/// found by `explore`, raises it at most to `pickedCap`, so exact grammar
+/// hits stay the only near-certain steps. The safety gate runs after it.
 public struct JudgedPolicy: Policy {
     public var inner: any Policy
     public var judge: any DecisionJudge

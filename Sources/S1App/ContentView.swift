@@ -37,8 +37,9 @@ struct ContentView: View {
         .onChange(of: model.needsOnboarding) {
             if model.needsOnboarding { openWindow(id: "onboarding") }
         }
-        // A new command always brings the conversation forward.
-        .onChange(of: model.turns.count) { selection = .conversation }
+        // A new command always brings the conversation forward (by id: the
+        // count stops changing once the history cap is reached).
+        .onChange(of: model.turns.last?.id) { selection = .conversation }
         .onChange(of: model.focusGoalToken) { selection = .conversation }
     }
 
@@ -151,7 +152,7 @@ struct ContentView: View {
                 Label("New Conversation", systemImage: "square.and.pencil")
             }
             .help("New Conversation (⌘K)")
-            .disabled(model.running || model.turns.isEmpty)
+            .disabled(model.commandInFlight || model.turns.isEmpty)
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) {
@@ -350,7 +351,8 @@ private struct ActivityCard: View {
             return String(localized: "Working…")
         }
         let n = turn.steps.count
-        let steps = String(localized: "\(n) steps")
+        // "1 step", "2 steps": inflected (Indonesian has one form).
+        let steps = String(AttributedString(localized: "^[\(n) step](inflect: true)").characters)
         guard let d = turn.duration else { return steps }
         return "\(steps) · \(StepPresentation.duration(d))"
     }

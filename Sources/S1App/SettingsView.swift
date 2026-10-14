@@ -82,10 +82,12 @@ private struct GeneralSettings: View {
                 FootNote("Menus and labels. The language s1 listens for is under Voice.")
             }
 
+            // Read so the toggles below redraw after a config edit.
+            let _ = model.configRevision
             Section {
                 Toggle("Remember what I ask it to", isOn: Binding(
                     get: { Memory.enabled() },
-                    set: { on in try? S1Config.update { $0.memory = on ? nil : false } }))
+                    set: { on in model.updateConfig { $0.memory = on ? nil : false } }))
                 LabeledContent("Memory and skills") {
                     HStack {
                         Button("Show Memory") {
@@ -203,7 +205,7 @@ private struct VoiceSettings: View {
                         Text("Best installed").tag("")
                         Divider()
                         ForEach(voices, id: \.identifier) { v in
-                            Text("\(v.name) — \(v.language)\(Self.qualityTag(v.quality))").tag(v.identifier)
+                            Text(verbatim: "\(v.name) — \(v.language)\(Self.qualityTag(v.quality))").tag(v.identifier)
                         }
                     }
                     .disabled(!model.speakReply)
@@ -231,8 +233,8 @@ private struct VoiceSettings: View {
 
     static func qualityTag(_ q: AVSpeechSynthesisVoiceQuality) -> String {
         switch q {
-        case .premium: " · Premium"
-        case .enhanced: " · Enhanced"
+        case .premium: " · " + String(localized: "Premium")
+        case .enhanced: " · " + String(localized: "Enhanced")
         default: ""
         }
     }
@@ -312,10 +314,12 @@ private struct AdvancedSettings: View {
 
     var body: some View {
         Form {
+            // Read so the Cua rows below redraw after the toggle writes config.
+            let _ = model.configRevision
             Section {
                 Toggle("Act in the background with Cua Driver", isOn: Binding(
                     get: { CuaDriver.enabled() },
-                    set: { on in try? S1Config.update { $0.executor = on ? nil : "cgevent" } }))
+                    set: { on in model.updateConfig { $0.executor = on ? nil : "cgevent" } }))
                     .disabled(CuaDriver.binary() == nil)
                 if CuaDriver.binary() != nil, CuaDriver.enabled() {
                     LabeledContent("Cua Driver's own permissions") {
@@ -408,7 +412,11 @@ private struct AdvancedSettings: View {
             }
         }
         return [
-            ("config.json", URL(fileURLWithPath: home + "/config.json"), { try? S1Config.load().save() }),
+            // Created when missing — never rewritten: the user may be opening
+            // it to fix a typo that a re-save would erase.
+            ("config.json", URL(fileURLWithPath: home + "/config.json"), {
+                if !FileManager.default.fileExists(atPath: S1Config.path) { try? S1Config().save() }
+            }),
             ("snippets.json", URL(fileURLWithPath: home + "/snippets.json"), { Snippets.ensureFile() }),
             ("convert.json", URL(fileURLWithPath: home + "/convert.json"), { touch(home + "/convert.json", "{}\n") }),
             ("srt-settings.json", URL(fileURLWithPath: home + "/srt-settings.json"), { Sandbox.ensureSettingsFile() }),
@@ -519,7 +527,7 @@ enum AboutPanel {
         for (name, license, use) in credits {
             body.append(NSAttributedString(string: "\(name) · \(license)\n",
                                            attributes: [.font: bold, .paragraphStyle: p, .foregroundColor: NSColor.labelColor]))
-            body.append(NSAttributedString(string: use + "\n",
+            body.append(NSAttributedString(string: String(localized: String.LocalizationValue(use)) + "\n",
                                            attributes: [.font: small, .paragraphStyle: p, .foregroundColor: NSColor.secondaryLabelColor]))
         }
         body.append(NSAttributedString(string: "\ngithub.com/Matthew-Eucaristo/s1",

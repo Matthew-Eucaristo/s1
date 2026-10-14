@@ -60,8 +60,22 @@ public enum S1Runner {
     /// Take the run lock, or throw `.busy` if a live s1 process holds it.
     /// Pair every successful call with `releaseRunLock()` (defer).
     public static func acquireRunLock() throws {
-        try claimPidFile(lockPath, what: "s1 run")
+        // Unlike the listener and mic locks, a run is never re-entrant: two
+        // runs in one process (the app's window and its companion) would
+        // drive the same keyboard, and the first to finish would drop the
+        // lock under the other.
+        guard runInProcess.claim() else {
+            throw S1Error.busy("a run is already in progress in this process")
+        }
+        do { try claimPidFile(lockPath, what: "s1 run") } catch {
+            runInProcess.clear()
+            throw error
+        }
     }
+
+    /// This process's run, claimed atomically — two in-process callers can
+    /// both read "not ours yet" from the pid file, but only one claims this.
+    private static let runInProcess = AtomicFlag()
 
     /// Atomically claim a pid file with this process's pid — O_EXCL create
     /// closes the check-then-write window where two processes could both
@@ -168,7 +182,10 @@ public enum S1Runner {
 
     /// Removes the lock only when WE hold it — a dry-run (which never
     /// acquires) must not delete a live run's lock file.
-    public static func releaseRunLock() { releasePidFile(lockPath) }
+    public static func releaseRunLock() {
+        releasePidFile(lockPath)
+        runInProcess.clear()
+    }
 
     /// Claim/release the mic lock. Two audio engines on one input device
     /// fail cryptically — or silently starve each other — so every mic
@@ -195,12 +212,18 @@ public enum S1Runner {
     public static func run(goal: String, policy: any Policy, artifacts: String,
                            maxSteps: Int, threshold: Double, dryRun: Bool,
                            allowIrreversible: Bool, killSwitch: String?,
+                           clearStaleStop: Bool = false,
                            s2: (any Reasoner)? = nil,
                            onStep: (@Sendable (StepRecord) -> Void)? = nil,
                            onPhase: (@Sendable (String) -> Void)? = nil) async throws -> (report: RunReport, logger: RunLogger) {
         if !dryRun {
             try requireAccessibility()
             try acquireRunLock()
+            // A stop file left from an earlier `s1 stop` would abort this run
+            // at step 0. Cleared only once this run holds the lock: a caller
+            // that loses the lock must not swallow a stop meant for the run
+            // that has it.
+            if clearStaleStop, let killSwitch { try? FileManager.default.removeItem(atPath: killSwitch) }
         }
         defer { if !dryRun { releaseRunLock() } }
         var config = LoopConfig()
@@ -208,6 +231,12 @@ public enum S1Runner {
         config.confidenceThreshold = threshold
         config.dryRun = dryRun
         config.killSwitchPath = killSwitch
+        // A dry run never clears a stop file (it holds no lock, the stop may
+        // be meant for a live run) — and one already there when it starts
+        // isn't meant for it either: it executes nothing, so it just runs.
+        if dryRun, clearStaleStop, let k = killSwitch, FileManager.default.fileExists(atPath: k) {
+            config.killSwitchPath = nil
+        }
 
         let root = URL(fileURLWithPath: artifacts)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

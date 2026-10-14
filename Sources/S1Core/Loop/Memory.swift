@@ -85,7 +85,8 @@ public enum Memory {
             .trimmingCharacters(in: CharacterSet(charactersIn: "?.!"))
         let patterns = [
             /^(?i)(?:what|who|where|which)(?:'s| is| are| was)\s+(my\s+.+)$/,
-            /^(?i)(?:do you remember|remind me(?: of| about)?|what did i (?:say|tell you) about)\s+(.+)$/,
+            // "remind me to call her at 5" is a request, not a recall.
+            /^(?i)(?:do you remember|remind me (?:of|about)|what did i (?:say|tell you) about)\s+(.+)$/,
             /^(?i)(?:apa|siapa|di ?mana)\s+(.+(?:ku|saya|aku))$/,
         ]
         guard enabled(),
@@ -93,16 +94,19 @@ public enum Memory {
         if let v = resolve(topic.hasPrefix("my ") || topic.lowercased().hasSuffix("ku") ? topic : "my " + topic, facts: facts) {
             return "\(topic.prefix(1).uppercased() + topic.dropFirst()): \(v)."
         }
-        // Looser: the fact sharing the most meaningful words with the question.
-        let stop: Set<String> = ["my", "the", "a", "is", "are", "what", "ku", "saya", "aku", "apa", "itu", "about"]
+        // Looser: a fact holding every meaningful word of the question —
+        // one shared word isn't the same subject ("my IP address" is not
+        // "my address").
+        let stop: Set<String> = ["my", "the", "a", "an", "is", "are", "what", "ku", "saya", "aku", "apa", "itu",
+                                 "about", "of", "to", "in", "on"]
         let want = Set(topic.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .map(String.init).filter { $0.count > 2 && !stop.contains($0) })
+            .map(String.init).filter { $0.count > 1 && !stop.contains($0) })
         guard !want.isEmpty else { return nil }
-        let scored = (facts ?? allFacts()).map { f -> (String, Int) in
+        let hit = (facts ?? allFacts()).last { f in
             let words = Set(plain(f).lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
-            return (plain(f), want.intersection(words).count)
-        }.filter { $0.1 > 0 }.max { $0.1 < $1.1 }
-        return scored.map { "You told me: \($0.0)" }
+            return want.isSubset(of: words)
+        }
+        return hit.map { "You told me: \(plain($0))" }
     }
 
     /// Dedupe key: stamp-free, case-folded — "Zed *(added …)*" == "zed".

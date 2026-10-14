@@ -70,6 +70,25 @@ public enum Action: Codable, Sendable, Equatable {
         }
     }
 
+    /// The snapshot ref an AX action targets, nil for everything else.
+    var axRef: String? {
+        switch self {
+        case .axPress(let r), .axSetValue(let r, _), .axAction(let r, _), .axSetAttribute(let r, _, _): return r
+        default: return nil
+        }
+    }
+
+    /// The same AX action aimed at another ref.
+    func withRef(_ r: String) -> Action {
+        switch self {
+        case .axPress: return .axPress(ref: r)
+        case .axSetValue(_, let v): return .axSetValue(ref: r, value: v)
+        case .axAction(_, let n): return .axAction(ref: r, name: n)
+        case .axSetAttribute(_, let a, let v): return .axSetAttribute(ref: r, attr: a, value: v)
+        default: return self
+        }
+    }
+
     /// Text payloads that get pattern-scanned by the gate's deny list.
     var textPayloads: [String] {
         switch self {

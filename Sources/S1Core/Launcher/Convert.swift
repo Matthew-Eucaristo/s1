@@ -157,12 +157,25 @@ public enum Convert {
         return q.amount / rf * rt
     }
 
-    public static func format(_ v: Double) -> String {
+    /// For reading: the user's locale ("3,1069" in Indonesia, "3.1069" in the US).
+    public static func format(_ v: Double, locale: Locale = .current) -> String {
+        formatter(v, locale: locale, grouping: true).string(from: NSNumber(value: v)) ?? String(v)
+    }
+
+    /// For the clipboard: a plain number any app parses ("1650000.25") —
+    /// stripping grouping from the localized text turned "3,1069" into 31069.
+    public static func plain(_ v: Double) -> String {
+        formatter(v, locale: Locale(identifier: "en_US_POSIX"), grouping: false)
+            .string(from: NSNumber(value: v)) ?? String(v)
+    }
+
+    private static func formatter(_ v: Double, locale: Locale, grouping: Bool) -> NumberFormatter {
         let f = NumberFormatter()
+        f.locale = locale
         f.numberStyle = .decimal
         f.maximumFractionDigits = abs(v) >= 100 ? 2 : abs(v) >= 1 ? 4 : 6
-        f.usesGroupingSeparator = true
-        return f.string(from: NSNumber(value: v)) ?? String(v)
+        f.usesGroupingSeparator = grouping
+        return f
     }
 
     /// The launcher row for a conversion, or nil. `rates` nil + a currency
@@ -174,13 +187,13 @@ public enum Convert {
             let fu = MeasurementFormatter(), raw = format(v)
             fu.unitOptions = .providedUnit
             return LauncherItem(kind: .calc, title: "\(amt) \(fu.string(from: a.unit)) = \(raw) \(fu.string(from: b.unit))",
-                                subtitle: "Unit conversion · Enter copies \(raw)", payload: raw.replacingOccurrences(of: ",", with: ""))
+                                subtitle: "Unit conversion · Enter copies \(raw)", payload: plain(v))
         }
         if let rates, let v = money(q, rates: rates), let f = currency(q.from), let t = currency(q.to) {
             let raw = format(v)
             return LauncherItem(kind: .calc, title: "\(amt) \(f) = \(raw) \(t)",
                                 subtitle: "ECB reference rate \(rates.date) via frankfurter.dev · Enter copies",
-                                payload: raw.replacingOccurrences(of: ",", with: ""))
+                                payload: plain(v))
         }
         return nil
     }

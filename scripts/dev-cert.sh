@@ -12,11 +12,24 @@
 set -euo pipefail
 
 NAME="${S1_SIGN_IDENTITY:-S1 Dev Cert}"
-DIR="${TMPDIR:-/tmp}/s1-dev-cert"
-mkdir -p "$DIR"
+KEYCHAIN=~/Library/Keychains/login.keychain-db
+# Private scratch dir, removed on any exit: it holds the private key.
+DIR=$(mktemp -d)
+trap 'rm -rf "$DIR"' EXIT
 
-if security find-identity -v -p codesigning | grep -q "\"$NAME\""; then
+IDENTITIES=$(security find-identity -v -p codesigning)
+if [[ "$IDENTITIES" == *"\"$NAME\""* ]]; then
     echo "identity '$NAME' already present — nothing to do"
+    exit 0
+fi
+
+# Imported on an earlier run whose trust prompt was cancelled: importing
+# again fails ("already exists") — just redo the trust step.
+if security find-certificate -c "$NAME" "$KEYCHAIN" >/dev/null 2>&1; then
+    echo "'$NAME' exists but isn't trusted for codesigning yet — trusting it (approve the dialog)…"
+    security find-certificate -c "$NAME" -p "$KEYCHAIN" > "$DIR/s1dev.crt"
+    security add-trusted-cert -k "$KEYCHAIN" -p codeSign "$DIR/s1dev.crt"
+    echo "done — make-app.sh will sign dist/S1.app with '$NAME' automatically"
     exit 0
 fi
 
@@ -34,13 +47,12 @@ openssl pkcs12 -export -legacy \
     -inkey "$DIR/s1dev.key" -in "$DIR/s1dev.crt" \
     -out "$DIR/s1dev.p12" -passout pass:s1dev 2>/dev/null
 
-security import "$DIR/s1dev.p12" -k ~/Library/Keychains/login.keychain-db \
+security import "$DIR/s1dev.p12" -k "$KEYCHAIN" \
     -P s1dev -T /usr/bin/codesign
 
 echo "trusting for codesigning (a password dialog will appear — approve it)…"
-security add-trusted-cert -k ~/Library/Keychains/login.keychain-db \
+security add-trusted-cert -k "$KEYCHAIN" \
     -p codeSign "$DIR/s1dev.crt"
 
-rm -rf "$DIR"
 echo "done — make-app.sh will sign dist/S1.app with '$NAME' automatically"
 echo "(override with S1_SIGN_IDENTITY=<your identity>)"

@@ -32,7 +32,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   Reasoner actions at (0,0) or confidence < 0.25 are refused and become a question to the user;
   the same press repeated right after it visibly worked finishes the run as done.
 - **Menus are each app's manual.** `MenuReader` (Perceive/Menus.swift) reads the frontmost app's menu
-  bar into `Snapshot.menus` (cached 30 s per pid, Apple and Services menus skipped); `.menuItem(path:)`
+  bar into `Snapshot.menus` (cached 30 s per pid, dropped after presses/shortcuts that can change which
+  items are enabled — `AgentLoop.changesMenus`; Apple and Services menus skipped); `.menuItem(path:)`
   presses by path or by title (`MenuReader.resolve`). The grammar uses exact title matches
   (`MenuMatch.exact`, never "open X" → X), unknown verbs offer `MenuMatch.fuzzy` candidates to the Judge,
   `explore` adds a "Menu commands" region, the Reasoner prompt lists enabled commands. Destructive titles
@@ -71,7 +72,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   Unreadable focus (a window still opening) counts as unchanged.
 - Screenshots are optional evidence: perception uses `observe(preferScreenshot:)` so a missing Screen
   Recording grant degrades to the AX tree; only an explicit `.captureScreenshot` action requires it.
-- Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save).
+- Keys never touch `config.json`. Config writes go through `S1Config.update` (load → mutate → save); it
+  throws instead of saving when the file exists but doesn't parse (never replace a typo'd config with `{}`).
 - Keychain: `SecretStore.has` reads attributes only (never prompts); `get` caches per process. Never read a
   secret just to test presence. Data-protection keychain needs a provisioning profile (AMFI kills the
   binary without one), so s1 stays on the login keychain with a stable signing identity.
@@ -91,6 +93,16 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Turn end (`Endpointer`): the noise floor learns only from waiting/quiet frames, the speech peak decays,
   and `TurnEnd.patience` lengthens the pause needed after long speech. Listening turns cap at 45 s.
 - Stuck-loop guards apply to model decisions only; grammar steps (`s1:ax`) repeat when the user said so.
+- Password boxes are AXTextField + subrole AXSecureTextField: `AXReader.nodeAttrs` normalizes them to role
+  `AXSecureTextField`; live checks use `AXReader.isSecure`. Menu commands get the same secure-field guard as keys.
+- Terminals: `SafetyGate.isTerminal` (case-blind), never `terminalApps.contains`. ⌘ shortcuts resolve
+  single characters through `KeyLayout.shortcutCode` (⌘ state) before the ANSI table.
+- Stop files (NSTemporaryDirectory): `s1-stop` CLI runs, `s1-serve-stop` CLI daemon, `s1-app-stop` app
+  window/Siri runs, `s1-app-serve-stop` the app's companion; `s1 stop` writes all. A run clears its own only
+  after taking the run lock (`S1Runner.run(clearStaleStop:)`). `Serve.sleep` writes its file only while its
+  run is in flight; a Serve run stopped from outside puts the listener to sleep. The run lock is not
+  re-entrant (one run per process); listener/mic locks are.
+- AX-ref actions record their target (`StepRecord.target`); replay re-finds it by identity or asks the user.
 
 ## Verify
 - SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides

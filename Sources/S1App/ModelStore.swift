@@ -158,11 +158,19 @@ final class ModelStore {
         reloadKeys()
     }
 
+    /// The last config write that failed (a hand-edited config.json that
+    /// doesn't parse) — shown in Settings until a write works again.
+    private(set) var writeError: String?
+
     private func write(_ body: (inout S1Config) -> Void) {
-        var c = S1Config.load()
-        body(&c)
-        try? c.save()
-        config = c
+        do {
+            try S1Config.update(body)
+            writeError = nil
+        } catch {
+            writeError = error.localizedDescription
+            return
+        }
+        config = S1Config.load()
         reloadKeys()
         onChange?()
     }
@@ -223,20 +231,32 @@ final class ModelStore {
     }
 
     /// One tap: pull, then (optionally) assign it.
+    /// The running pull per model: progress lines that arrive after a pull
+    /// ended (they hop to the main actor late) must not bring it back.
+    @ObservationIgnored private var pullIDs: [String: UUID] = [:]
+
     func pull(_ model: String, provider: Provider, assignTo role: ModelRole? = nil) {
-        guard pulls[model] == nil else { return }
+        guard pullIDs[model] == nil else { return }
+        let id = UUID()
+        pullIDs[model] = id
         pulls[model] = String(localized: "Starting…")
         Task {
             do {
                 try await ModelPull.pull(model: model) { line in
-                    Task { @MainActor in self.pulls[model] = line }
+                    Task { @MainActor in if self.pullIDs[model] == id { self.pulls[model] = line } }
                 }
+                pullIDs[model] = nil
                 pulls[model] = nil
                 refreshInstalled()
                 await refreshModels(provider)
                 if let role { assign(role, ModelRef(provider: provider.id, model: model)) }
             } catch {
-                pulls[model] = String(localized: "Failed: \(error.localizedDescription)")
+                pullIDs[model] = nil
+                let failed = String(localized: "Failed: \(error.localizedDescription)")
+                pulls[model] = failed
+                // Shown for a moment, then the download button is back.
+                try? await Task.sleep(for: .seconds(6))
+                if pulls[model] == failed { pulls[model] = nil }
             }
         }
     }

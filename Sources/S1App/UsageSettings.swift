@@ -57,14 +57,16 @@ struct UsageSettings: View {
             GridRow {
                 Tile(title: "Spent", value: Self.usd(report.spentUSD),
                      detail: report.estimatedUSD > 0
-                        ? "\(Self.usd(report.billedUSD)) billed · \(Self.usd(report.estimatedUSD)) est."
-                        : report.planCalls > 0 ? "\(report.planCalls) calls in plan" : "billed by providers")
+                        ? String(localized: "\(Self.usd(report.billedUSD)) billed · \(Self.usd(report.estimatedUSD)) est.")
+                        : report.planCalls > 0 ? String(localized: "\(report.planCalls) calls in plan")
+                        : String(localized: "billed by providers"))
                 Tile(title: "Calls", value: report.calls.formatted(),
-                     detail: report.failures > 0 ? "\(report.failures) failed" : "all succeeded")
+                     detail: report.failures > 0 ? String(localized: "\(report.failures) failed")
+                        : String(localized: "all succeeded"))
                 Tile(title: "Tokens", value: Self.compact(report.input + report.output),
-                     detail: "\(Self.compact(report.input)) in · \(Self.compact(report.output)) out")
+                     detail: String(localized: "\(Self.compact(report.input)) in · \(Self.compact(report.output)) out"))
                 Tile(title: "Cache", value: report.cacheHitRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
-                     detail: "\(Self.compact(report.cached)) read · \(Self.compact(report.cacheWrite)) write")
+                     detail: String(localized: "\(Self.compact(report.cached)) read · \(Self.compact(report.cacheWrite)) write"))
             }
         }
     }
@@ -253,11 +255,11 @@ private struct ModelUsageRow: View {
     }
 
     private var detail: String {
-        var s = "\(row.calls) calls · \(UsageSettings.compact(row.input)) in"
-        if row.cached > 0 { s += " (\(UsageSettings.compact(row.cached)) cached)" }
-        if row.cacheWrite > 0 { s += " · \(UsageSettings.compact(row.cacheWrite)) cache write" }
-        s += " · \(UsageSettings.compact(row.output)) out · \(row.avgMs) ms"
-        if row.failures > 0 { s += " · \(row.failures) failed" }
+        var s = String(localized: "\(row.calls) calls · \(UsageSettings.compact(row.input)) in")
+        if row.cached > 0 { s += " " + String(localized: "(\(UsageSettings.compact(row.cached)) cached)") }
+        if row.cacheWrite > 0 { s += " · " + String(localized: "\(UsageSettings.compact(row.cacheWrite)) cache write") }
+        s += " · " + String(localized: "\(UsageSettings.compact(row.output)) out") + " · \(row.avgMs) ms"
+        if row.failures > 0 { s += " · " + String(localized: "\(row.failures) failed") }
         return s
     }
 }

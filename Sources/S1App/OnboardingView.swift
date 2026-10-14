@@ -81,7 +81,8 @@ struct OnboardingView: View {
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 76, height: 76)
-                .glassEffect(.regular.tint(tint.opacity(0.18)), in: .circle)
+                // Content, not chrome: a plain fill (glass is for controls).
+                .background(tint.opacity(0.15), in: .circle)
                 .symbolEffect(.bounce, value: step)
             Text(title)
                 .font(.system(size: 26, weight: .bold))
@@ -134,7 +135,7 @@ struct OnboardingView: View {
     private var permissions: some View {
         VStack(spacing: 24) {
             Spacer()
-            header("hand.raised.fill", .orange, "Let s1 use your Mac",
+            header("hand.raised.fill", model.accent, "Let s1 use your Mac",
                    "Only Accessibility is required. The rest unlock the shortcut, your voice and screenshots.")
             VStack(spacing: 4) {
                 PermissionRow(title: "Accessibility", detail: "Required — see and use apps.",
@@ -176,7 +177,7 @@ struct OnboardingView: View {
     private var executor: some View {
         VStack(spacing: 22) {
             Spacer()
-            header("cursorarrow.rays", .blue, "Work in the background",
+            header("cursorarrow.rays", model.accent, "Work in the background",
                    "Cua Driver lets s1 type and press keys without taking over your cursor or focus. Installed with CUA's official installer.")
             Group {
                 if CuaInstaller.installed {
@@ -208,7 +209,7 @@ struct OnboardingView: View {
     private var ready: some View {
         VStack(spacing: 24) {
             Spacer()
-            header("checkmark.seal.fill", .green, "You're all set",
+            header("checkmark.seal.fill", model.accent, "You're all set",
                    "Try it now: double-tap ⇧ and say “open Notes”. Or type in the s1 window.")
             VStack(spacing: 12) {
                 LabeledContent("Talk to s1") { KeyCaps(keys: ["⇧", "⇧"]) }
@@ -295,7 +296,7 @@ private struct QuickConnect: View {
                         .font(.callout).foregroundStyle(.green)
                 } else {
                     HStack {
-                        SecureField(template.keyHint ?? "API key", text: $key)
+                        SecureField(template.keyHint ?? String(localized: "API key"), text: $key)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { Task { await connect() } }
                         if working {

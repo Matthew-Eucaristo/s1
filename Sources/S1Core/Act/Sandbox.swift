@@ -95,6 +95,18 @@ public enum Sandbox {
         return p
     }
 
+    /// Where a gated shell command runs: where s1 was started (a project
+    /// folder for `s1 run`), unless that is "/" (launchd, the app) — then
+    /// a sandboxed shell gets a scratch folder the policy lets it write
+    /// ("." would otherwise mean the whole disk) and a bare one the home
+    /// folder, like a new Terminal window.
+    public static func workingDirectory(sandboxed: Bool,
+                                        cwd: String = FileManager.default.currentDirectoryPath,
+                                        home: String = NSHomeDirectory()) -> String {
+        guard cwd == "/" || cwd.isEmpty else { return cwd }
+        return sandboxed ? home + "/Library/Caches/s1/shell" : home
+    }
+
     /// Wrap a shell command for the srt runtime: `srt --settings <file>
     /// <cmd>` — srt takes the command as argv, so the zsh line is handed
     /// over verbatim with no quoting tricks. Returns nil when srt isn't

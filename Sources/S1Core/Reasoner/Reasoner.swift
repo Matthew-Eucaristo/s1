@@ -69,8 +69,18 @@ public struct ChatClient: Sendable {
         model.lowercased().contains("deepseek") ? ["thinking": ["type": "disabled"]] : [:]
     }
 
+    /// OpenAI reasoning models (gpt-5 family, o-series) reject any
+    /// `temperature` but the default with HTTP 400, and spend their
+    /// completion budget on hidden reasoning first. Matched on the model
+    /// id after a gateway prefix ("openai/gpt-5" on OpenRouter).
+    static func isReasoningModel(_ model: String) -> Bool {
+        let m = (model.split(separator: "/").last.map(String.init) ?? model).lowercased()
+        if m.hasPrefix("gpt-5") { return !m.contains("chat") }
+        return m.range(of: #"^o\d"#, options: .regularExpression) != nil
+    }
+
     static func requestBody(endpoint: Endpoint, messages: [ChatMessage], maxTokens: Int,
-                            temperature: Double, extras: Bool = true,
+                            temperature: Double?, extras: Bool = true,
                             tools: [[String: Any]] = []) -> [String: Any] {
         // Messages go out in order: stable system prompt first, volatile
         // screen/state last — the prefix providers cache automatically.
@@ -86,9 +96,10 @@ public struct ChatClient: Sendable {
         var body: [String: Any] = [
             "model": endpoint.model,
             "messages": wire,
-            "temperature": temperature,
             "stream": false,
         ]
+        let reasoning = !endpoint.isLocal && isReasoningModel(endpoint.model)
+        if let temperature, !reasoning { body["temperature"] = temperature }
         if !tools.isEmpty { body["tools"] = tools }
         if endpoint.isLocal {
             // Ollama knobs: skip reasoning traces for fast decisions and
@@ -101,8 +112,9 @@ public struct ChatClient: Sendable {
             body["keep_alive"] = "30m"
         } else {
             // Strict OpenAI spec: reasoning models only take the newer key,
-            // chat models accept it too — the safe remote cap.
-            body["max_completion_tokens"] = maxTokens
+            // chat models accept it too — the safe remote cap. Reasoning
+            // tokens count against it: leave room or the answer is empty.
+            body["max_completion_tokens"] = reasoning ? max(maxTokens, 8192) : maxTokens
             if extras { body.merge(providerExtras(model: endpoint.model)) { a, _ in a } }
         }
         return body
@@ -158,9 +170,11 @@ public struct ChatClient: Sendable {
         }
         let withExtras = !endpoint.isLocal && !Self.providerExtras(model: endpoint.model).isEmpty
         var attempt = 0
+        var sendTemperature = true
         while true {
             let body = Self.requestBody(endpoint: endpoint, messages: messages, maxTokens: maxTokens,
-                                        temperature: temperature, extras: attempt == 0, tools: tools)
+                                        temperature: sendTemperature ? temperature : nil,
+                                        extras: attempt == 0, tools: tools)
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             let data: Data, resp: URLResponse
             let sent = Date()
@@ -173,6 +187,12 @@ public struct ChatClient: Sendable {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             DebugTrace.http(role: role, url: url, status: code, ms: Int(Date().timeIntervalSince(sent) * 1000),
                             request: req.httpBody, response: data)
+            // A model that only takes its default temperature (one this
+            // list doesn't know yet) gets one retry without it.
+            if code == 400, sendTemperature,
+               String(decoding: data.prefix(2000), as: UTF8.self).contains("temperature") {
+                sendTemperature = false; continue
+            }
             // A gateway that rejects the provider toggle gets one plain retry.
             if code == 400, withExtras, attempt == 0 { attempt += 1; continue }
             guard code == 200 else {

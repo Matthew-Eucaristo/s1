@@ -25,6 +25,12 @@ echo "sha256: $(shasum -a 256 "$TAR" | awk '{print $1}')"
 echo "=== building universal S1.app ==="
 ./scripts/make-app.sh release >/dev/null
 [[ -d dist/S1.app ]] || { echo "dist/S1.app missing" >&2; exit 1; }
+SIG=$(codesign -dvv dist/S1.app 2>&1 || true)
+if [[ "$SIG" == *"Signature=adhoc"* || "$SIG" != *"Authority="* ]]; then
+    echo "!! dist/S1.app is ad-hoc signed — users would lose their permissions on every upgrade;" >&2
+    echo "   set S1_SIGN_IDENTITY (or run scripts/dev-cert.sh) and rebuild" >&2
+    exit 1
+fi
 lipo -info "dist/S1.app/Contents/MacOS/S1"
 
 ZIP="S1-${VERSION}-app.zip"

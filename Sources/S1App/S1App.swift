@@ -69,14 +69,15 @@ private struct S1Commands: Commands {
             Divider()
             Button(model.serveState == .idle ? "Start Listening" : "Stop Listening") { model.toggleServe() }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
-            Button(model.listening ? "Stop Dictating" : "Speak a Command") { model.toggleListen() }
+            Button(model.isDictating ? "Stop Dictating"
+                   : model.listening ? "Stop Listening for a Command" : "Speak a Command") { model.toggleListen() }
                 .keyboardShortcut("l")
             Button("Show Launcher") { LauncherController.shared.show() }
                 .keyboardShortcut(.space, modifiers: .option)
             Divider()
             Button("Clear Conversation") { model.clearConversation() }
                 .keyboardShortcut("k")
-                .disabled(model.running || model.turns.isEmpty)
+                .disabled(model.commandInFlight || model.turns.isEmpty)
         }
         CommandGroup(replacing: .help) {
             Button("s1 Website") { NSWorkspace.shared.open(URL(string: "https://s1-mac.pages.dev")!) }

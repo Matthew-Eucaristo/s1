@@ -194,8 +194,9 @@ public enum ProviderCatalog {
                 .init("whisper-large-v3", name: "Whisper Large v3", roles: [.transcribe], note: "most accurate"),
                 .init("canopylabs/orpheus-v1-english", name: "Orpheus English", roles: [.speak],
                       recommended: [.speak], voice: "troy"),
-                .init("canopylabs/orpheus-v1-indonesian", name: "Orpheus Indonesian", roles: [.speak],
-                      voice: "troy"),
+                // Groq serves Orpheus in English and Saudi Arabic only.
+                .init("canopylabs/orpheus-arabic-saudi", name: "Orpheus Arabic (Saudi)", roles: [.speak],
+                      voice: "fahad"),
               ],
               listsModels: true),
         .init(id: "gemini", name: "Google Gemini", kind: .cloud,
@@ -612,7 +613,10 @@ public enum ProviderCheck {
         let started = Date()
         func ms() -> String { "\(Int(Date().timeIntervalSince(started) * 1000)) ms" }
         if p.needsKey, (key ?? "").isEmpty { return .failed("needs an API key") }
-        if p.base(.chat) != nil {
+        // Only servers that list models get asked to: Cloudflare's
+        // OpenAI-compatible API has no /models, so its check is a Judge
+        // question instead.
+        if p.base(.chat) != nil, p.template.listsModels || p.base(.systemOne) == nil {
             switch await ModelList.fetch(p, key: key) {
             case .success(let ids):
                 return .ok(ids.isEmpty ? "connected · \(ms())" : "\(ids.count) models · \(ms())")

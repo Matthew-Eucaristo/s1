@@ -27,27 +27,28 @@ public struct AXPolicy: Policy {
     /// ("2", "2s", "2 seconds", "2 detik", "500ms", "1,5 detik", "2 menit").
     /// Unparseable args fall back to a conservative 0.5s.
     static func parseWaitSeconds(_ arg: String) -> Double {
-        let t = arg.replacingOccurrences(of: ",", with: ".")
+        var t = arg.lowercased().replacingOccurrences(of: ",", with: ".")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = t.split(separator: " ", maxSplits: 1)
-        if let n = Double(parts.first ?? "") {
-            let unit = parts.count > 1 ? parts[1].lowercased() : ""
-            switch unit {
-            case "ms", "milidetik", "milisekon", "millisecond", "milliseconds":
-                return n / 1000
-            case "menit", "minute", "minutes":
-                return n * 60
-            default:
-                return n >= 100 && unit.isEmpty ? n / 1000 : n
-            }
+        // "wait for 2 seconds", "tunggu selama 3 detik".
+        for lead in ["for ", "selama ", "about ", "sekitar "] where t.hasPrefix(lead) {
+            t = String(t.dropFirst(lead.count))
         }
-        // Attached suffix forms: "500ms", "2s". Keep the sign — a negative
-        // arg must clamp to 0 downstream, not become a positive wait.
-        let sign: Double = t.hasPrefix("-") ? -1 : 1
-        let digits = t.drop(while: { $0 == "-" }).prefix(while: { $0.isNumber || $0 == "." })
-        guard let m = Double(digits) else { return 0.5 }
-        let v = sign * m
-        return t.hasSuffix("ms") ? v / 1000 : v
+        // Dictation ends the sentence: "Wait 500 ms." — the period isn't a unit.
+        t = t.trimmingCharacters(in: CharacterSet(charactersIn: ".!?;:").union(.whitespaces))
+        // Keep the sign — a negative arg must clamp to 0 downstream, not
+        // become a positive wait.
+        guard let m = t.firstMatch(of: /^(-?\d+(?:\.\d+)?)\s*([a-z]*)/), let n = Double(m.1) else { return 0.5 }
+        switch String(m.2) {
+        case "ms", "msec", "msecs", "millisecond", "milliseconds", "milidetik", "milisekon":
+            return n / 1000
+        case "m", "min", "mins", "minute", "minutes", "menit", "mnt":
+            return n * 60
+        case "":
+            // "wait 2" means seconds to a human; "wait 2000" means ms.
+            return n >= 100 ? n / 1000 : n
+        default:
+            return n   // s, sec, secs, second(s), detik, dtk…
+        }
     }
 
     /// Split "open TextEdit, type hello, done" into ordered intents.
@@ -207,6 +208,25 @@ public struct AXPolicy: Policy {
     /// Every way people say "put this text here".
     static let typeVerbs: Set<String> = ["type", "ketik", "write", "tulis", "chat", "input",
                                          "reply", "balas", "enter", "masukkan"]
+
+    /// The Mac skill an intent asks for, if its verb can ask for one.
+    static func skill(verb: String, arg: String) -> (action: Action, label: String)? {
+        let v = verb.lowercased()
+        let other: Set<String> = ["verify", "cek", "check", "pastikan", "click", "press", "klik", "tekan",
+                                  "set", "isi", "dclick", "rclick", "scroll", "gulir", "drag", "seret",
+                                  "hover", "arahkan", "wait", "tunggu"]
+        guard !typeVerbs.contains(v), !editVerbs.contains(v), !other.contains(v),
+              let skill = MacSkills.match(verb + " " + arg) else { return nil }
+        // Closing something never opens a pane, folder or app.
+        if ["close", "tutup", "quit", "keluar", "exit", "hide", "dismiss"].contains(v) {
+            switch skill.action {
+            case .openURL, .openApp: return nil
+            default: break
+            }
+        }
+        return skill
+    }
+
     /// Clipboard/edit verbs. They split "and/then" only outside typed text —
     /// "type copy and paste" still types all three words.
     static let editVerbs: Set<String> = ["copy", "salin", "paste", "tempel", "cut", "potong",
@@ -234,7 +254,10 @@ public struct AXPolicy: Policy {
             }
         }
         // Trailing politeness: "close my reminder please?", "buka notes ya".
-        for tail in [" please", " ya", " dong", " deh", " thanks", " thank you", " plz"] {
+        // Not when the last command is typing: there it is the text ("type
+        // thank you", "open notes and type thank you", "balas ya").
+        for tail in [" please", " ya", " dong", " deh", " thanks", " thank you", " plz"]
+        where !lastCommandTypes(g) {
             let t = g.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
             if t.lowercased().hasSuffix(tail) { g = String(t.dropLast(tail.count)); break }
         }
@@ -300,9 +323,11 @@ public struct AXPolicy: Policy {
                 return Decision(action: .keyCombo(keys: ["cmd", String(n)]), confidence: 0.95,
                                 rationale: n == 9 ? "last tab" : "tab \(n)")
             }
-            guard n >= 1, n <= tabs.count else { return nil }
-            let tab = n == 9 && tabs.count < 9 ? tabs[tabs.count - 1] : tabs[n - 1]
-            return Decision(action: .axPress(ref: tab.ref), confidence: 0.9, rationale: "tab \(n)")
+            // "last tab" is the last one however many there are (⌘9's
+            // meaning), not the ninth.
+            let last = n == 9 && p.range(of: #"\b(last|terakhir)\b"#, options: .regularExpression) != nil
+            guard let tab = last ? tabs.last : (n >= 1 && n <= tabs.count ? tabs[n - 1] : nil) else { return nil }
+            return Decision(action: .axPress(ref: tab.ref), confidence: 0.9, rationale: last ? "last tab" : "tab \(n)")
         }
         if picking, let t = title {
             if ["next", "berikutnya", "selanjutnya", "lanjut"].contains(t) {
@@ -325,6 +350,16 @@ public struct AXPolicy: Policy {
             return score >= 0.6 ? (tab, score) : nil
         }
         guard let best = scored.max(by: { $0.1 < $1.1 }) else { return nil }
+        // Two tabs both containing the words ("Gmail – Inbox", "Gmail –
+        // Compose") is a question for the Judge, not a coin toss.
+        let tied = scored.filter { $0.1 >= best.1 }
+        if tied.count > 1 {
+            let options = tied.prefix(6).map { tab, _ in
+                Decision.Option(label: "the “\(tab.title ?? tab.desc ?? "")” tab", action: .axPress(ref: tab.ref))
+            }
+            return Decision(action: .axPress(ref: best.0.ref), confidence: 0.6,
+                            rationale: "\(tied.count) tabs match “\(t)”", options: Array(options))
+        }
         return Decision(action: .axPress(ref: best.0.ref), confidence: best.1 >= 1 ? 0.92 : 0.8,
                         rationale: "switch to tab “\(best.0.title ?? best.0.desc ?? t)”")
     }
@@ -349,6 +384,23 @@ public struct AXPolicy: Policy {
         let first = s.split(separator: " ", maxSplits: 1).first
             .map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) } ?? ""
         return verbs.contains(first) || editVerbs.contains(first)
+    }
+
+    /// Whether the last command in `s` is typing — then the words at the
+    /// end are its text, not filler. A command starts the goal or follows a
+    /// comma or a conjunction with a verb; anything else (a verb word inside
+    /// typed text, "see you, thanks") continues the command before it.
+    static func lastCommandTypes(_ s: String) -> Bool {
+        let conj: Set<String> = ["and", "dan", "then", "lalu", "terus", "trus", "kemudian"]
+        let polite: Set<String> = ["please", "tolong", "pls", "coba"]
+        var last: String?
+        for piece in s.lowercased().components(separatedBy: CharacterSet(charactersIn: ",;")) {
+            let words = piece.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+            for (i, w) in words.enumerated() where i == 0 || conj.contains(words[i - 1]) || polite.contains(words[i - 1]) {
+                if verbs.contains(w) || editVerbs.contains(w) { last = w }
+            }
+        }
+        return last.map(typeVerbs.contains) ?? false
     }
 
     static func startsWithTypeVerb(_ s: String) -> Bool {
@@ -448,9 +500,16 @@ public struct AXPolicy: Policy {
     /// How a Judge sees one candidate control: role, label, and where it is.
     static func label(_ n: AXNode) -> String {
         let role = n.role.replacingOccurrences(of: "AX", with: "")
-        let name = n.title ?? n.desc ?? n.help ?? n.value ?? n.ref
+        let name = n.title ?? n.desc ?? n.help ?? publicValue(n) ?? n.ref
         let at = n.frame.map { " at (\(Int($0.x)), \(Int($0.y)))" } ?? ""
         return "\(role) \"\(name.prefix(60))\"\(at)"
+    }
+
+    /// A node's value when it is what the control shows as its name (web
+    /// text, a cell) — never what someone typed into a field: field
+    /// contents don't go to the Judge.
+    static func publicValue(_ n: AXNode) -> String? {
+        AXSemantics.editable.contains(n.role) || AXSemantics.secure.contains(n.role) ? nil : n.value
     }
 
     /// Element match quality 0...1: exact title 1.0, prefix 0.8, contains 0.6.
@@ -547,12 +606,26 @@ public struct AXPolicy: Policy {
         }
         // Tabs by number or by title: "go to tab 3", "switch to the TikTok tab".
         if let d = Self.tabDecision(intent.verb + " " + intent.arg, in: observation) { return d }
+        // "tekan enter" / "press return" / "press cmd s" — when the arg
+        // is a key name (or combo), it's a keystroke, not an AX click or a
+        // menu command: "press delete" is the Delete key, not Edit › Delete.
+        // Without this the policy searches the tree for a node literally
+        // named "enter" and abstains on the most common follow-up a user
+        // says after typing. Only the keystroke verbs route here —
+        // "klik a" still means click the element named "a".
+        if ["tekan", "press"].contains(intent.verb), let combo = Self.keyNames(intent.arg) {
+            return Decision(action: .keyCombo(keys: combo), confidence: 0.95,
+                            rationale: "key press \(intent.arg)")
+        }
         // The app's own command for it: "new chat" → File › New Chat.
         if let m = MenuMatch.exact(verb: intent.verb, arg: intent.arg, in: observation.menus) {
             return Decision(action: .menuItem(path: m.path), confidence: 0.92, rationale: "menu: \(m.label)")
         }
-        // Mac skills: settings panes, folders, system shortcuts by name.
-        if let skill = MacSkills.match(intent.verb + " " + intent.arg) {
+        // Mac skills: settings panes, folders, system shortcuts by name —
+        // never for a verb that means something else to do with the words
+        // ("type check your wifi settings" types; "close bluetooth
+        // settings" must not open the pane).
+        if let skill = Self.skill(verb: intent.verb, arg: intent.arg) {
             return Decision(action: skill.action, confidence: 0.95, rationale: "Mac skill: \(skill.label)")
         }
         switch intent.verb {
@@ -630,18 +703,27 @@ public struct AXPolicy: Policy {
         case "scroll", "gulir", "geser":
             // Voice says directions, pixels come out (wheel1 = vertical).
             let a = intent.arg.lowercased()
-            if ["top", "paling atas", "awal", "ke atas sekali"].contains(where: a.contains) {
+            // Whole words: "scroll down to supplies" is not "up", "the
+            // laptop deals" is not "top".
+            func says(_ words: [String]) -> Bool {
+                words.contains { a.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }
+            }
+            // The direction is the first word; "down to the top deals" is down.
+            let lead = a.split(separator: " ").first.map(String.init) ?? ""
+            let downFirst = ["down", "bawah", "turun"].contains(lead)
+            if !downFirst, says(["top", "paling atas", "awal", "ke atas sekali"]) {
                 return Decision(action: .keyCombo(keys: ["cmd", "up"]), confidence: 0.9, rationale: "scroll to top")
             }
-            if ["bottom", "paling bawah", "akhir"].contains(where: a.contains) {
+            if says(["bottom", "paling bawah", "akhir"]) {
                 return Decision(action: .keyCombo(keys: ["cmd", "down"]), confidence: 0.9, rationale: "scroll to bottom")
             }
             var d: (Double, Double) = (0, 300)          // "down"/"bawah" + bare "scroll"
-            if a.contains("up") || a.contains("atas") { d = (0, -300) }
-            else if a.contains("left") || a.contains("kiri") { d = (-300, 0) }
-            else if a.contains("right") || a.contains("kanan") { d = (300, 0) }
-            let k = ["a lot", "banyak", "jauh", "far"].contains(where: a.contains) ? 3.0
-                : ["a little", "a bit", "sedikit", "dikit"].contains(where: a.contains) ? 0.35 : 1.0
+            if downFirst { d = (0, 300) }
+            else if says(["up", "atas", "naik"]) { d = (0, -300) }
+            else if says(["left", "kiri"]) { d = (-300, 0) }
+            else if says(["right", "kanan"]) { d = (300, 0) }
+            let k = says(["a lot", "banyak", "jauh", "far"]) ? 3.0
+                : says(["a little", "a bit", "sedikit", "dikit"]) ? 0.35 : 1.0
             return Decision(action: .scroll(dx: d.0 * k, dy: d.1 * k), confidence: 0.9,
                             rationale: "scroll \(a.isEmpty ? "down" : a)")
         case "drag", "seret":
@@ -681,17 +763,6 @@ public struct AXPolicy: Policy {
                 return Decision(action: nil, confidence: 0.15,
                                 rationale: "'\(intent.verb)' needs a target")
             }
-            // "tekan enter" / "press return" / "press cmd s" — when the arg
-            // is a key name (or combo), it's a keystroke, not an AX click.
-            // Without this the policy searches the tree for a node literally
-            // named "enter" and abstains on the most common follow-up a user
-            // says after typing. Only the keystroke verbs route here —
-            // "klik a" still means click the element named "a".
-            if ["tekan", "press"].contains(intent.verb),
-               let combo = Self.keyNames(intent.arg) {
-                return Decision(action: .keyCombo(keys: combo), confidence: 0.95,
-                                rationale: "key press \(intent.arg)")
-            }
             // "isi <field> dengan <value>" / "set <field> to <value>" —
             // the needle is the field name; the value is what lands in it.
             var needle = intent.arg, setValue: String? = nil
@@ -726,7 +797,7 @@ public struct AXPolicy: Policy {
                 .map { ($0, AXPolicy.matchScore(needle, $0)) }
                 .filter { $0.1 > 0 }
                 .sorted { $0.1 > $1.1 }
-            guard let (node, score) = candidates.first else {
+            guard !candidates.isEmpty else {
                 // Plain clicks can still be found by looking: the Judge
                 // narrows the screen down to the control the words mean.
                 let plain = setValue == nil && !["dclick", "rclick"].contains(intent.verb)
@@ -750,25 +821,30 @@ public struct AXPolicy: Policy {
                 guard let f = n.frame else { return nil }
                 return .click(x: f.x + f.w / 2, y: f.y + f.h / 2)
             }
-            guard let action = target(node) else {
+            // Only candidates something can be done to: a frameless top
+            // match mustn't hide a clickable runner-up.
+            let usable = candidates.filter { target($0.0) != nil }
+            guard let (node, score) = usable.first, let action = target(node) else {
                 return Decision(action: nil, confidence: 0.2,
-                                rationale: "matched \(node.ref) but it has no frame to click")
+                                rationale: "matched \(candidates[0].0.ref) but it has no frame to click")
             }
             // Ambiguity penalty: second-place close behind → less sure.
-            let runnerUp = candidates.dropFirst().first?.1 ?? 0
+            let runnerUp = usable.dropFirst().first?.1 ?? 0
             let ambiguous = runnerUp > score - 0.15
             let confidence = min(0.95, score * (ambiguous ? 0.75 : 1.0))
             // Not an exact hit: the plausible candidates go along as a
             // distribution, so a Judge chooses (or says none fits) instead of
             // the grammar committing to its first guess.
+            // A lone inexact candidate is a question too: the Judge can
+            // still answer "none of these".
             let options: [Decision.Option]? = ambiguous || confidence < JudgedPolicy.sureAbove
-                ? candidates.prefix(6).filter { $0.1 >= 0.25 }.compactMap { c in
+                ? usable.prefix(6).filter { $0.1 >= 0.25 }.compactMap { c in
                     target(c.0).map { Decision.Option(label: Self.label(c.0), action: $0) }
                   }
                 : nil
             return Decision(action: action, confidence: confidence,
                             rationale: "matched \(node.ref) \(node.role) \"\(node.title ?? node.desc ?? node.help ?? "")\" score=\(score)",
-                            options: (options?.count ?? 0) > 1 ? options : nil)
+                            options: (options?.isEmpty ?? true) ? nil : options)
         case _ where Self.editVerbs.contains(intent.verb),
              "select", "pilih":
             // Standard edit shortcuts on whatever is focused/selected. A real
@@ -796,7 +872,9 @@ public struct AXPolicy: Policy {
         // ---- Window / tab / app control: plain keyCombos, no model needed.
         case "close", "tutup":
             let target = AppResolver.spokenAppName(intent.arg)
-            guard intent.arg.isEmpty || ["window", "this window", "jendela", "jendela ini", "tab", "this tab", "ini"].contains(target) else {
+            let raw = intent.arg.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            let front = ["window", "this window", "the window", "jendela", "jendela ini", "tab", "this tab", "ini"]
+            guard intent.arg.isEmpty || front.contains(target) || front.contains(raw) else {
                 return Decision(action: nil, confidence: 0.2,
                                 rationale: "close what? — object targets need S2")
             }

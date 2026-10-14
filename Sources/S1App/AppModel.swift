@@ -83,7 +83,13 @@ final class AppModel {
     /// Pinned Apple voice identifier; "" = best installed per language.
     var ttsVoice = "" { didSet { scheduleRearm() } }
     /// Provider-side voice name when the speak role is a cloud model.
-    var cloudVoice = "" { didSet { scheduleSave() } }
+    /// Saved only once the user types one: picking a voice model in
+    /// Settings writes the model's own default voice to config, which an
+    /// older value here must not overwrite.
+    var cloudVoice = "" { didSet { if !booting { voiceSavePending = true }; scheduleSave() } }
+    /// A typed voice name not saved yet — the only time `saveConfig`
+    /// writes `cloudVoice`.
+    @ObservationIgnored private var voiceSavePending = false
     var speakReply = true { didSet { scheduleRearm() } }
     var voiceInterrupt = true { didSet { scheduleRearm() } }
     var vadMode = "auto" { didSet { invalidateStt(); scheduleSave() } }
@@ -129,7 +135,18 @@ final class AppModel {
 
     private let speaker = Speaker()
     private let hud = NotchHUDController()
+    /// Stop file for runs typed in the window (and Siri); `s1 stop` and
+    /// Stop write it.
     private let killPath = NSTemporaryDirectory() + "s1-app-stop"
+    /// The companion's own stop file: its sleeping (silence, Esc, a setting
+    /// change) must never abort a run typed in the window, and vice versa.
+    private let serveKillPath = NSTemporaryDirectory() + "s1-app-serve-stop"
+    /// The app's own listen or dictation has the mic — read by the
+    /// companion before it wakes (a second engine on one input).
+    private let micInUse = Locked(false)
+    /// A setting changed while the companion was running a command: rebuild
+    /// it after the command instead of aborting it.
+    @ObservationIgnored private var pendingRearm = false
     /// GUI apps launched from Finder have cwd "/" — anchor run output in ~/.s1.
     private let artifactsRoot = S1Home.path + "/artifacts"
     private var serve: Serve?
@@ -160,7 +177,21 @@ final class AppModel {
         needsOnboarding = cfg.onboarded != true
         booting = false
 
-        models.onChange = { [weak self] in self?.scheduleRearm() }
+        models.onChange = { [weak self] in
+            guard let self else { return }
+            // A voice name typed a moment ago is saved first, so it's what
+            // gets compared — not lost to the save debounce.
+            if self.voiceSavePending {
+                self.saveTask?.cancel()
+                self.saveConfig()
+            }
+            // A voice model just assigned brings its own voice name.
+            let v = S1Config.load().cloudVoice ?? ""
+            if v != self.cloudVoice {
+                self.booting = true; self.cloudVoice = v; self.booting = false
+            }
+            self.scheduleRearm()
+        }
 
         refreshPermissions()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -223,7 +254,10 @@ final class AppModel {
     /// No titled window open → no Dock icon (a menu-bar companion); a window
     /// opens → back in the Dock and the app switcher.
     private func windowsChanged() {
-        let open = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        // Real windows only: the ⌥Space launcher is a titled non-activating
+        // panel, and counting it would bring back the Dock icon and take
+        // focus from the app the user was in.
+        let open = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) && !($0 is LauncherPanel) }
         if !open && !keepRunning && !DemoContent.enabled { NSApp.terminate(nil); return }
         let want: NSApplication.ActivationPolicy = open ? .regular : .accessory
         guard NSApp.activationPolicy() != want else { return }
@@ -291,8 +325,22 @@ final class AppModel {
         vocabulary = parsedVocab.filter { $0 != w }.joined(separator: ", ")
     }
 
+    /// One config edit from the UI; a config.json that doesn't parse is
+    /// reported, never overwritten.
+    @discardableResult
+    func updateConfig(_ body: (inout S1Config) -> Void) -> Bool {
+        do { try S1Config.update(body); configRevision += 1; return true } catch {
+            show(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Bumped on every UI config edit, so views reading config.json redraw.
+    private(set) var configRevision = 0
+
     private func saveConfig() {
-        try? S1Config.update { cfg in
+        let voice = voiceSavePending
+        let saved = updateConfig { cfg in
             cfg.locale = locale
             cfg.speak = speakReply
             cfg.voiceInterrupt = voiceInterrupt
@@ -302,9 +350,10 @@ final class AppModel {
             cfg.recent = recentGoals.isEmpty ? nil : recentGoals
             cfg.notchHUD = notchHUD
             cfg.voice = ttsVoice.isEmpty ? nil : ttsVoice
-            cfg.cloudVoice = cloudVoice.isEmpty ? nil : cloudVoice
+            if voice { cfg.cloudVoice = cloudVoice.isEmpty ? nil : cloudVoice }
             cfg.sandbox = sandboxSrt ? "srt" : nil
         }
+        if saved && voice { voiceSavePending = false }
     }
 
     private func scheduleRearm() {
@@ -366,8 +415,9 @@ final class AppModel {
                 s2: Brain.reasoner(),
                 speak: speakReply,
                 artifacts: artifactsRoot,
-                // One stop file: Stop (⌘.), the HUD and `s1 stop` all write it.
-                killSwitch: killPath,
+                // Its own stop file: Serve writes it when it sleeps mid-run,
+                // Stop (⌘.) and `s1 stop` reach it too.
+                killSwitch: serveKillPath,
                 lockPath: S1Home.path + "/serve.pid",
                 transcribe: { [weak self] onPartial in
                     guard let self else { return "" }
@@ -378,7 +428,8 @@ final class AppModel {
                     return S1Runner.anotherRunActive()
                 },
                 languages: langs, voice: ttsVoice.isEmpty ? nil : ttsVoice,
-                voiceInterrupt: voiceInterrupt),
+                voiceInterrupt: voiceInterrupt,
+                micBusy: { [micInUse] in micInUse.value }),
             locale: langs[0],
             hotkeyPatterns: [Hotkey.doubleShift, Hotkey.defaultChord]
         ) { [weak self] ev in
@@ -406,6 +457,9 @@ final class AppModel {
         case .listening:
             speaking = false
             serveState = .listening
+            // A new listening turn starts with a clean line.
+            transcript = ""
+            rearmIfPending()
         case .partial: transcript = ev.text
         case .heard: transcript = ev.text
         case .speaking: speaking = true
@@ -437,6 +491,7 @@ final class AppModel {
             dictatingHandsFree = false
             serveState = .idle
             transcript = ""
+            rearmIfPending()
             if ev.kind == .sleeping, ev.text.hasPrefix("stt errors"), let e = lastListenError {
                 show(String(localized: "Speech recognition kept failing, so s1 stopped listening: \(e)"))
             }
@@ -455,9 +510,18 @@ final class AppModel {
 
     func rearmServe() {
         guard !booting else { return }
+        saveConfig()
+        // Mid-command, a rebuild would abort what the companion is doing.
+        if serve?.state == .running { pendingRearm = true; return }
+        pendingRearm = false
         serve?.disarm()
         startServe()
-        saveConfig()
+    }
+
+    /// The companion finished its command: apply a setting that changed
+    /// during it.
+    private func rearmIfPending() {
+        if pendingRearm, serve?.state != .running { rearmServe() }
     }
 
     func toggleServe() {
@@ -470,6 +534,10 @@ final class AppModel {
 
     /// Synchronous truth from the Serve lock (`serveState` lags a hop).
     var serveIsListening: Bool { serve.map { $0.state != .idle } ?? false }
+    /// The companion is running a command (synchronous, from the Serve lock).
+    var companionRunning: Bool { serve?.state == .running }
+    /// A command is in flight — typed or spoken to the companion.
+    var commandInFlight: Bool { running || serveState == .running }
 
     func toggleLoginItem() {
         do {
@@ -573,7 +641,8 @@ final class AppModel {
     }
 
     func clearConversation() {
-        guard !running else { return }
+        // A companion command still running would lose its live turn.
+        guard !commandInFlight else { return }
         turns = []
         transcript = ""
     }
@@ -592,9 +661,11 @@ final class AppModel {
             show(String(localized: "Another s1 run is in progress in Terminal."))
             return
         }
-        try? FileManager.default.removeItem(atPath: killPath)
         goal = ""
         running = true
+        // The last reply stops talking: a new command is under way.
+        speaker.stop()
+        speaking = false
         appendTurn(Turn(goal: goalText, spoken: !transcript.isEmpty))
         transcript = ""
         recentGoals.removeAll { $0 == goalText }
@@ -605,7 +676,7 @@ final class AppModel {
             let (report, logger) = try await S1Runner.run(
                 goal: goalText, policy: Brain.policy(), artifacts: artifactsRoot,
                 maxSteps: 25, threshold: 0.6, dryRun: false,
-                allowIrreversible: false, killSwitch: killPath, s2: Brain.reasoner(),
+                allowIrreversible: false, killSwitch: killPath, clearStaleStop: true, s2: Brain.reasoner(),
                 onStep: { [weak self] rec in
                     Task { @MainActor [weak self] in self?.updateCurrent { $0.steps.append(rec); $0.phase = nil } }
                 },
@@ -623,6 +694,8 @@ final class AppModel {
                 why = w
             }
             finishCurrent(status: report.status, answer: report.answer, why: why, runDir: report.runDir)
+            // Free for the next command now — the reply below may still be
+            // speaking, and must not clear `running` for a run started meanwhile.
             running = false
             saveConfig()
             if speakReply, !FileManager.default.fileExists(atPath: killPath) {
@@ -650,8 +723,8 @@ final class AppModel {
                 $0.finished = Date()
             }
             historyRevision += 1
+            running = false
         }
-        running = false
         refreshPermissions()
     }
 
@@ -662,6 +735,9 @@ final class AppModel {
 
     func stop() {
         try? "stop".write(toFile: killPath, atomically: true, encoding: .utf8)
+        // A command the companion is running stops the companion: it sleeps
+        // (its run aborts on its own stop file) instead of reopening the mic.
+        if serve?.state == .running { serve?.sleep() }
         // An in-flight listen doesn't check the kill file — cancel it too.
         listenTask?.cancel()
         listenTask = nil
@@ -672,7 +748,12 @@ final class AppModel {
 
     // MARK: - mic
 
+    /// Dictation (⌃⌥D) is recording.
+    var isDictating: Bool { dictation != nil }
+
     func toggleListen() {
+        // ⌘L while dictating ends the dictation, like a second ⌃⌥D tap.
+        if let d = dictation { d.stop(); return }
         if listening {
             listenTask?.cancel()
             listenTask = nil
@@ -681,6 +762,10 @@ final class AppModel {
         }
         listenTask = Task { await listenAndRun() }
     }
+
+    /// Identifies the newest listen: an older one unwinding after a cancel
+    /// must not clear the state of the one that replaced it.
+    @ObservationIgnored private var listenToken = UUID()
 
     private func listenAndRun() async {
         guard !listening, !running else { return }
@@ -692,9 +777,18 @@ final class AppModel {
             show(String(localized: "The microphone is in use by another s1 process."))
             return
         }
-        defer { S1Runner.releaseMic() }
+        let token = UUID()
+        listenToken = token
+        micInUse.value = true
         listening = true
-        defer { listening = false; listenTask = nil }
+        defer {
+            if listenToken == token {
+                micInUse.value = false
+                S1Runner.releaseMic()
+                listening = false
+                listenTask = nil
+            }
+        }
         do {
             let text = try await stt.transcribeMic(maxSeconds: 20) { p in
                 Task { @MainActor in self.transcript = p }
@@ -762,7 +856,8 @@ final class AppModel {
             show(String(localized: "The microphone is in use by another s1 process."))
             return
         }
-        defer { S1Runner.releaseMic() }
+        micInUse.value = true
+        defer { micInUse.value = false; S1Runner.releaseMic() }
         listening = true
         transcript = ""
         defer { listening = false; transcript = "" }
@@ -817,7 +912,7 @@ final class AppModel {
 
     func markOnboarded() {
         needsOnboarding = false
-        try? S1Config.update { $0.onboarded = true }
+        updateConfig { $0.onboarded = true }
     }
 
     /// Install Cua Driver via CUA's own installer, streaming its log.

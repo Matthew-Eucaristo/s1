@@ -30,7 +30,7 @@ echo "== status =="
 echo "== dry-run demo (touches nothing) =="
 "$S1" demo --dry-run
 
-echo "== scripted dry-run =="
-"$S1" run --task open-app --policy ax --dry-run
+echo "== grammar dry-run (no models: --no-s2 keeps it offline and free) =="
+"$S1" run --task open-app --policy ax --dry-run --no-s2
 
 echo "smoke done — artifacts in ~/.s1/artifacts/"

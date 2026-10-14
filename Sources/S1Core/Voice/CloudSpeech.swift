@@ -16,12 +16,18 @@ public enum CloudSpeech {
         URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")) + "/audio/speech")
     }
 
-    /// Whisper's `prompt` biases spelling of custom words; it caps at 224
-    /// tokens, so keep the list short (~150 words is safe).
-    public static func prompt(vocabulary: [String]) -> String? {
-        let words = vocabulary.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !words.isEmpty else { return nil }
-        return words.prefix(150).joined(separator: ", ")
+    /// Whisper's `prompt` biases spelling of custom words. It keeps only
+    /// the LAST 224 tokens, so an over-long list silently loses its first
+    /// (most important) words: cap by length (~500 characters stays under
+    /// the limit even for names that tokenize badly), in priority order.
+    public static func prompt(vocabulary: [String], maxCharacters: Int = 500) -> String? {
+        var out = ""
+        for w in vocabulary.map({ $0.trimmingCharacters(in: .whitespaces) }) where !w.isEmpty {
+            let next = out.isEmpty ? w : out + ", " + w
+            guard next.count <= maxCharacters else { break }
+            out = next
+        }
+        return out.isEmpty ? nil : out
     }
 
     public static func multipart(file: Data, filename: String, fields: [(String, String)],
@@ -45,7 +51,8 @@ public enum CloudSpeech {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             DebugTrace.http(role: role, url: req.url!, status: code, ms: ms(), request: nil,
-                            response: code == 200 && role == "tts" ? nil : data)
+                            // Audio bytes aren't worth logging; error bodies are.
+                            response: code == 200 && role == "speak" ? nil : data)
             guard code == 200 else {
                 let snippet = String(decoding: data.prefix(200), as: UTF8.self).terminalSafe
                 UsageLog.append(UsageRecord(role: role, host: host, model: model, ms: ms(), ok: false,
@@ -102,9 +109,11 @@ public enum CloudSpeech {
     /// Whether a TTS model can read `language` — Groq's Orpheus English
     /// model would mangle Indonesian; Apple's voice is better there.
     public static func ttsSpeaks(model: String, language: String) -> Bool {
-        let m = model.lowercased()
-        if m.contains("english") { return language.lowercased().hasPrefix("en") }
-        if m.contains("arabic") { return language.lowercased().hasPrefix("ar") }
+        let m = model.lowercased(), l = language.lowercased()
+        // A model named for one language reads only that one.
+        for (name, code) in [("english", "en"), ("arabic", "ar"), ("indonesian", "id")] where m.contains(name) {
+            return l.hasPrefix(code)
+        }
         return true
     }
 

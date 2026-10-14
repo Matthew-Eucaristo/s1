@@ -3,9 +3,11 @@ import AppKit
 import Foundation
 
 /// Optional background executor: Cua Driver (MIT, trycua/cua) delivers
-/// keys/text/launches to a target pid without stealing focus. Off by
-/// default; only gated actions reach it (the SafetyGate runs first), and
-/// anything it can't take — or a failed call — goes to the CGEvent path.
+/// keys/text/clicks to a target pid without stealing focus. Used whenever
+/// the driver is installed (`executor: "cgevent"` opts out); only gated
+/// actions reach it (the SafetyGate runs first, the act-time checks right
+/// before it), and anything it can't take — or a call that did nothing —
+/// goes to the CGEvent path.
 /// The AGPL perception extension is never used or bundled.
 public enum CuaDriver {
     public static let docs = URL(string: "https://cua.ai/docs/cua-driver")!
@@ -34,7 +36,11 @@ public enum CuaDriver {
             guard let pid else { return nil }
             tool = "type_text"; args["pid"] = Int(pid); args["text"] = text
         case .keyCombo(let keys):
-            guard let pid else { return nil }
+            // Character keys go through CGEvent, which resolves them on the
+            // current layout (⌘A on AZERTY is the key labelled A); the
+            // driver isn't known to. Named keys (return, tab, arrows) are
+            // layout-free.
+            guard let pid, !keys.contains(where: { $0.count == 1 }) else { return nil }
             tool = "hotkey"; args["pid"] = Int(pid); args["keys"] = keys.map { $0.lowercased() }
         case .openApp(let name):
             guard let id = bundleID(name) else { return nil }
@@ -42,27 +48,38 @@ public enum CuaDriver {
         default:
             return nil
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]) else { return nil }
-        return (tool, String(decoding: data, as: UTF8.self))
+        guard let json = json(args) else { return nil }
+        return (tool, json)
+    }
+
+    /// Compact sorted JSON, or nil for anything JSON can't hold (NaN, ∞
+    /// from a salvaged model reply) — JSONSerialization raises an
+    /// Objective-C exception on those, which `try?` can't catch.
+    static func json(_ obj: Any) -> String? {
+        guard JSONSerialization.isValidJSONObject(obj),
+              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Scroll needs no coordinates on the keystroke path — just pid +
     /// direction — so it maps without the window lookup clicks require.
     /// s1's `dy > 0` means content moves DOWN (the wheel rolls up).
     public static func scrollCall(dx: Double, dy: Double, pid: pid_t) -> (tool: String, args: String)? {
-        let direction: String, amount: Int
+        // Model output is untrusted: Int(1e300) and Int(.nan) trap.
+        guard dx.isFinite, dy.isFinite else { return nil }
+        let direction: String, lines: Double
         if abs(dy) >= abs(dx) {
             direction = dy > 0 ? "down" : "up"
-            amount = Int((abs(dy) / 120).rounded())
+            lines = abs(dy) / 120
         } else {
             direction = dx > 0 ? "right" : "left"
-            amount = Int((abs(dx) / 120).rounded())
+            lines = abs(dx) / 120
         }
+        let amount = Int(min(lines, 10).rounded())
         let args: [String: Any] = ["session": "s1", "pid": Int(pid),
                                    "direction": direction, "by": "line",
-                                   "amount": max(1, min(amount, 10))]
-        guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]) else { return nil }
-        return ("scroll", String(decoding: data, as: UTF8.self))
+                                   "amount": max(1, amount)]
+        return json(args).map { ("scroll", $0) }
     }
 
     /// One window record from `list_windows` — only the fields the
@@ -78,9 +95,8 @@ public enum CuaDriver {
     /// failure — callers fall back to CGEvent rather than trusting nothing.
     public static func windows(binary: String, pid: pid_t, timeout: TimeInterval = 10) -> [CuaWindow] {
         let argsObj: [String: Any] = ["session": "s1", "pid": Int(pid), "on_screen_only": true]
-        guard let data = try? JSONSerialization.data(withJSONObject: argsObj, options: [.sortedKeys]),
-              let out = try? run(binary, argv: ["call", "list_windows", String(decoding: data, as: UTF8.self)],
-                               timeout: timeout),
+        guard let args = json(argsObj),
+              let out = try? run(binary, argv: ["call", "list_windows", args], timeout: timeout),
               let parsed = try? JSONSerialization.jsonObject(with: Data(out.utf8)) else { return [] }
         // The payload may be a bare array or wrapped in {"windows": [...]}.
         let rows: [[String: Any]]
@@ -123,12 +139,28 @@ public enum CuaDriver {
     /// Backing scale for the display showing `point` — cua's window-local
     /// coordinates are screenshot pixels, not screen points.
     static func scale(for point: CGPoint) -> CGFloat {
-        NSScreen.screens.first { $0.frame.contains(point) }?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor ?? 2
+        // Action points are global display coordinates (top-left origin,
+        // like CG and AX); NSScreen frames are bottom-left — look the
+        // display up the CG way, then read its NSScreen's scale.
+        var id = CGDirectDisplayID(0), count = UInt32(0)
+        if CGGetDisplaysWithPoint(point, 1, &id, &count) == .success, count > 0,
+           let screen = NSScreen.screens.first(where: {
+               ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id
+           }) {
+            return screen.backingScaleFactor
+        }
+        return NSScreen.main?.backingScaleFactor ?? 2
     }
 
     public static func bundleID(_ name: String) -> String? {
         AppResolver.resolve(name).flatMap { Bundle(url: $0)?.bundleIdentifier }
+    }
+
+    /// A call that ran out of time: it may have half-happened (half the
+    /// text typed), so it is never re-run another way.
+    struct TimedOut: Error, LocalizedError {
+        var tool: String
+        var errorDescription: String? { "cua-driver \(tool) timed out" }
     }
 
     /// `cua-driver <argv…>` — argv, never a shell. Bounded wait.
@@ -138,13 +170,27 @@ public enum CuaDriver {
         p.arguments = argv
         let out = Pipe(), err = Pipe()
         p.standardOutput = out; p.standardError = err
+        p.standardInput = FileHandle.nullDevice
         try p.run()
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
+        // Both pipes drain at once: read one after the other, a chatty
+        // stderr fills its buffer and stalls the driver until the timeout.
+        let errBox = Locked(Data())
+        let drained = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            errBox.value = (try? err.fileHandleForReading.readToEnd()) ?? Data()
+            drained.signal()
+        }
         let data = ((try? out.fileHandleForReading.readToEnd()) ?? Data())
-        let errData = ((try? err.fileHandleForReading.readToEnd()) ?? Data())
+        drained.wait()
         p.waitUntilExit()
+        // Killed by the timeout (or crashed): whatever it was doing may
+        // have partly happened.
+        let killed = p.terminationReason == .uncaughtSignal
         killer.cancel()
+        if killed { throw TimedOut(tool: argv.dropFirst().first ?? argv.first ?? "?") }
+        let errData = errBox.value
         guard p.terminationStatus == 0 else {
             let msg = String(decoding: errData.isEmpty ? data : errData, as: UTF8.self)
             throw S1Error.aborted("cua-driver \(argv.first ?? "?") failed: \(msg.prefix(200))")
@@ -169,13 +215,25 @@ public struct CuaActuator: Actuator {
 
     public func perform(_ action: Action, frontmostPID: pid_t?) async throws -> String {
         if !Self.needsPermissions, let c = try? await cuaCall(for: action, pid: frontmostPID) {
+            // The same act-time re-checks the CGEvent path runs: a password
+            // box that grabbed focus, or a terminal that came to the front.
+            switch action {
+            case .typeText(let t): try fallback.actTimeChecks(payload: t)
+            case .keyCombo: try fallback.actTimeChecks(payload: nil)
+            default: break
+            }
             let bin = binary
+            let tool = c.count > 1 ? c[1] : c[0]
             do {
                 let out = try await Task.detached { try CuaDriver.run(bin, argv: c) }.value
-                DebugTrace.event("cua", ["tool": c[0], "ok": true])
-                return "cua \(c[0]): \(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))"
+                DebugTrace.event("cua", ["tool": tool, "ok": true])
+                return "cua \(tool): \(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))"
+            } catch let e as CuaDriver.TimedOut {
+                // It may have half-happened; doing it again would double it.
+                DebugTrace.event("cua", ["tool": tool, "ok": false, "error": "timeout"])
+                throw S1Error.actionFailed(e.localizedDescription + " — not retried, it may have partly run")
             } catch {
-                DebugTrace.event("cua", ["tool": c[0], "ok": false, "error": "\(error)"])
+                DebugTrace.event("cua", ["tool": tool, "ok": false, "error": "\(error)"])
                 if "\(error)".contains("permissions_pending") { Self.missingPermissions.store(true, ordering: .relaxed) }
                 let r = try await fallback.perform(action, frontmostPID: frontmostPID)
                 return r + " (cua fallback: \(error.localizedDescription.prefix(120)))"
@@ -195,6 +253,11 @@ public struct CuaActuator: Actuator {
             return ["call", c.tool, c.args]
         case .click, .rightClick, .doubleClick, .drag, .moveMouse:
             return try await clickCall(action, pid: pid)
+        case .openApp:
+            // "open X" means X comes to the front (the next keys go there);
+            // launch_app opens without focus, so CGEvent's activating
+            // open takes it.
+            return nil
         default:
             guard let c = CuaDriver.call(for: action, pid: pid) else { return nil }
             return ["call", c.tool, c.args]
@@ -210,8 +273,7 @@ public struct CuaActuator: Actuator {
             let args: [String: Any] = ["session": "s1", "scope": "desktop",
                                        "target": ["kind": "display", "display_id": "primary"],
                                        "x": x * Double(s), "y": y * Double(s)]
-            guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]) else { return nil }
-            return ["call", "move_cursor", String(decoding: data, as: UTF8.self)]
+            return CuaDriver.json(args).map { ["call", "move_cursor", $0] }
         }
         guard let pid else { return nil }
         let bin = binary
@@ -252,8 +314,7 @@ public struct CuaActuator: Actuator {
         default:
             return nil
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]) else { return nil }
-        return ["call", tool, String(decoding: data, as: UTF8.self)]
+        return CuaDriver.json(args).map { ["call", tool, $0] }
     }
 }
 

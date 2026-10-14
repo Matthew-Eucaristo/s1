@@ -57,6 +57,12 @@ enum LLMDecisionCodec {
         }.joined(separator: "\n")
     }
 
+    /// A coordinate for a log line or prompt. Model output is untrusted:
+    /// `Int(1e20)` and `Int(.nan)` trap, and a trap here kills the app.
+    static func pt(_ v: Double) -> String {
+        v.isFinite && abs(v) < 1e9 ? String(Int(v)) : "?"
+    }
+
     static func describe(_ a: Action?) -> String {
         guard let a else { return "none" }
         switch a {
@@ -70,11 +76,11 @@ enum LLMDecisionCodec {
         case .editText(let f, let r): return r.isEmpty ? "delete(\(f.prefix(20)))" : "replace(\(f.prefix(15))→\(r.prefix(15)))"
         case .axPress(let r): return "axPress(\(r))"
         case .axSetValue(let r, let v): return "axSet(\(r),\(v.prefix(15)))"
-        case .click(let x, let y): return "click(\(Int(x)),\(Int(y)))"
-        case .rightClick(let x, let y): return "rightClick(\(Int(x)),\(Int(y)))"
-        case .doubleClick(let x, let y): return "doubleClick(\(Int(x)),\(Int(y)))"
+        case .click(let x, let y): return "click(\(pt(x)),\(pt(y)))"
+        case .rightClick(let x, let y): return "rightClick(\(pt(x)),\(pt(y)))"
+        case .doubleClick(let x, let y): return "doubleClick(\(pt(x)),\(pt(y)))"
         case .drag(let fx, let fy, let tx, let ty):
-            return "drag(\(Int(fx)),\(Int(fy))->\(Int(tx)),\(Int(ty)))"
+            return "drag(\(pt(fx)),\(pt(fy))->\(pt(tx)),\(pt(ty)))"
         case .axAction(let r, let n): return "axAction(\(r),\(n))"
         case .axSetAttribute(let r, let a, let v): return "axSet(\(r),\(a)=\(v))"
         case .keyCombo(let k): return "key(\(k.joined(separator: "+")))"
@@ -83,7 +89,7 @@ enum LLMDecisionCodec {
         case .verify(let e): return "verify(\(e.prefix(30)))"
         case .done: return "done"
         case .scroll(let dx, let dy): return "scroll(\(dx),\(dy))"
-        case .moveMouse(let x, let y): return "move(\(Int(x)),\(Int(y)))"
+        case .moveMouse(let x, let y): return "move(\(pt(x)),\(pt(y)))"
         case .shell(let c): return "shell(\(c.prefix(20)))"
         case .custom(let n, _): return "custom(\(n))"
         }
@@ -93,7 +99,7 @@ enum LLMDecisionCodec {
         Reply with ONLY one JSON object — no prose, no fences, no examples:
         {"action":{"type":"<TYPE>","<FIELD>":"<VALUE>"},"confidence":<0.0 to 1.0>,"rationale":"<why this action, in this screen>"}
         - The goal may list several steps separated by commas — do them left to right; a "done" step means the task is finished.
-        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, quitApp, wait, verify, captureScreenshot, editText, webSearch, done. Never write more than one.
+        - "type" is exactly ONE of: click, rightClick, doubleClick, drag, moveMouse, axPress, axSetValue, axAction, axSetAttribute, typeText, keyCombo, scroll, openApp, quitApp, menu, wait, verify, captureScreenshot, editText, webSearch, delegate, done. Never write more than one.
         - Fields by type: click/rightClick/doubleClick/moveMouse take "x","y"; drag takes "x","y" (start) and "toX","toY" (end); axPress/axSetValue/axAction/axSetAttribute take "ref"; axSetValue also "value"; axAction also "name" (AXShowMenu, AXIncrement, AXDecrement, AXConfirm, AXCancel, AXPick, AXRaise, AXOpen); axSetAttribute also "attr" (AXSelected, AXFocused, AXExpanded, AXMain, AXMinimized) and "value" ("true"/"false"); typeText takes "text"; openApp takes "app" (the app name); keyCombo takes "keys" like "cmd+s"; scroll takes "dx","dy" pixel deltas (dy>0 = scroll content DOWN); wait takes "ms"; verify/done take "expect".
         - Use "ref" (an AX element id like e3) whenever the target is in the AX tree — prefer axPress over click.
         - To open/launch an app, use openApp with the app name. Never try to press app/root nodes.
@@ -140,7 +146,13 @@ enum LLMDecisionCodec {
                 y = try c.decodeIfPresent(Double.self, forKey: .y)
                 ref = try c.decodeIfPresent(String.self, forKey: .ref)
                 text = try c.decodeIfPresent(String.self, forKey: .text)
-                value = try c.decodeIfPresent(String.self, forKey: .value)
+                // Models write `"value": 5` or `true` for a field's value as
+                // often as a string — take it as the text it means.
+                if let v = try? c.decodeIfPresent(String.self, forKey: .value) { value = v }
+                else if let n = try? c.decodeIfPresent(Double.self, forKey: .value) {
+                    value = n.rounded() == n && abs(n) < 1e15 ? String(Int64(n)) : String(n)
+                } else if let b = try? c.decodeIfPresent(Bool.self, forKey: .value) { value = String(b) }
+                else { value = nil }
                 app = try c.decodeIfPresent(String.self, forKey: .app)
                 dx = try c.decodeIfPresent(Double.self, forKey: .dx)
                 dy = try c.decodeIfPresent(Double.self, forKey: .dy)
@@ -148,9 +160,9 @@ enum LLMDecisionCodec {
                 expect = try c.decodeIfPresent(String.self, forKey: .expect)
                 seconds = try c.decodeIfPresent(Double.self, forKey: .seconds)
                 if let arr = try? c.decode([String].self, forKey: .keys) {
-                    keys = arr
+                    keys = arr.flatMap(CGEventActuator.comboKeys)
                 } else if let s = try? c.decode(String.self, forKey: .keys) {
-                    keys = s.split(separator: "+").map { $0.lowercased() }
+                    keys = CGEventActuator.comboKeys(s)
                 } else { keys = [] }
                 if let arr = try? c.decode([String].self, forKey: .goals) {
                     goals = arr
@@ -224,7 +236,12 @@ enum LLMDecisionCodec {
         let a: Action?
         switch type {
         case "axPress":   a = field("ref").map { .axPress(ref: $0) }
-        case "axSetValue": a = field("ref").map { .axSetValue(ref: $0, value: field("value") ?? field("text") ?? "") }
+        case "axSetValue":
+            // No value at all is a truncated reply, not "clear the field".
+            let raw = field("value") ?? field("text") ?? num("value").map {
+                $0.rounded() == $0 && abs($0) < 1e15 ? String(Int64($0)) : String($0)
+            }
+            a = field("ref").flatMap { ref in raw.map { .axSetValue(ref: ref, value: $0) } }
         case "typeText":  a = field("text").map { .typeText($0) }
         case "editText":  a = field("text").map { .editText(find: $0, replace: field("value") ?? "") }
         case "webSearch": a = field("text").map { .webSearch(query: $0) }
@@ -245,7 +262,7 @@ enum LLMDecisionCodec {
             .axSetAttribute(ref: $0, attr: field("attr") ?? "AXSelected",
                             value: ["true", "1", "yes"].contains((field("value") ?? "true").lowercased()))
         }
-        case "keyCombo":  a = field("keys").map { .keyCombo(keys: $0.split(separator: "+").map { $0.lowercased() }) }
+        case "keyCombo":  a = field("keys").map { .keyCombo(keys: CGEventActuator.comboKeys($0)) }
         case "wait":      a = .wait(seconds: num("ms").map { $0 / 1000 } ?? num("seconds") ?? 0.5)
         case "scroll":    a = .scroll(dx: num("dx") ?? 0, dy: num("dy") ?? 0)
         case "verify":    a = field("expect").map { .verify(expectation: $0) }
@@ -291,8 +308,8 @@ enum LLMDecisionCodec {
         // step escalates instead of erroring against a blank element id.
         case "axPress":   guard let ref = a.ref, !ref.isEmpty else { return nil }
                           return .axPress(ref: ref)
-        case "axSetValue": guard let ref = a.ref, !ref.isEmpty else { return nil }
-                          return .axSetValue(ref: ref, value: a.value ?? a.text ?? "")
+        case "axSetValue": guard let ref = a.ref, !ref.isEmpty, let v = a.value ?? a.text else { return nil }
+                          return .axSetValue(ref: ref, value: v)
         case "typeText":  guard let t = a.text, !t.isEmpty else { return nil }
                           return .typeText(t)
         case "quitApp":   return .quitApp(name: a.app ?? a.name ?? a.text ?? "")

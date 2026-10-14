@@ -14,7 +14,8 @@ extension JudgedPolicy {
     static let directLimit = 14
     /// Probability mass the region beam must cover (at most two regions).
     static let beamMass = 0.8
-    /// Below this the Judge's control pick doesn't act.
+    /// Below this the Judge's control pick isn't even proposed (a pick
+    /// above it still has to clear the run's confidence threshold to act).
     static let exploreFloor = 0.4
 
     func explore(_ words: String, base: Decision, goal: String, observation: Snapshot,
@@ -34,7 +35,10 @@ extension JudgedPolicy {
         if total <= Self.directLimit || regions.count == 1 {
             pool = regions.flatMap(\.targets)
         } else {
-            let shown = Array(regions.prefix(12))
+            // The menu commands always make the list, however many parts
+            // the window has.
+            let menuRegion = menus.isEmpty ? nil : regions.last
+            let shown = menuRegion.map { Array(regions.dropLast().prefix(11)) + [$0] } ?? Array(regions.prefix(12))
             let keys = shown.enumerated().map { "\($0.offset + 1). \($0.element.summary)" }
             let state = DecisionContext.state(goal: goal, observation: observation, history: history)
             var criteria = Dictionary(uniqueKeysWithValues: keys.map { ($0, String?.none) })
@@ -94,7 +98,7 @@ enum Screen {
 
         init?(node n: AXNode) {
             guard let a = Screen.press(n) else { return nil }
-            label = AXPolicy.label(n); name = n.title ?? n.desc ?? n.value ?? ""; action = a; node = n
+            label = AXPolicy.label(n); name = n.title ?? n.desc ?? AXPolicy.publicValue(n) ?? ""; action = a; node = n
         }
         init(menu m: MenuCommand) {
             label = "Menu “\(m.label)”"; name = m.title; action = .menuItem(path: m.path); node = nil
@@ -131,7 +135,7 @@ enum Screen {
         if AXSemantics.pressable.contains(n.role) || AXSemantics.editable.contains(n.role) { return true }
         guard ["AXStaticText", "AXImage", "AXCell", "AXRow"].contains(n.role),
               let f = n.frame, f.w > 0, f.h > 0 else { return false }
-        return !((n.title ?? n.desc ?? n.value ?? "").isEmpty)
+        return !((n.title ?? n.desc ?? AXPolicy.publicValue(n) ?? "").isEmpty)
     }
 
     /// Each landmark becomes a part; controls belong to the nearest one.

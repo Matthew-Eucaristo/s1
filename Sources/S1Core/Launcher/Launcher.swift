@@ -10,7 +10,9 @@ public struct LauncherItem: Identifiable, Sendable, Equatable {
     public var subtitle: String
     /// App path, snippet/clip text, calc result, layout raw value, or goal.
     public var payload: String
-    public var id: String { "\(kind.rawValue):\(title):\(payload.prefix(80))" }
+    /// The whole payload: two clips sharing their first 80 characters
+    /// (long URLs, stack traces) are still two rows.
+    public var id: String { "\(kind.rawValue):\(title):\(payload)" }
 
     public init(kind: Kind, title: String, subtitle: String = "", payload: String) {
         self.kind = kind; self.title = title; self.subtitle = subtitle; self.payload = payload
@@ -176,7 +178,9 @@ public enum Snippets {
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
         let tf = DateFormatter(); tf.dateStyle = .none; tf.timeStyle = .short
         let wf = DateFormatter(); wf.dateFormat = "EEEE"
-        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withFullDate]
+        // Today's date where the user is — the formatter defaults to UTC,
+        // which is still yesterday in Jakarta until 07:00.
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withFullDate]; iso.timeZone = .current
         return text
             .replacingOccurrences(of: "{datetime}", with: df.string(from: now) + " " + tf.string(from: now))
             .replacingOccurrences(of: "{isodate}", with: iso.string(from: now))
@@ -213,6 +217,9 @@ public enum Calc {
             .replacingOccurrences(of: ",", with: "")
         guard src.contains(where: { "+-*/^%".contains($0) }), src.contains(where: \.isNumber),
               src.allSatisfy({ "0123456789.+-*/^%() ".contains($0) }) else { return nil }
+        // "2026-10-15", "0812-3456-7890", "+62-812-555": dates and phone
+        // numbers, not sums ("10 - 5 - 2" with spaces still is one).
+        if src.wholeMatch(of: /\+?\d+(-\d+){2,}/) != nil { return nil }
         var p = Parser(chars: Array(src.filter { $0 != " " }))
         guard let v = p.expr(), p.i == p.chars.count, v.isFinite else { return nil }
         return v

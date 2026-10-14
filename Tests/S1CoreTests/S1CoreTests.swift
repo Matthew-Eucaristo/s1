@@ -2081,7 +2081,9 @@ private struct DelegatingReasoner: Reasoner {
     let t = CuaDriver.call(for: .typeText("hi \"x\""), pid: 42)
     #expect(t?.tool == "type_text")
     #expect(t?.args == #"{"pid":42,"session":"s1","text":"hi \"x\""}"#)
-    #expect(CuaDriver.call(for: .keyCombo(keys: ["Cmd", "s"]), pid: 7)?.args == #"{"keys":["cmd","s"],"pid":7,"session":"s1"}"#)
+    #expect(CuaDriver.call(for: .keyCombo(keys: ["Cmd", "Return"]), pid: 7)?.args == #"{"keys":["cmd","return"],"pid":7,"session":"s1"}"#)
+    // Character keys stay on CGEvent, which follows the keyboard layout.
+    #expect(CuaDriver.call(for: .keyCombo(keys: ["cmd", "s"]), pid: 7) == nil)
     #expect(CuaDriver.call(for: .openApp(name: "Notes"), pid: nil, bundleID: { _ in "com.apple.Notes" })?.tool == "launch_app")
     #expect(CuaDriver.call(for: .typeText("x"), pid: nil) == nil)
     #expect(CuaDriver.call(for: .click(x: 1, y: 2), pid: 1) == nil)

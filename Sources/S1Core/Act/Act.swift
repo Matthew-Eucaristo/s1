@@ -28,7 +28,7 @@ public struct CGEventActuator: Actuator {
         // non-finite coordinates — a CGPoint(inf) posted to CGEvent is
         // undefined. Reject loudly like the nil-event checks below.
         func finite(_ v: Double, _ name: String) throws -> Double {
-            guard v.isFinite else { throw S1Error.aborted("non-finite \(name) in action") }
+            guard v.isFinite, abs(v) < 1_000_000 else { throw S1Error.aborted("\(name) is off every display (\(v))") }
             return v
         }
         switch action {
@@ -123,9 +123,11 @@ public struct CGEventActuator: Actuator {
                 throw S1Error.aborted("cannot create drag release event")
             }
             up.post(tap: .cghidEventTap)
-            return "drag (\(Int(fx)),\(Int(fy))) -> (\(Int(tx)),\(Int(ty)))"
+            return "drag (\(fx.rounded()),\(fy.rounded())) -> (\(tx.rounded()),\(ty.rounded()))"
 
         case .menuItem(let path):
+            // Paste/AutoFill from the menu reach a password box like ⌘V does.
+            try actTimeChecks(payload: nil)
             let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? frontmostPID
             guard let pid else { throw S1Error.axFailed("no app in front") }
             return try MenuReader.press(path: path, pid: pid)
@@ -136,7 +138,10 @@ public struct CGEventActuator: Actuator {
             // Single-line fields report their text reliably: check the typing
             // landed there (some ignore synthetic keys), else insert through
             // Accessibility. Terminals and canvases aren't checked.
-            let before = focusedField(pid: pid)?.value
+            // Text with a newline is skipped: a field that submits and
+            // clears on Return reads unchanged although the text went out,
+            // and a second insert would send it twice.
+            let before = text.contains(where: \.isNewline) ? nil : focusedField(pid: pid)?.value
             try postKeystrokes(text)
             if let before, !text.isEmpty {
                 var landed = false
@@ -144,6 +149,9 @@ public struct CGEventActuator: Actuator {
                     if let now = focusedField(pid: pid)?.value, now != before { landed = true; break }
                     usleep(50_000)
                 }
+                // One last look before inserting again: a slow app may have
+                // taken the keys after all.
+                if !landed, let now = focusedField(pid: pid)?.value, now != before { landed = true }
                 if !landed {
                     if insertViaAccessibility(text, pid: pid) { return "typed \(text.count) chars (via accessibility)" }
                     throw S1Error.axFailed("the text didn't land in the focused field")
@@ -221,24 +229,30 @@ public struct CGEventActuator: Actuator {
             if AXReader.setValue(pid: pid, ref: ref, value: value) {
                 return "AXSetValue \(ref) = \"\(value.prefix(30))\""
             }
-            // Ref index shifted or the node refuses AX value writes — focus the
-            // element (click its frame if needed) and type the value for real.
+            // The node refuses AX value writes — focus the element (click
+            // its frame), select what's there and type the value for real.
+            // A ref that no longer resolves fails: typing would land in
+            // whatever happens to have focus.
+            guard let f = AXReader.frameOf(pid: pid, ref: ref) else {
+                throw S1Error.axFailed("\(ref) is gone — couldn't set its value")
+            }
             _ = AXReader.setAttribute(pid: pid, ref: ref,
                                       attr: kAXFocusedAttribute, value: kCFBooleanTrue!)
-            if let f = AXReader.frameOf(pid: pid, ref: ref) {
-                let p = CGPoint(x: f.midX, y: f.midY)
-                let src = CGEventSource(stateID: .hidSystemState)
-                guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
-                        mouseCursorPosition: p, mouseButton: .left),
-                      let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
-                        mouseCursorPosition: p, mouseButton: .left) else {
-                    throw S1Error.aborted("cannot create fallback click events")
-                }
-                down.post(tap: .cghidEventTap)
-                usleep(60_000)
-                up.post(tap: .cghidEventTap)
+            let p = CGPoint(x: f.midX, y: f.midY)
+            let src = CGEventSource(stateID: .hidSystemState)
+            guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                    mouseCursorPosition: p, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                    mouseCursorPosition: p, mouseButton: .left) else {
+                throw S1Error.aborted("cannot create fallback click events")
             }
+            down.post(tap: .cghidEventTap)
+            usleep(60_000)
+            up.post(tap: .cghidEventTap)
+            usleep(80_000)
             try actTimeChecks(payload: value)
+            // Set means replace: select the old contents first.
+            try postKeyCombo(["cmd", "a"])
             try postUnicode(value)
             return "focused+typed \(value.count) chars (AXSetValue refused)"
 
@@ -267,11 +281,7 @@ public struct CGEventActuator: Actuator {
             // Settings panes and folders only — never an app, script or file
             // a URL could launch.
             guard let url = URL(string: raw) else { throw S1Error.aborted("bad URL: \(raw)") }
-            var isDir: ObjCBool = false
-            let ok = url.scheme == "x-apple.systempreferences"
-                || (url.isFileURL && FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
-                    && url.pathExtension != "app")
-            guard ok else { throw S1Error.aborted("s1 only opens settings panes and folders this way") }
+            guard Self.opensSafely(url) else { throw S1Error.aborted("s1 only opens settings panes and folders this way") }
             guard NSWorkspace.shared.open(url) else { throw S1Error.aborted("couldn't open \(raw)") }
             return url.isFileURL ? "opened \(url.lastPathComponent)" : "opened settings"
 
@@ -306,7 +316,14 @@ public struct CGEventActuator: Actuator {
             // Wait (bounded) so the outcome line tells the truth — a fire-
             // and-forget launch would log success before anything ran.
             let p = Process()
-            if Sandbox.enabled() {
+            let sandboxed = Sandbox.enabled()
+            let cwd = Sandbox.workingDirectory(sandboxed: sandboxed)
+            try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+            p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+            // Never the agent's own stdin: a command waiting for input
+            // would hang until the timeout.
+            p.standardInput = FileHandle.nullDevice
+            if sandboxed {
                 // `sandbox: "srt"` set → run inside sandbox-runtime's
                 // Seatbelt + proxy. Missing binary fails CLOSED: silently
                 // running unsandboxed would pretend a promise was kept.
@@ -322,7 +339,15 @@ public struct CGEventActuator: Actuator {
                 p.arguments = ["-c", cmd]
             }
             try p.run()
-            let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+            // SIGTERM at 30 s, SIGKILL 5 s later for a command that traps TERM.
+            let pid = p.processIdentifier
+            let killer = DispatchWorkItem {
+                guard p.isRunning else { return }
+                p.terminate()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                    if p.isRunning { kill(pid, SIGKILL) }
+                }
+            }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: killer)
             p.waitUntilExit()
             killer.cancel()
@@ -360,21 +385,18 @@ public struct CGEventActuator: Actuator {
     /// terminal — the payload then gets the command-level scan the loop
     /// applied to whatever was frontmost when it decided. Either refusal
     /// errors the step; the next observe re-gates honestly.
-    private func actTimeChecks(payload: String?) throws {
+    func actTimeChecks(payload: String?) throws {
         let sys = AXUIElementCreateSystemWide()
         AXReader.bindTimeout(sys)
         var v: CFTypeRef?
         if AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &v) == .success,
            let el = v, CFGetTypeID(el) == AXUIElementGetTypeID() {
-            var role: CFTypeRef?
-            if AXUIElementCopyAttributeValue(el as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success,
-               (role as? String) == "AXSecureTextField" {
+            if AXReader.isSecure(el as! AXUIElement) {
                 throw S1Error.axFailed("secure text field grabbed focus — keystrokes refused")
             }
         }
         if let payload,
-           let front = NSWorkspace.shared.frontmostApplication?.localizedName,
-           SafetyGate.terminalApps.contains(front),
+           SafetyGate.isTerminal(NSWorkspace.shared.frontmostApplication?.localizedName),
            case .needsHuman(let r) = SafetyGate.evaluateTerminalPayload(payload) {
             throw S1Error.axFailed("keystrokes refused: \(r)")
         }
@@ -393,10 +415,14 @@ public struct CGEventActuator: Actuator {
             guard AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &v) == .success,
                   let ref = v, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
             let el = ref as! AXUIElement
-            var value: CFTypeRef?, role: CFTypeRef?
-            AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
-            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
-            return (el, value as? String, (role as? String) ?? "?")
+            var value: CFTypeRef?
+            let role = AXReader.secureRole(AXReader.attr(el, kAXRoleAttribute) ?? "?",
+                                           subrole: AXReader.attr(el, kAXSubroleAttribute))
+            // A password box's value is never read, not even to search it.
+            if role != "AXSecureTextField" {
+                AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
+            }
+            return (el, value as? String, role)
         }
         guard var f = focused() else { throw S1Error.axFailed("no text field is focused") }
         if f.2 == "AXSecureTextField" { throw S1Error.axFailed("refusing to edit a password field") }
@@ -537,6 +563,7 @@ public struct CGEventActuator: Actuator {
         let el = ref as! AXUIElement
         AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
         guard ["AXTextField", "AXComboBox", "AXSearchField"].contains(role as? String ?? ""),
+              !AXReader.isSecure(el),
               AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
               let text = value as? String else { return nil }
         return (el, text)
@@ -579,7 +606,9 @@ public struct CGEventActuator: Actuator {
     func postKeyCombo(_ keys: [String]) throws {
         var flags = CGEventFlags()
         var key: String?
-        for k in keys {
+        for raw in keys {
+            let k = raw.trimmingCharacters(in: .whitespaces)
+            if k.isEmpty { continue }
             switch k.lowercased() {
             case "cmd", "command": flags.insert(.maskCommand)
             case "shift": flags.insert(.maskShift)
@@ -604,17 +633,46 @@ public struct CGEventActuator: Actuator {
             Self.postMediaKey(aux)
             return
         }
-        guard let code = Self.keyCodes[k.lowercased()] else {
+        guard let code = Self.keyCode(for: k) else {
+            if k.count == 1, KeyLayout.shortcutMap() == nil {
+                throw S1Error.aborted("couldn't read the keyboard layout to press \(keys.joined(separator: "+"))")
+            }
             throw S1Error.aborted("unknown key in combo \(keys)")
         }
         let src = CGEventSource(stateID: .hidSystemState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)
-        let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)
-        down?.flags = flags
-        up?.flags = flags   // modifiers stay "held" through the release
-        down?.post(tap: .cghidEventTap)
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false) else {
+            throw S1Error.aborted("cannot create keyboard events")
+        }
+        down.flags = flags
+        up.flags = flags   // modifiers stay "held" through the release
+        down.post(tap: .cghidEventTap)
         usleep(50_000)
-        up?.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+    }
+
+    /// The key that makes `key` in a shortcut. A single character goes
+    /// through the current layout first — macOS matches ⌘ shortcuts by the
+    /// character a key types, so on AZERTY ⌘A must post the key labelled
+    /// A, not the US position (which types Q: ⌘Q). Named keys, and
+    /// characters the layout can't make (non-Latin layouts), use the ANSI
+    /// table, which is what macOS falls back to as well.
+    static func keyCode(for key: String) -> CGKeyCode? {
+        let k = key.lowercased()
+        if k.count == 1, let ch = k.first {
+            // Layout unreadable this moment: refuse rather than guess the
+            // US position (⌘A would be ⌘Q on AZERTY).
+            guard let map = KeyLayout.shortcutMap() else { return nil }
+            if let code = map[ch] { return code }
+        }
+        return keyCodes[k]
+    }
+
+    /// "cmd + s", "cmd+,", "Cmd+Shift+T" → ["cmd", "s"] … — model replies
+    /// space their combos; the actuator wants bare tokens.
+    static func comboKeys(_ s: String) -> [String] {
+        s.split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
     }
 
     static let keyCodes: [String: CGKeyCode] = [
@@ -652,11 +710,33 @@ public struct CGEventActuator: Actuator {
             return NSEvent.otherEvent(with: .systemDefined, location: .zero,
                 modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags)),
                 timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
-                data1: (key << 16) | (flags << 8), data2: -1)?.cgEvent
+                data1: mediaKeyData(key, down: down), data2: -1)?.cgEvent
         }
         ev(true)?.post(tap: .cghidEventTap)
         usleep(30_000)
         ev(false)?.post(tap: .cghidEventTap)
+    }
+
+    /// A Settings pane, or a plain folder — never a bundle (an app, a
+    /// prefPane, an installer package), however its extension is spelled
+    /// or whatever symlink points at it: opening those launches code.
+    static func opensSafely(_ url: URL) -> Bool {
+        if url.scheme == "x-apple.systempreferences" { return true }
+        guard url.isFileURL else { return false }
+        let real = url.resolvingSymlinksInPath()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: real.path, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        return !NSWorkspace.shared.isFilePackage(atPath: real.path)
+            && !["app", "prefpane", "pkg", "mpkg", "bundle", "framework", "appex", "plugin", "kext", "workflow"]
+                .contains(real.pathExtension.lowercased())
+    }
+
+    /// NX_SYSDEFINED data1: key type in the high 16 bits, then the key
+    /// state byte (0xA down, 0xB up) in bits 8–15.
+    static func mediaKeyData(_ key: Int, down: Bool) -> Int {
+        (key << 16) | ((down ? 0xa : 0xb) << 8)
     }
 
     @discardableResult
@@ -696,6 +776,9 @@ enum AppResolver {
     static let cutoff = 0.55
 
     static func resolve(_ name: String) -> URL? {
+        // An app NAME, not a path: "../../tmp/x" must not walk out of the
+        // app folders.
+        guard !name.isEmpty, !name.contains("/"), name != "..", name != "." else { return nil }
         let ws = NSWorkspace.shared
         if let url = ws.urlForApplication(withBundleIdentifier: name) ??
             URL(fileURLWithPath: "/System/Applications/\(name).app").exists ??

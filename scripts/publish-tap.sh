@@ -26,12 +26,31 @@ TAG="v${VERSION}"
 
 ZIP="S1-${VERSION}-app.zip"
 
+# -- 0. what gets published is exactly the tagged, versioned source --------------
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "!! the working tree has changes — publish from a clean checkout of $TAG" >&2
+    exit 1
+fi
+if [[ "$(git describe --exact-match --tags HEAD 2>/dev/null)" != "$TAG" ]]; then
+    echo "!! HEAD isn't tagged $TAG — check out the tag (or tag this commit) first" >&2
+    exit 1
+fi
+CODE_VERSION=$(sed -nE 's/.*static let version = "([^"]+)".*/\1/p' Sources/S1Core/S1.swift)
+PLIST_VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Sources/S1App/Info.plist)
+if [[ "$CODE_VERSION" != "$VERSION" || "$PLIST_VERSION" != "$VERSION" ]]; then
+    echo "!! version mismatch: S1Info.version=$CODE_VERSION, Info.plist=$PLIST_VERSION, asked $VERSION" >&2
+    exit 1
+fi
+
 # -- 1. artifact ---------------------------------------------------------------
 # Always build and sign locally: CI's zip is ad-hoc signed, and macOS keys
 # Screen Recording/Accessibility grants to the signature — shipping it would
 # make every upgrade ask for permissions again. This zip replaces CI's.
 ./scripts/make-app.sh release
-if codesign -dvv dist/S1.app 2>&1 | grep -q "Signature=adhoc"; then
+# Captured first, matched after: `codesign | grep -q` can lose the match to
+# SIGPIPE under pipefail and let an ad-hoc build through.
+SIG=$(codesign -dvv dist/S1.app 2>&1 || true)
+if [[ "$SIG" == *"Signature=adhoc"* || "$SIG" != *"Authority="* ]]; then
     echo "!! dist/S1.app is ad-hoc signed — set S1_SIGN_IDENTITY to a real identity" >&2
     exit 1
 fi
@@ -45,12 +64,31 @@ echo "app zip sha256: $ZIP_SHA"
 RELEASE_URLS=0
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     RELEASE_URLS=1
+    # CI's release job uploads its own (ad-hoc) zip under the same name —
+    # let it finish first, or it overwrites this upload after the cask
+    # already carries this zip's sha.
+    RUN_ID=""
+    for _ in 1 2 3 4 5 6; do
+        RUN_ID=$(gh run list --repo "$REPO" --workflow release.yml --branch "$TAG" --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+        [[ -n "$RUN_ID" ]] && break
+        sleep 10
+    done
+    if [[ -n "$RUN_ID" ]]; then
+        echo "waiting for CI's release run $RUN_ID to finish…"
+        gh run watch "$RUN_ID" --repo "$REPO" --exit-status >/dev/null \
+            || echo "!! CI's release run didn't succeed — this upload is the release asset now"
+    else
+        echo "!! no CI release run found for $TAG — uploading anyway"
+    fi
+    PRERELEASE=()
+    [[ "$VERSION" == 0.* ]] && PRERELEASE=(--prerelease)   # same rule as CI: v0.x is beta
     if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
         gh release upload "$TAG" "dist/$ZIP" "dist/$ZIP.sha256" --repo "$REPO" --clobber
         echo "uploaded to existing release $TAG"
     else
         gh release create "$TAG" "dist/$ZIP" "dist/$ZIP.sha256" --repo "$REPO" \
-            --title "s1 $VERSION" --generate-notes
+            --title "s1 $VERSION" --generate-notes "${PRERELEASE[@]}"
         echo "created release $TAG"
     fi
 else

@@ -40,6 +40,12 @@ public enum MenuReader {
         return items
     }
 
+    /// Drop an app's cached commands — after a step that can change which
+    /// are enabled (play → "Next" turns on), so the next look is fresh.
+    public static func forget(pid: pid_t) {
+        cache.withLock { _ = $0.removeValue(forKey: pid) }
+    }
+
     static func read(pid: pid_t) -> [MenuCommand] {
         let app = AXUIElementCreateApplication(pid)
         AXReader.bindTimeout(app)

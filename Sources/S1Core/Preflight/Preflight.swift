@@ -55,11 +55,13 @@ public enum Preflight {
             // or Speech Recognition panes — the user would have to "+"-add
             // the app by hand. requestAccess/requestAuthorization register
             // the entries AND show the system prompt in one step.
-            if request {
-                AVCaptureDevice.requestAccess(for: .audio) { _ in }
-                SFSpeechRecognizer.requestAuthorization { _ in }
-            }
+            if request { AVCaptureDevice.requestAccess(for: .audio) { _ in } }
             notes.append("Microphone: needed only for voice (P4)")
+        }
+        // Speech Recognition is its own grant: a mic allowed some other way
+        // still needs this entry for the recognizer fallback.
+        if request, SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { _ in }
         }
 
         var inputMon = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted

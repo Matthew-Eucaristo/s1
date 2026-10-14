@@ -52,13 +52,14 @@ public enum CuaInstaller {
             let chunk = String(decoding: h.availableData, as: UTF8.self)
             for line in buf.append(chunk) { output(line) }
         }
-        try proc.run()
         // Bound the wait: the script downloads an app bundle — a dead
         // network would otherwise hang the wizard forever.
         let killer = DispatchWorkItem { if proc.isRunning { proc.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 300, execute: killer)
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            proc.terminationHandler = { _ in c.resume() }
+        do { try await proc.runUntilExit() } catch {
+            killer.cancel()
+            pipe.fileHandleForReading.readabilityHandler = nil
+            throw error
         }
         killer.cancel()
         pipe.fileHandleForReading.readabilityHandler = nil
@@ -121,14 +122,15 @@ public enum CuaInstaller {
         let pipe = Pipe()
         proc.standardOutput = pipe; proc.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { h in
-            output(String(decoding: h.availableData, as: UTF8.self))
+            let data = h.availableData
+            // EOF: an empty read repeats forever until the handler is gone.
+            guard !data.isEmpty else { h.readabilityHandler = nil; return }
+            output(String(decoding: data, as: UTF8.self))
         }
-        try proc.run()
-        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
-            proc.terminationHandler = { p in
-                p.terminationStatus == 0 ? c.resume()
-                    : c.resume(throwing: S1Error.actionFailed("cua-driver permissions grant failed"))
-            }
+        defer { pipe.fileHandleForReading.readabilityHandler = nil }
+        try await proc.runUntilExit()
+        guard proc.terminationStatus == 0 else {
+            throw S1Error.actionFailed("cua-driver permissions grant failed")
         }
     }
 

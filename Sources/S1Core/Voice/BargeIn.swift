@@ -29,6 +29,8 @@ public final class BargeMonitor: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let lock = NSLock()
     private var running = false
+    private var starting = false
+    private var stopPending = false
     private var fired = false
     private var floor: Float?
     private var voiced = 0.0
@@ -45,14 +47,22 @@ public final class BargeMonitor: @unchecked Sendable {
     /// enabled (barge-in silently degrades to "not available" — the
     /// kill switch and hotkey still interrupt).
     public func start() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !running else { return }
+        // `starting` claims the slot; the engine calls run outside the lock
+        // the tap callback takes, so a tap block in flight can never wait on
+        // a thread that waits on it.
+        let claimed: Bool = lock.withLock {
+            guard !running, !starting else { return false }
+            starting = true
+            return true
+        }
+        guard claimed else { return }
+        defer { lock.withLock { starting = false; stopPending = false } }
         let input = engine.inputNode
         // AEC is what makes listening through TTS playback workable.
         // Without it the speaker's own voice would hold the floor up
-        // and every reply would read as an interruption.
-        try? input.setVoiceProcessingEnabled(true)
+        // and every reply would read as an interruption — so no AEC, no
+        // barge-in.
+        do { try input.setVoiceProcessingEnabled(true) } catch { return }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { return }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
@@ -60,19 +70,27 @@ public final class BargeMonitor: @unchecked Sendable {
         }
         do {
             try engine.start()
-            running = true
+            // A stop() that arrived while starting wins.
+            let stopNow: Bool = lock.withLock {
+                if stopPending { stopPending = false; return true }
+                running = true
+                return false
+            }
+            if stopNow { input.removeTap(onBus: 0); engine.stop() }
         } catch {
             input.removeTap(onBus: 0)
         }
     }
 
     public func stop() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard running else { return }
+        let wasRunning: Bool = lock.withLock {
+            if starting { stopPending = true }
+            defer { running = false }
+            return running
+        }
+        guard wasRunning else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        running = false
     }
 
     deinit { stop() }

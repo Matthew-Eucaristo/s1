@@ -56,7 +56,10 @@ done
 # Sign the embedded CLI first, then the bundle — inner components must be
 # signed before the enclosing bundle so both seals stay valid.
 # No --deep: deprecated by Apple.
-if security find-identity -v -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
+# Captured first, matched after: `security | grep -q` can lose the match to
+# SIGPIPE under pipefail and silently fall back to ad-hoc.
+IDENTITIES=$(security find-identity -v -p codesigning)
+if [[ "$IDENTITIES" == *"\"$SIGN_IDENTITY\""* ]]; then
     codesign --force --sign "$SIGN_IDENTITY" "$APP/Contents/Resources/s1" >/dev/null
     codesign --force --sign "$SIGN_IDENTITY" "$APP" >/dev/null
     echo "signed with '$SIGN_IDENTITY' (stable TCC identity across rebuilds)"

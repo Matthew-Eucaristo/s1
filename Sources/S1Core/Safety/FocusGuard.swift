@@ -44,6 +44,7 @@ public struct FocusMark: Codable, Sendable, Equatable {
         case "AXTextArea": "a text area"
         case "AXTextField", "AXComboBox": "a text field"
         case "AXSearchField": "a search field"
+        case "AXSecureTextField": "a password field"
         case "AXWebArea": "the page"
         case "AXButton": "a button"
         default: "another control"
@@ -62,7 +63,8 @@ public enum FocusGuard {
     /// window (menu commands), true = the focused element (keys and text).
     static func depth(_ a: Action) -> Bool? {
         switch a {
-        case .typeText, .editText: return true
+        // axSetValue can fall back to clicking and typing (Act.swift).
+        case .typeText, .editText, .axSetValue: return true
         case .keyCombo(let keys):
             // Media keys go to the system, not the focused app.
             return keys.allSatisfy { CGEventActuator.mediaKeys[$0.lowercased()] != nil } ? nil : true

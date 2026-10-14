@@ -76,6 +76,15 @@ public struct SafetyGate: Sendable {
         "wezterm-gui", "ghostty", "Warp", "Hyper", "tmux", "screen", "zsh", "bash",
     ]
 
+    private static let terminalNames = Set(terminalApps.map { $0.lowercased() })
+
+    /// Whether `app` (a localized process name) is a terminal. Case-blind:
+    /// Ghostty and Alacritty report capitalized names.
+    public static func isTerminal(_ app: String?) -> Bool {
+        guard let a = app?.lowercased(), !a.isEmpty else { return false }
+        return terminalNames.contains(a)
+    }
+
     /// Commands that are dangerous the moment they exist in a shell — the
     /// generic deny-list catches flag-bearing variants; this list catches
     /// what typed text can smuggle in (`rm file`, `sudo …`, `ssh host`)
@@ -124,8 +133,10 @@ public struct SafetyGate: Sendable {
         self.allowIrreversible = allowIrreversible
     }
 
+    /// English plus the Indonesian and en-GB titles of the same commands
+    /// (macOS menus follow the system language).
     static let destructiveMenu =
-        #"\b(delete|erase|empty trash|move to (the )?trash|remove|discard|revert|clear (all|history)|log ?out|sign ?out|restart|shut ?down|reset|uninstall|format|burn)\b"#
+        #"\b(delete|erase|empty trash|move to (the )?(trash|bin)|empty bin|remove|discard|revert|clear (all|history)|log ?out|sign ?out|restart|shut ?down|reset|uninstall|format|burn|hapus|buang|tong sampah|kosongkan|mulai ulang|matikan|atur ulang|copot)\b"#
 
     public func evaluate(_ action: Action) -> GateVerdict {
         // Deny-list first: it applies to every class.
@@ -134,10 +145,15 @@ public struct SafetyGate: Sendable {
             // quits the frontmost app (unsaved work dies with it) and
             // ⌘⌥⎋ opens force-quit. The user can't have meant these unless
             // they said them — a scripted goal still says them verbatim.
-            let ks = Set(keys.map { $0.lowercased() })
+            let ks = Set(keys.map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
             let cmd = !ks.isDisjoint(with: ["cmd", "command"])
             let opt = !ks.isDisjoint(with: ["opt", "option", "alt"])
             let ctrl = !ks.isDisjoint(with: ["ctrl", "control"])
+            // ⌃⌘Q locks the screen instantly — a run that locks the
+            // screen can't observe or act afterwards: self-stalling.
+            if cmd && ctrl && ks.contains("q") {
+                return .needsHuman(reason: "⌃⌘Q locks the screen — a locked screen stalls the agent")
+            }
             if cmd && ks.contains("q") {
                 // ⇧⌘Q logs the user OUT entirely — quitting the frontmost
                 // app is reversible-ish, ending the session is not.
@@ -150,10 +166,11 @@ public struct SafetyGate: Sendable {
             if cmd && opt && !ks.isDisjoint(with: ["esc", "escape"]) {
                 return .needsHuman(reason: "⌘⌥⎋ opens Force Quit")
             }
-            // ⌃⌘Q locks the screen instantly — a run that locks the
-            // screen can't observe or act afterwards: self-stalling.
-            if cmd && ctrl && ks.contains("q") {
-                return .needsHuman(reason: "⌃⌘Q locks the screen — a locked screen stalls the agent")
+            // ⌘⌫ moves the selection to the Trash (Finder, Photos, Mail);
+            // ⌥⇧⌘⌫ empties the Trash with no confirmation — the same
+            // commands the destructive-menu rule sends to the user.
+            if cmd && !ks.isDisjoint(with: ["delete", "backspace", "del", "forwarddelete", "fwddelete"]) {
+                return .needsHuman(reason: "⌘⌫ deletes the selection — it may not be undoable")
             }
             // ⌃⌥Space is s1's own wake chord — a model posting it toggles
             // the agent's listener mid-run: self-disruption, not the goal.

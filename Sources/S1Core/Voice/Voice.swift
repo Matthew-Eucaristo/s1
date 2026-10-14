@@ -418,6 +418,10 @@ public struct SpeechToText: Sendable {
                     do {
                         if let last = try await analyzer.analyzeSequence(from: file) {
                             try await analyzer.finalizeAndFinish(through: last)
+                        } else {
+                            // No audio at all: finish anyway, or the results
+                            // stream never ends and the transcription hangs.
+                            await analyzer.cancelAndFinishNow()
                         }
                     } catch {
                         failures.withLock { $0.append(error) }
@@ -517,23 +521,21 @@ public struct SpeechToText: Sendable {
         let failure = Locked<Error?>(nil)
         let finished = AtomicFlag()
         let lastText = Locked<Date?>(nil)
+        // When words first arrived: patience grows with time spent talking,
+        // not with the silence before the user started.
+        let firstText = Locked<Date?>(nil)
         let task = rec.recognitionTask(with: req) { result, error in
             // First terminal callback wins — a trailing error must not erase
             // a final transcript that already landed.
             if let r = result, r.isFinal {
-                if !finished.get {
-                    collected.value = r.bestTranscription.formattedString
-                    finished.set()
-                }
+                if finished.claim() { collected.value = r.bestTranscription.formattedString }
             } else if let error {
-                if !finished.get {
-                    failure.value = error
-                    finished.set()
-                }
+                if finished.claim() { failure.value = error }
             } else if let r = result {
                 // Partial hypothesis — volatile best-guess while the user
                 // is still mid-word; live UI transcript, never persisted.
                 lastText.value = Date()
+                firstText.withLock { if $0 == nil { $0 = Date() } }
                 onPartial?(r.bestTranscription.formattedString)
             }
         }
@@ -566,7 +568,8 @@ public struct SpeechToText: Sendable {
             if control?.stopped == true { endReason = "released"; break }
             if control?.holding != true {
                 if endpointer.isDone { endReason = "endpointer:\(endpointer.state)"; break }
-                if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle + TurnEnd.patience(spoken: waited) { endReason = "textSettle"; break }
+                let spoken = firstText.value.map { Date().timeIntervalSince($0) } ?? 0
+                if let t = lastText.value, Date().timeIntervalSince(t) > Self.textSettle + TurnEnd.patience(spoken: spoken) { endReason = "textSettle"; break }
             }
             try await Task.sleep(nanoseconds: 100_000_000)
             waited += 0.1
@@ -671,6 +674,7 @@ public struct SpeechToText: Sendable {
         let leader = Locked<[Double]>(Array(repeating: -1, count: lanes.count))
         let speechEnded = AtomicFlag()
         let lastText = Locked<Date?>(nil)
+        let firstText = Locked<Date?>(nil)
         let heardSoFar = Locked<String>("")
         // VAD: speechDetected true→false means the utterance is over —
         // close the turn promptly even when the final segment lags.
@@ -691,7 +695,10 @@ public struct SpeechToText: Sendable {
             resultsTasks.append(Task {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
-                    if !text.trimmingCharacters(in: .whitespaces).isEmpty { lastText.value = Date() }
+                    if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                        lastText.value = Date()
+                        firstText.withLock { if $0 == nil { $0 = Date() } }
+                    }
                     if result.isFinal {
                         await collected.append(text, confidence: Self.confidence(of: result.text))
                         let mean = await collected.meanConfidence ?? 0
@@ -741,7 +748,8 @@ public struct SpeechToText: Sendable {
                 }
                 endReason = "unfinished+wait"; break
             }
-            let settle = Self.textSettle + TurnEnd.patience(spoken: waited)
+            let spoken = firstText.value.map { Date().timeIntervalSince($0) } ?? 0
+            let settle = Self.textSettle + TurnEnd.patience(spoken: spoken)
             let ended: String? = speechEnded.get ? "speechDetector"
                 : endpointer.isDone ? "endpointer:\(endpointer.state)"
                 : lastText.value.map({ Date().timeIntervalSince($0) > settle }) == true ? "textSettle" : nil
@@ -753,7 +761,7 @@ public struct SpeechToText: Sendable {
             }
             var settled = false
             for c in collectors {
-                if await c.hasContent, await c.idleFor(0.9 + TurnEnd.patience(spoken: waited)) { settled = true; break }
+                if await c.hasContent, await c.idleFor(0.9 + TurnEnd.patience(spoken: spoken)) { settled = true; break }
             }
             if settled {
                 if extensions == 0, TurnEnd.looksUnfinished(heardSoFar.value) {
@@ -766,13 +774,15 @@ public struct SpeechToText: Sendable {
                                    "lanes": collectors.count])
         recorder?.close()
         continuations.forEach { $0.finish() }
-        var laneErrors: [Error] = []
+        // Errors by lane: one language failing twice (input and results)
+        // is still one failed lane, not "every language failed".
+        var laneErrors: [Int: Error] = [:]
         for (i, t) in inputTasks.enumerated() {
             do {
                 try await t.value
                 try await analyzers[i].finalizeAndFinishThroughEndOfInput()
             } catch {
-                laneErrors.append(error)
+                laneErrors[i] = laneErrors[i] ?? error
                 await analyzers[i].cancelAndFinishNow()
             }
         }
@@ -786,17 +796,18 @@ public struct SpeechToText: Sendable {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             pending.forEach { $0.cancel() }
         }
-        for t in resultsTasks {
+        for (i, t) in resultsTasks.enumerated() {
             do { try await t.value } catch is CancellationError {
                 // Watchdog fired — the results that already landed are still good.
             } catch {
-                laneErrors.append(error)
+                laneErrors[i] = laneErrors[i] ?? error
             }
         }
         watchdog.cancel()
         let heard = await Self.choose(lanes: lanes, collectors: collectors)
         // Only fail the turn when every language failed and nothing was heard.
-        if heard.text.isEmpty, laneErrors.count >= lanes.count, let err = laneErrors.first { throw err }
+        if heard.text.isEmpty, laneErrors.count >= lanes.count,
+           let err = laneErrors.sorted(by: { $0.key < $1.key }).first?.value { throw err }
         return heard
     }
 
@@ -954,10 +965,13 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
 
     private func speakOnce(_ text: String, language: String, voice: String?, timeout: Double) async {
         self.stop()
-        if await speakCloud(text, language: language, timeout: timeout) { return }
+        // This reply's generation: a Stop from now on — even one that lands
+        // while a cloud voice request fails and falls back — keeps it silent.
+        let gen = lock.withLock { generation }
+        if await speakCloud(text, language: language, timeout: timeout, gen: gen) { return }
+        guard lock.withLock({ generation == gen }) else { return }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
-                let gen = lock.withLock { generation }
                 let u = AVSpeechUtterance(string: text)
                 u.voice = Self.voice(for: language, pinned: voice)
                 await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
@@ -982,11 +996,10 @@ public final class Speaker: NSObject, @unchecked Sendable, AVSpeechSynthesizerDe
     }
 
     /// Cloud TTS when configured and it speaks this language; false = use Apple.
-    private func speakCloud(_ text: String, language: String, timeout: Double) async -> Bool {
+    private func speakCloud(_ text: String, language: String, timeout: Double, gen: Int) async -> Bool {
         let cfg = S1Config.load()
         guard let ep = Models.endpoint(.speak, config: cfg),
               CloudSpeech.ttsSpeaks(model: ep.model, language: language) else { return false }
-        let gen = lock.withLock { generation }
         let voice = cfg.cloudVoice ?? CloudSpeech.defaultVoice(for: ep)
         guard let data = try? await CloudSpeech.synthesize(text, endpoint: ep, voice: voice),
               let p = try? AVAudioPlayer(data: data) else { return false }

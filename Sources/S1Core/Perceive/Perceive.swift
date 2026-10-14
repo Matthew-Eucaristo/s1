@@ -84,10 +84,6 @@ public struct SystemPerceiver: Perceiver {
         obs.secureTextFocused = m.secure
         obs.focus = m.focus
         obs.menus = m.menus
-        if let tree = m.tree, let pid = m.appPID {
-            AXReader.noteTree(tree, pid: pid)
-        }
-
         obs.appStates = Self.appStates(windows: obs.windows, frontmostPID: obs.frontmostPID)
 
         // No sink → nothing can consume the image, so skip the capture
@@ -95,6 +91,12 @@ public struct SystemPerceiver: Perceiver {
         if wantScreenshot, let screenshotSink {
             let image = try await Self.captureScreen()
             obs.screenshotPath = try await screenshotSink(image)
+        }
+        // The ref baseline is the tree a caller actually receives: noted
+        // only once the whole observation succeeded, so a failed capture
+        // can't swap in a tree the decision never saw.
+        if let tree = m.tree, let pid = m.appPID {
+            AXReader.noteTree(tree, pid: pid)
         }
         return obs
     }
@@ -295,7 +297,8 @@ public enum AXReader {
     /// (attrs + children), cutting observe latency roughly in half on wide trees.
     private static func scalarAttrs() -> CFArray {
         [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
-         kAXHelpAttribute, kAXValueAttribute, kAXPositionAttribute, kAXSizeAttribute] as CFArray
+         kAXHelpAttribute, kAXValueAttribute, kAXPositionAttribute, kAXSizeAttribute,
+         kAXSubroleAttribute] as CFArray
     }
 
     /// One node's scalar reads in a single IPC round-trip, with the
@@ -311,13 +314,14 @@ public enum AXReader {
         if AXUIElementCopyMultipleAttributeValues(el, scalarAttrs(),
                                                   AXCopyMultipleAttributeOptions(rawValue: 0),
                                                   &vals) == .success,
-           let arr = vals as? [Any], arr.count == 7 {
+           let arr = vals as? [Any], arr.count == 8 {
             role = arr[0] as? String ?? role
             title = arr[1] as? String
             desc = arr[2] as? String
             help = arr[3] as? String
             value = stringifyValue(arr[4])
             frame = extractFrame(pos: arr[5], size: arr[6])
+            role = secureRole(role, subrole: arr[7] as? String)
         } else {
             // Older apps can fail the multi-copy — per-attr fallback keeps
             // them observable rather than invisible.
@@ -327,12 +331,26 @@ public enum AXReader {
             help = attr(el, kAXHelpAttribute)
             value = stringValue(el)
             frame = liveFrame(of: el)
+            role = secureRole(role, subrole: attr(el, kAXSubroleAttribute))
         }
         // A secure field's value is a credential-in-progress: never read it
         // at all — not into the snapshot, the step log, or a model prompt.
         // (Some hosts expose the raw text via AXValue despite the role.)
         if role == "AXSecureTextField" { value = nil }
         return (role, title, desc, help, value, frame)
+    }
+
+    /// Password boxes are role AXTextField with SUBROLE AXSecureTextField
+    /// (NSSecureTextField, web password inputs). Trees carry them as role
+    /// AXSecureTextField so every role-based guard sees one name.
+    static func secureRole(_ role: String, subrole: String?) -> String {
+        subrole == "AXSecureTextField" ? "AXSecureTextField" : role
+    }
+
+    /// Whether a live element is a password box (by role or subrole).
+    static func isSecure(_ el: AXUIElement) -> Bool {
+        secureRole(attr(el, kAXRoleAttribute) ?? "", subrole: attr(el, kAXSubroleAttribute))
+            == "AXSecureTextField"
     }
 
     /// kAXValueAttribute can be a String, NSNumber, AXValue, or garbage —
@@ -446,8 +464,7 @@ public enum AXReader {
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &v) == .success,
               let el = v, CFGetTypeID(el) == AXUIElementGetTypeID()
         else { return false }
-        let role = attr(el as! AXUIElement, kAXRoleAttribute)
-        return role == "AXSecureTextField"
+        return isSecure(el as! AXUIElement)
     }
 
     /// The frontmost app's focused window and element, as a `FocusMark`.
@@ -467,7 +484,7 @@ public enum AXReader {
         }
         if let e = element(app, kAXFocusedUIElementAttribute) {
             mark.element = Int(bitPattern: CFHash(e))
-            mark.role = attr(e, kAXRoleAttribute)
+            mark.role = attr(e, kAXRoleAttribute).map { secureRole($0, subrole: attr(e, kAXSubroleAttribute)) }
             mark.label = [kAXTitleAttribute, kAXDescriptionAttribute, "AXPlaceholderValue"]
                 .lazy.compactMap { attr(e, $0) }.first { !$0.isEmpty }
         }
@@ -492,29 +509,35 @@ public enum AXReader {
         let candidate = target < entries.count ? entries[target] : nil
         guard let o else { return candidate?.el }   // no baseline: trust the index
 
-        // Same role and same labels → the ref still points at the same widget.
+        func distance(_ f: CGRect?) -> Double {
+            guard let of = o.frame, let f else { return .infinity }
+            return hypot(f.midX - (of.x + of.w / 2), f.midY - (of.y + of.h / 2))
+        }
+        let oLabel = [o.title, o.desc, o.help].lazy.compactMap { $0 }.first { !$0.isEmpty }
+        // Same role and same labels → the ref still points at the same
+        // widget. Two unlabeled fields look alike, so without a label the
+        // widget must also still be where it was.
         if let candidate,
            o.role == candidate.role,
            (o.title ?? "") == (candidate.title ?? ""),
            (o.desc ?? "") == (candidate.desc ?? ""),
-           (o.help ?? "") == (candidate.help ?? "") {
+           (o.help ?? "") == (candidate.help ?? ""),
+           oLabel != nil || o.frame == nil || candidate.frame == nil || distance(candidate.frame) < 24 {
             return candidate.el
         }
         // Index drifted — or the tree shrank past the ref (a dialog closed
         // and rebuilt its tree shorter). Find the recorded node by identity
-        // instead of giving up at the bounds check.
+        // instead of giving up at the bounds check: same role and label,
+        // the nearest one when several share it ("Reply" on every row);
+        // unlabeled, the same role within 24 pt of where it was.
         var best: (AXUIElement, Double)?
-        for e in entries {
-            guard e.role == o.role else { continue }
-            let oLabel = (o.title?.isEmpty == false ? o.title
-                          : o.desc?.isEmpty == false ? o.desc : o.help)
-            if let ot = oLabel, !ot.isEmpty {
-                if e.title == ot || e.desc == ot || e.help == ot { return e.el }
-                continue
-            }
-            if let of = o.frame, let ef = e.frame {
-                let d = hypot(ef.midX - (of.x + of.w / 2), ef.midY - (of.y + of.h / 2))
-                if d < 24, d < (best?.1 ?? .infinity) { best = (e.el, d) }
+        for e in entries where e.role == o.role {
+            let d = distance(e.frame)
+            if let ot = oLabel {
+                guard e.title == ot || e.desc == ot || e.help == ot else { continue }
+                if best == nil || d < best!.1 { best = (e.el, d) }
+            } else if d < 24, d < (best?.1 ?? .infinity) {
+                best = (e.el, d)
             }
         }
         // The recorded node is gone and nothing nearby matches — the element

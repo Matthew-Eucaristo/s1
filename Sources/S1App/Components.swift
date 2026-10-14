@@ -124,7 +124,7 @@ struct StepRow: View {
             }
             if let b = p.brain {
                 BrainTag(text: b)
-                    .help(p.confidence.map { "\(b) · confidence \($0.formatted(.number.precision(.fractionLength(2))))" } ?? b)
+                    .help(p.confidence.map { "\(b) · " + String(localized: "confidence \($0.formatted(.number.precision(.fractionLength(2))))") } ?? b)
             }
             if let v = p.verified {
                 Image(systemName: v ? "checkmark.circle.fill" : "xmark.circle.fill")

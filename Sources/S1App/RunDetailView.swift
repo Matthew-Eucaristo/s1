@@ -28,7 +28,7 @@ struct RunDetailView: View {
                         if let s = run.started, let f = run.finished {
                             Text(StepPresentation.duration(f.timeIntervalSince(s)))
                         }
-                        Text("\(steps.count) steps")
+                        Text("^[\(steps.count) step](inflect: true)")
                     }
                     .font(.callout)
                     .foregroundStyle(.secondary)

@@ -60,21 +60,22 @@ public enum RunReader {
     /// replayed run must be as interruptible as a live one.
     public static func replay(runDir: URL, into logger: RunLogger,
                               actuator: any Actuator, gate: SafetyGate,
-                              killSwitchPath: String? = nil) async throws -> Int {
+                              killSwitchPath: String? = nil,
+                              perceiver: any Perceiver = SystemPerceiver()) async throws -> Int {
         let recs = try steps(in: runDir)
         var i = 0
         // Focus before a replayed wait: keys after it must still go there.
         var aimed: FocusMark?
-        for rec in recs {
+        steps: for rec in recs {
             if Task.isCancelled || (killSwitchPath.map { FileManager.default.fileExists(atPath: $0) } ?? false) {
                 try await logger.log(StepRecord(index: i, time: Date(),
                     observation: "replay", decidedBy: "system",
                     confidence: nil, rationale: Task.isCancelled ? "task cancelled" : "kill switch",
                     modelReply: nil, action: nil, gate: "-", outcome: "aborted",
                     verified: nil, escalation: nil))
-                break
+                break steps
             }
-            guard let action = rec.action else { continue }
+            guard var action = rec.action else { continue }
             switch action {
             case .done, .verify, .captureScreenshot:
                 try await logger.log(StepRecord(index: i, time: Date(),
@@ -93,29 +94,50 @@ public enum RunReader {
                 default: false
                 }
                 let liveObs = needsObs
-                    ? try? await SystemPerceiver().observe(wantScreenshot: false)
+                    ? try? await perceiver.observe(wantScreenshot: false)
                     : nil
-                var verdict = gate.evaluate(action)
-                if case .typeText = action, liveObs?.secureTextFocused == true {
-                    verdict = .needsHuman(reason: "focused field is a secure text field")
+                // A ref is an index into the screen as it was recorded:
+                // re-find that element now, or ask instead of pressing
+                // whatever sits at the old index today.
+                var lost: String?
+                if let ref = action.axRef, liveObs != nil {
+                    if let live = rec.target?.resolve(in: liveObs?.axTree) {
+                        action = action.withRef(live)
+                    } else {
+                        lost = rec.target == nil
+                            ? "this recording doesn't say which element \(ref) was"
+                            : "the recorded element (\(rec.target?.label ?? rec.target?.role ?? ref)) isn't on screen"
+                    }
                 }
-                // Paste reaches a password box without a keystroke.
-                if case .keyCombo = action, liveObs?.secureTextFocused == true {
-                    verdict = .needsHuman(reason: "focused field is a secure text field")
+                var verdict = gate.evaluate(action)
+                if let lost { verdict = .needsHuman(reason: lost) }
+                // Keys, text and menu commands go wherever focus is: a
+                // password box (typing, paste, Edit › Paste) never gets
+                // them, and an unreadable screen is no proof it isn't one.
+                let focusBound: Bool = switch action {
+                case .typeText, .keyCombo, .editText, .menuItem: true
+                default: false
+                }
+                if focusBound, liveObs?.secureTextFocused != false {
+                    verdict = .needsHuman(reason: liveObs == nil
+                        ? "couldn't read the screen to check the focused field"
+                        : "focused field is a secure text field")
                 }
                 // Same secure-field coverage as the live loop: any targeted
                 // write/perform on a password box escalates.
                 switch action {
                 case .axPress(let ref), .axSetValue(let ref, _), .axAction(let ref, _),
                      .axSetAttribute(let ref, _, _):
-                    if S1SecureField.isSecure(ref, in: liveObs?.axTree) {
+                    if liveObs == nil {
+                        verdict = .needsHuman(reason: "couldn't read the screen to find \(ref)")
+                    } else if S1SecureField.isSecure(ref, in: liveObs?.axTree) {
                         verdict = .needsHuman(reason: "target is a secure text field")
                     }
                 default: break
                 }
                 // Replay of text into a terminal gets the command scan too —
                 // a recorded "ls" is fine, a recorded "rm file" isn't.
-                if SafetyGate.terminalApps.contains(liveObs?.frontmostApp ?? "") {
+                if SafetyGate.isTerminal(liveObs?.frontmostApp) {
                     let payload: String? = switch action {
                     case .typeText(let t): t
                     case .axSetValue(_, let v): v
@@ -136,7 +158,7 @@ public enum RunReader {
                 var outcome = "blocked"
                 if case .allow = verdict {
                     if case .wait(let s) = action {
-                        if aimed == nil { aimed = await SystemPerceiver().focus() }
+                        if aimed == nil { aimed = await perceiver.focus() }
                         if actuator is DryRunActuator {
                             // A dry-run previews without touching the machine
                             // — burning a real 60s recorded wait defeats that.
@@ -157,14 +179,19 @@ public enum RunReader {
                         }
                     }
                 }
+                // Keep the identity: a replay's own record can be replayed too.
                 try await logger.log(StepRecord(index: i, time: Date(),
                     observation: "replay", decidedBy: "replay",
                     confidence: nil, rationale: rec.rationale, modelReply: nil, action: action,
                     gate: verdict.label, outcome: outcome,
-                    verified: nil, escalation: nil))
+                    verified: nil, escalation: nil, target: rec.target))
                 if !FocusGuard.keepsFocus(action) { aimed = nil }
-                // The rest of the recording was aimed at the old focus too.
-                if moved { i += 1; break }
+                // A step that needs the user ends the replay, as it ends a
+                // live run: the steps after it (a Return after blocked
+                // typing, keys aimed at a focus that moved) assumed it ran.
+                var needsHuman = moved
+                if case .needsHuman = verdict { needsHuman = true }
+                if needsHuman { i += 1; break steps }
             }
             i += 1
         }

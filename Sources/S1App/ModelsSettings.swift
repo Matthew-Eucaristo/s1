@@ -14,6 +14,12 @@ struct ModelsSettings: View {
 
     var body: some View {
         Form {
+            if let e = store.writeError {
+                Section {
+                    Label(e, systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                }
+            }
             Section {
                 RoleRow(store: store, role: .judge) { adding = true }
                 RoleRow(store: store, role: .reasoner) { adding = true }
@@ -415,7 +421,12 @@ private struct ConnectForm: View {
 /// models — with one-tap downloads for Ollama.
 private struct ProviderDetailSheet: View {
     let store: ModelStore
-    let provider: Provider
+    /// The provider as the sheet opened; `provider` below is the live one,
+    /// so a Server URL saved here is the one checks and keys use.
+    let opened: Provider
+    private var provider: Provider { store.provider(opened.id) ?? opened }
+
+    init(store: ModelStore, provider: Provider) { self.store = store; self.opened = provider }
     @Environment(\.dismiss) private var dismiss
     @State private var newKey = ""
     @State private var replacing = false

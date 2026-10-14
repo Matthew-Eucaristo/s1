@@ -20,13 +20,20 @@ public enum Doctor {
     static let knownConfigKeys: Set<String> = [
         "providers", "models", "cloudVoice", "vision", "locale", "speak", "vocabulary", "recent",
         "notchHUD", "voice", "executor", "memory", "sandbox", "onboarded",
-        "voiceInterrupt", "vad", "vadSensitivity",
+        "voiceInterrupt", "vad", "vadSensitivity", "webSearch",
     ]
+
+    /// Key presence for the sweep, never the secret itself: a Keychain read
+    /// would prompt (and the value isn't needed to say "key in Keychain").
+    public static let keyPresence: Models.Secret = { p in
+        if let k = ProcessInfo.processInfo.environment[p.keyEnv], !k.isEmpty { return k }
+        return SecretStore.has(account: p.keyAccount) ? "present" : nil
+    }
 
     /// The whole ~/.s1 sweep. Synchronous and cheap — every check is a
     /// local file read or a binary probe.
     public static func run(home: String = S1Home.path,
-                           secret: Models.Secret = Models.keychain) -> [Item] {
+                           secret: Models.Secret = Doctor.keyPresence) -> [Item] {
         var out: [Item] = []
         let fm = FileManager.default
 

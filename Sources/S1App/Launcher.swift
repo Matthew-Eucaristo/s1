@@ -134,7 +134,14 @@ final class LauncherController: NSObject, NSWindowDelegate {
     /// Paste into the app you came from; snippets put your clipboard back.
     func paste(_ text: String, restore: Bool, into app: NSRunningApplication?) {
         let pb = NSPasteboard.general
-        let previous = restore ? pb.string(forType: .string) : nil
+        // Every item in every type — an image or a copied file comes back
+        // too, not only text.
+        let previous: [[NSPasteboard.PasteboardType: Data]]? = restore
+            ? (pb.pasteboardItems ?? []).map { item in
+                Dictionary(item.types.compactMap { t in item.data(forType: t).map { (t, $0) } },
+                           uniquingKeysWith: { a, _ in a })
+            }
+            : nil
         setClipboard(text)
         let mine = pb.changeCount
         Task { @MainActor in
@@ -143,7 +150,14 @@ final class LauncherController: NSObject, NSWindowDelegate {
             _ = try? await CGEventActuator().perform(.keyCombo(keys: ["cmd", "v"]), frontmostPID: nil)
             guard restore, let previous else { return }
             try? await Task.sleep(for: .milliseconds(600))
-            if pb.changeCount == mine { self.setClipboard(previous) }
+            guard pb.changeCount == mine else { return }
+            pb.clearContents()
+            pb.writeObjects(previous.map { types in
+                let item = NSPasteboardItem()
+                for (t, d) in types { item.setData(d, forType: t) }
+                return item
+            })
+            self.ownChange = pb.changeCount
         }
     }
 

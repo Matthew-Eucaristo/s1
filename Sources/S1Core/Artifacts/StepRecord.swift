@@ -17,10 +17,47 @@ public struct StepRecord: Codable, Sendable {
     public var outcome: String?               // actuator result summary
     public var verified: Bool?
     public var escalation: Escalation?
+    /// The element an AX-ref action aimed at, as it was when recorded —
+    /// refs are snapshot indices, so replay re-finds the element by this
+    /// identity instead of trusting an index from another day's screen.
+    public var target: Target? = nil
 
     public struct Escalation: Codable, Sendable {
         public var to: String                 // "s2:<reasoner>" | "human"
         public var reason: String
+    }
+
+    public struct Target: Codable, Sendable {
+        public var role: String
+        public var label: String?
+        public var frame: CGRectCodable?
+
+        /// The identity of `ref`'s node in `tree`, nil when it isn't there.
+        static func of(_ ref: String, in tree: AXNode?) -> Target? {
+            guard let n = tree?.flattened.first(where: { $0.ref == ref }) else { return nil }
+            return Target(role: n.role, label: label(of: n), frame: n.frame)
+        }
+
+        static func label(of n: AXNode) -> String? {
+            [n.title, n.desc, n.help].lazy.compactMap { $0 }.first { !$0.isEmpty }
+        }
+
+        /// The ref of the live node that is this target: same role and
+        /// label (the nearest one when several share it), or for an
+        /// unlabeled target the same role within 24 pt of where it was.
+        func resolve(in tree: AXNode?) -> String? {
+            guard let nodes = tree?.flattened else { return nil }
+            func distance(_ n: AXNode) -> Double {
+                guard let a = frame, let b = n.frame else { return .infinity }
+                return hypot((a.x + a.w / 2) - (b.x + b.w / 2), (a.y + a.h / 2) - (b.y + b.h / 2))
+            }
+            let same = nodes.filter { $0.role == role && Self.label(of: $0) == label }
+            if label != nil {
+                if same.count == 1 { return same[0].ref }
+                return same.min { distance($0) < distance($1) }.flatMap { distance($0).isFinite ? $0.ref : nil }
+            }
+            return same.filter { distance($0) < 24 }.min { distance($0) < distance($1) }?.ref
+        }
     }
 
     public func jsonLine() throws -> String {

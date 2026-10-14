@@ -28,7 +28,7 @@ struct RunGoalIntent: AppIntent {
             // dialog would announce a run that run() then refuses. Ask the
             // Serve object synchronously: the mirrored serveState lags a
             // MainActor hop and would let a Siri run start mid-companion-run.
-            if AppModel.shared.running || AppModel.shared.serveIsListening
+            if AppModel.shared.running || AppModel.shared.companionRunning
                 || S1Runner.anotherRunActive() {
                 return true
             }

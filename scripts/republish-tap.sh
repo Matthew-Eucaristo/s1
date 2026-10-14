@@ -33,6 +33,14 @@ done
 if [[ $BUILD == 1 ]]; then
     ./scripts/make-app.sh release >/dev/null
 fi
+# Never ship an ad-hoc build: TCC keys grants to the signature, so every
+# upgrade would drop the users' permissions. Captured first, matched after —
+# `codesign | grep -q` can lose the match to SIGPIPE under pipefail.
+SIG=$(codesign -dvv dist/S1.app 2>&1 || true)
+if [[ "$SIG" == *"Signature=adhoc"* || "$SIG" != *"Authority="* ]]; then
+    echo "!! dist/S1.app isn't signed with a real identity — set S1_SIGN_IDENTITY and rebuild" >&2
+    exit 1
+fi
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/S1.app/Contents/Info.plist)
 ZIP="S1-${VERSION}-app.zip"
 ditto -c -k --sequesterRsrc --keepParent dist/S1.app "dist/$ZIP"
@@ -46,6 +54,18 @@ TAP_DIR="${TAP_DIR:-}"
 if [[ -z "$TAP_DIR" ]]; then
     TAP_DIR=$(mktemp -d)/tap
     git clone --quiet "https://github.com/$TAP_REPO" "$TAP_DIR"
+fi
+# The cask must already be at this version and fetch from the tap itself:
+# rewriting only the sha of a cask that points at a GitHub Release (or an
+# older version) would make every install fail its checksum.
+CASK="$TAP_DIR/Casks/s1.rb"
+if ! grep -q "version \"$VERSION\"" "$CASK"; then
+    echo "!! the cask isn't at $VERSION — run scripts/publish-tap.sh $VERSION instead" >&2
+    exit 1
+fi
+if ! grep -Eq "raw.githubusercontent.com/$TAP_REPO/[a-f0-9]{40}/" "$CASK"; then
+    echo "!! the cask's url isn't pinned to a tap commit (it serves a release asset) — use publish-tap.sh" >&2
+    exit 1
 fi
 mkdir -p "$TAP_DIR/releases/v$VERSION"
 cp "dist/$ZIP" "$TAP_DIR/releases/v$VERSION/"
@@ -61,7 +81,6 @@ else
 fi
 
 # -- 3. cask: sha256 + url pinned to the artifact commit --------------------------
-CASK="$TAP_DIR/Casks/s1.rb"
 sed -i '' -E \
     -e "s|sha256 \"[a-f0-9]{64}\"|sha256 \"$ZIP_SHA\"|" \
     -e "s|$TAP_REPO/[a-f0-9]{40}|$TAP_REPO/$ART_SHA|" \

@@ -65,9 +65,13 @@ struct RunCmd: AsyncParsableCommand {
         // --plan is a program to replay: scripted is the only policy that
         // consumes it. Resolve it implicitly so `s1 run --plan` just works.
         let policyName = policy ?? (plan != nil ? "scripted" : "auto")
+        // A plan with another policy would run the plan's FILENAME as a
+        // live goal — refuse instead of guessing.
         if plan != nil, policyName != "scripted" {
-            FileHandle.standardError.write(
-                "note: --plan given but --policy \(policyName) ignores the file\n".data(using: .utf8)!)
+            throw ValidationError("--plan runs with the scripted policy only (drop --policy \(policyName))")
+        }
+        if task != nil, goal != nil {
+            throw ValidationError("pass --goal or --task, not both")
         }
         let pol: any Policy
         switch policyName {
@@ -125,14 +129,12 @@ struct RunCmd: AsyncParsableCommand {
             throw ValidationError("empty goal — pass --goal or --task")
         }
         let s2: (any Reasoner)? = cliReasoner(s2)
-        // A stale switch from an earlier `s1 stop` would abort this run at
-        // step 0 — disarm it now that a run is genuinely starting.
-        try? FileManager.default.removeItem(atPath: killSwitch)
         // Live step feed — a 25-step run is otherwise silent for minutes and
         // reads as hung. Same digest format the app feed shows.
         let (report, _) = try await S1Runner.run(goal: goalText, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: threshold, dryRun: dryRun,
-                               allowIrreversible: allowIrreversible, killSwitch: killSwitch, s2: s2,
+                               allowIrreversible: allowIrreversible, killSwitch: killSwitch,
+                               clearStaleStop: true, s2: s2,
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
@@ -262,14 +264,13 @@ struct ListenCmd: AsyncParsableCommand {
         guard !goal.isEmpty else { throw ValidationError("nothing transcribed") }
 
         let reasoner: (any Reasoner)? = cliReasoner(s2)
-        // A fresh listen clears a stale kill switch — the user just asked for
-        // a new run, so an old "stop" file must not silently abort step 0.
+        // A fresh listen clears a stale kill switch (once it holds the run
+        // lock) — an old "stop" file must not silently abort step 0.
         let kill = NSTemporaryDirectory() + "s1-stop"
-        try? FileManager.default.removeItem(atPath: kill)
         let (report, _) = try await S1Runner.run(goal: goal, policy: pol, artifacts: artifacts,
                                maxSteps: maxSteps, threshold: 0.6, dryRun: dryRun,
                                allowIrreversible: false,
-                               killSwitch: kill, s2: reasoner,
+                               killSwitch: kill, clearStaleStop: true, s2: reasoner,
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
         if speak ?? S1Config.load().speak ?? false {
@@ -301,11 +302,10 @@ struct DemoCmd: AsyncParsableCommand {
             .init(action: .done(summary: "demo complete"), rationale: "finish"),
         ]
         let kill = NSTemporaryDirectory() + "s1-stop"
-        try? FileManager.default.removeItem(atPath: kill)
         let (report, _) = try await S1Runner.run(goal: "p1-demo-textedit", policy: ScriptedPolicy(steps: steps),
                                artifacts: artifacts, maxSteps: 25, threshold: 0.6,
                                dryRun: dryRun, allowIrreversible: false,
-                               killSwitch: kill,
+                               killSwitch: kill, clearStaleStop: true,
                                onStep: { rec in print(rec.digest) })
         if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
     }
@@ -388,12 +388,16 @@ struct MenusCmd: AsyncParsableCommand {
 
     func run() async throws {
         let ws = NSWorkspace.shared
-        let app: NSRunningApplication? = target.flatMap { t in
+        // A named app that isn't running is an error — never the frontmost
+        // app instead (`--choose` would press its menu).
+        let app: NSRunningApplication? = if let t = target {
             pid_t(t).flatMap(NSRunningApplication.init(processIdentifier:))
                 ?? ws.runningApplications.first { $0.bundleIdentifier?.caseInsensitiveCompare(t) == .orderedSame }
                 ?? ws.runningApplications.first { $0.localizedName?.caseInsensitiveCompare(t) == .orderedSame }
                 ?? ws.runningApplications.first { $0.activationPolicy == .regular && ($0.localizedName?.localizedCaseInsensitiveContains(t) ?? false) }
-        } ?? ws.frontmostApplication
+        } else {
+            ws.frontmostApplication
+        }
         guard let app else { print("no such app running"); throw ExitCode(1) }
         if let choose {
             let action = Action.menuItem(path: MenuReader.path(choose))
@@ -439,7 +443,16 @@ struct ServeCmd: AsyncParsableCommand {
 
     func run() async throws {
         if uninstall { try manageLaunchAgent(install: false); return }
-        if install { try manageLaunchAgent(install: true); return }
+        if install {
+            // Checked now, not by the agent at every launch: a bad flag
+            // would otherwise exit non-zero and respawn forever.
+            _ = try makePolicy(policy)
+            guard listenSeconds > 0, idleTurns > 0 else {
+                throw ValidationError("--listen-seconds and --idle-turns must be positive")
+            }
+            try manageLaunchAgent(install: true)
+            return
+        }
         let loc = resolveLocale(locale)
         let resolvedSpeak = speak ?? S1Config.load().speak ?? false
         setbuf(stdout, nil)   // daemon: stream events unbuffered
@@ -464,13 +477,12 @@ struct ServeCmd: AsyncParsableCommand {
             let text = try await stt.transcribe(file: URL(fileURLWithPath: file))
             print("heard: \(text.terminalSafe)")
             guard !text.isEmpty else { throw ValidationError("nothing transcribed") }
-            // A one-shot has no wake() to clear the daemon's kill switch —
-            // remove the stale file or this run aborts at step 0.
-            let kill = NSTemporaryDirectory() + "s1-serve-stop"
-            try? FileManager.default.removeItem(atPath: kill)
+            // A one-shot is a CLI run, not the daemon: it takes the CLI's stop
+            // file (clearing the daemon's could swallow a stop meant for it).
+            let kill = NSTemporaryDirectory() + "s1-stop"
             let (report, _) = try await S1Runner.run(goal: text, policy: makePol(),
                 artifacts: S1Home.path + "/artifacts", maxSteps: 25, threshold: 0.6, dryRun: false,
-                allowIrreversible: false, killSwitch: kill,
+                allowIrreversible: false, killSwitch: kill, clearStaleStop: true,
                 s2: reasoner,
                 onStep: { rec in print(rec.digest) })
             if report.status != .done { throw S1Error.aborted(report.status.rawValue) }
@@ -486,7 +498,13 @@ struct ServeCmd: AsyncParsableCommand {
         // pid file, so `s1 serve` next to S1.app is refused too. Atomic
         // (O_EXCL): two serves launched at the same instant can't both win.
         let pidPath = S1Home.path + "/serve.pid"
-        try S1Runner.claimPidFile(pidPath, what: "s1 listener")
+        do { try S1Runner.claimPidFile(pidPath, what: "s1 listener") } catch let e as S1Error {
+            // Started at login while S1.app already listens: a clean exit, or
+            // launchd's KeepAlive would respawn the agent every 10 s forever.
+            guard ServeLaunchd.runningAsAgent, case .busy = e else { throw e }
+            print("\(e) — the agent steps aside")
+            return
+        }
         // Pid-checked release: if the file was stolen and re-claimed by a
         // competitor daemon, our exit must not delete THEIR lock.
         defer { S1Runner.releasePidFile(pidPath) }
@@ -831,11 +849,11 @@ struct StatusCmd: AsyncParsableCommand {
             // it at the next turn — "stopping" until then. An idle companion
             // ignores the file entirely (wake() clears it), so don't claim
             // it's about to stop.
-            // The daemon only watches ITS kill file (the app watches
-            // s1-app-stop, the CLI watches s1-serve-stop) — a stale file
-            // for the other context must not claim "stopping".
+            // The daemon only watches ITS kill file (the app's companion
+            // watches s1-app-serve-stop, the CLI daemon s1-serve-stop) — a
+            // stale file for another context must not claim "stopping".
             let isApp = S1Runner.pidExePath(pid)?.contains(".app/") ?? false
-            let stopFile = NSTemporaryDirectory() + (isApp ? "s1-app-stop" : "s1-serve-stop")
+            let stopFile = NSTemporaryDirectory() + (isApp ? "s1-app-serve-stop" : "s1-serve-stop")
             let stopPending = (daemonState == "listening" || daemonState == "runStart")
                 && FileManager.default.fileExists(atPath: stopFile)
             let mode = stopPending ? "stopping"
@@ -889,7 +907,7 @@ struct StopCmd: AsyncParsableCommand {
     func run() async throws {
         var did = false
         // Land every kill switch — an in-flight run aborts at its next step.
-        for f in ["s1-stop", "s1-serve-stop", "s1-app-stop"] {
+        for f in ["s1-stop", "s1-serve-stop", "s1-app-stop", "s1-app-serve-stop"] {
             try? "stop".write(toFile: NSTemporaryDirectory() + f,
                              atomically: true, encoding: .utf8)
         }
@@ -938,8 +956,8 @@ struct ReplayCmd: AsyncParsableCommand {
             // Same gate as a live run — replayed clicks/types need trust
             // or they land nowhere while the log claims they happened.
             try S1Runner.requireAccessibility()
-            try? FileManager.default.removeItem(atPath: kill)  // don't inherit a stale stop
             try S1Runner.acquireRunLock()   // live replay types/clicks — same lock as a run
+            try? FileManager.default.removeItem(atPath: kill)  // don't inherit a stale stop (lock held)
         }
         defer { if !dryRun { S1Runner.releaseRunLock() } }
         let logger = try RunLogger(goal: "replay:\(src.lastPathComponent)",
@@ -978,10 +996,14 @@ struct DecideCmd: AsyncParsableCommand {
             throw ValidationError("no judge assigned — pass --model (e.g. ollama/tev1:0.8b) or `s1 use judge …`")
         }
         let name = ep.model
-        let q: DecisionQuestion = options.map { o in
-            .choice(question, options: Dictionary(uniqueKeysWithValues: o.split(separator: ",")
-                .map { (String($0).trimmingCharacters(in: .whitespaces), String?.none) }))
-        } ?? .noul(question)
+        var q: DecisionQuestion = .noul(question)
+        if let options {
+            // Repeated or empty options would trap Dictionary(uniqueKeys…).
+            let names = options.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !names.isEmpty else { throw ValidationError("--options needs at least one option") }
+            q = .choice(question, options: Dictionary(names.map { ($0, String?.none) }, uniquingKeysWith: { a, _ in a }))
+        }
         let started = Date()
         let r = try await SystemOneClient(endpoint: ep, timeout: 120)
             .evaluate(state: .string(state), questions: ["q": q])
@@ -1047,12 +1069,17 @@ struct DoctorCmd: AsyncParsableCommand {
 
     func run() async throws {
         if fix {
+            S1Home.ensurePrivate()
+            var problems: [String] = []
             if !FileManager.default.fileExists(atPath: Convert.extensionsPath.path) {
-                try? "{\n  \"units\": { },\n  \"currencies\": { }\n}\n"
-                    .write(to: Convert.extensionsPath, atomically: true, encoding: .utf8)
+                do {
+                    try "{\n  \"units\": { },\n  \"currencies\": { }\n}\n"
+                        .write(to: Convert.extensionsPath, atomically: true, encoding: .utf8)
+                } catch { problems.append("convert.json: \(error.localizedDescription)") }
             }
-            try? Memory.rebuildIndex()
-            print("wrote missing defaults + rebuilt the memory index\n")
+            do { try Memory.rebuildIndex() } catch { problems.append("memory index: \(error.localizedDescription)") }
+            print(problems.isEmpty ? "wrote missing defaults + rebuilt the memory index\n"
+                  : "fix incomplete — " + problems.joined(separator: "; ") + "\n")
         }
         var fails = 0, warns = 0
         for item in Doctor.run() {
@@ -1077,12 +1104,16 @@ struct DoctorCmd: AsyncParsableCommand {
 struct SetupCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "setup",
         abstract: "First-run setup: permissions, defaults, Cua Driver, API keys — the same flow the app's onboarding runs.")
-    @Flag(help: "Install Cua Driver (default on; CUA's official installer).")
+    @Flag(help: "Install Cua Driver without asking (CUA's official installer). Interactive runs offer it anyway.")
     var installCua = false
     @Flag(help: "Skip the Cua Driver step entirely.")
     var noCua = false
     @Flag(help: "Answer no prompts — write defaults and stop (for scripts).")
     var nonInteractive = false
+
+    func validate() throws {
+        if installCua && noCua { throw ValidationError("--install-cua and --no-cua contradict each other") }
+    }
 
     func run() async throws {
         let interactive = !nonInteractive && isatty(STDIN_FILENO) != 0
@@ -1145,9 +1176,8 @@ struct SetupCmd: AsyncParsableCommand {
                     continue
                 }
                 try SecretStore.set(key, account: id)
-                var cfg = S1Config.load()
-                let took = Models.connect(ProviderConfig(id: id), in: &cfg)
-                try cfg.save()
+                var took: [ModelRole] = []
+                try S1Config.update { took = Models.connect(ProviderConfig(id: id), in: &$0) }
                 print("✓ \(t.name) connected" + (took.isEmpty ? "" : " — \(took.map(\.rawValue).joined(separator: ", "))"))
             }
         } else {
@@ -1162,9 +1192,12 @@ struct SetupCmd: AsyncParsableCommand {
             let mark = item.level == .ok ? " ✓" : item.level == .warn ? " ⚠" : " ✗"
             print("\(mark) \(item.what)\(item.detail.isEmpty ? "" : " — \(item.detail)")")
         }
+        if fails > 0 {
+            print("\ns1 isn't ready yet — fix the ✗ items above, then run `s1 doctor`.")
+            throw ExitCode(1)
+        }
         print("\ns1 is ready. Try: s1 run --goal \"open Notes\" — or say things like")
         print("  \"remember that apps: my editor is Zed\" · \"list my tasks\" · s1 serve")
-        if fails > 0 { throw ExitCode(1) }
     }
 
     /// y/N prompt — Enter means yes (the recommended path is one keypress).

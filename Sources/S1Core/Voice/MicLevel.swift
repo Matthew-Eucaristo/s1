@@ -125,8 +125,13 @@ public final class Endpointer: @unchecked Sendable {
         // Only quiet frames teach the floor: during a long sentence the voice
         // itself would otherwise drag the floor up to speech level within
         // ~10 s, and the rest of the sentence would read as silence.
+        // Digital silence (an engine still starting, a muted input) isn't
+        // the room: it teaches the floor nothing — learned from it, the
+        // floor sat so low that plain room noise read as speech, and a
+        // turn nobody spoke in never ended.
+        let digital = dB < -100
         let lvl = max(dB, -80)
-        let f0 = floor ?? lvl
+        let f0 = floor ?? (digital ? -80 : lvl)
         // The peak fades (~3 dB/s): one loud word early on mustn't make
         // ordinary speech afterwards count as silence.
         peak = max(-120, peak - Float(3 * seconds))
@@ -136,7 +141,8 @@ public final class Endpointer: @unchecked Sendable {
         if isVoice { peak = max(peak, dB) }
         // Before speech starts the floor learns the room (steady fan noise);
         // once someone is talking, only the quiet frames between words do.
-        if lvl < f0 { floor = lvl }
+        if digital { }
+        else if floor == nil || lvl < f0 { floor = lvl }
         else if _state == .waiting || !isVoice { floor = f0 + (lvl - f0) * 0.02 }
         else { floor = f0 }
         switch _state {

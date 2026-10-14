@@ -13,6 +13,7 @@ enum KeyLayout {
     private typealias Layout = (id: String, data: Data, kbd: UInt32)
 
     private static let cache = Mutex<(id: String, map: [Character: Stroke])?>(nil)
+    private static let shortcutCache = Mutex<(id: String, map: [Character: CGKeyCode])?>(nil)
 
     /// The current layout's character → keystroke table (rebuilt on switch).
     /// Empty when the layout can't be read: typing then falls back to unicode.
@@ -21,6 +22,40 @@ enum KeyLayout {
         if let hit = cache.withLock({ $0 }), hit.id == id { return hit.map }
         let map = build(data, kbd: kbd)
         cache.withLock { $0 = (id, map) }
+        return map
+    }
+
+    /// The key that types `ch` while ⌘ is held — what a ⌘-shortcut for
+    /// `ch` must post. Read in the ⌘ state because some layouts switch to
+    /// QWERTY under ⌘ ("Dvorak – QWERTY ⌘"). nil when no key makes it.
+    static func shortcutCode(for ch: Character) -> CGKeyCode? { shortcutMap()?[ch] }
+
+    /// The ⌘-state map, or nil when the layout can't be read right now
+    /// (callers must not guess a US position then: on AZERTY that's ⌘Q).
+    static func shortcutMap() -> [Character: CGKeyCode]? {
+        guard let (id, data, kbd) = currentLayout() else { return nil }
+        if let hit = shortcutCache.withLock({ $0 }), hit.id == id { return hit.map }
+        let map = buildShortcuts(data, kbd: kbd)
+        shortcutCache.withLock { $0 = (id, map) }
+        return map
+    }
+
+    private static func buildShortcuts(_ data: Data, kbd: UInt32) -> [Character: CGKeyCode] {
+        var map: [Character: CGKeyCode] = [:]
+        data.withUnsafeBytes { buf in
+            guard let layout = buf.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return }
+            for code in 0..<128 {
+                var dead: UInt32 = 0, len = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                let err = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), UInt32(cmdKey >> 8),
+                                         kbd, OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                         &dead, 4, &len, &chars)
+                guard err == noErr, len == 1, chars[0] > 0x20, chars[0] != 0x7F,
+                      let ch = String(utf16CodeUnits: chars, count: len).lowercased().first,
+                      map[ch] == nil else { continue }
+                map[ch] = CGKeyCode(code)
+            }
+        }
         return map
     }
 
@@ -67,6 +102,14 @@ enum KeyLayout {
                                              &dead, 4, &len, &chars)
                     guard err == noErr, len == 1, let ch = String(utf16CodeUnits: chars, count: len).first,
                           !ch.isNewline, ch != "\t", map[ch] == nil, chars[0] >= 0x20, chars[0] != 0x7F else { continue }
+                    // A dead key ("´" on US Option-E, "'" on US-International)
+                    // starts a compose: posting it would merge with the NEXT
+                    // character. Leave those to unicode events.
+                    var deadState: UInt32 = 0, deadLen = 0
+                    var deadChars = [UniChar](repeating: 0, count: 4)
+                    _ = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), state, kbd,
+                                       0, &deadState, 4, &deadLen, &deadChars)
+                    guard deadState == 0 else { continue }
                     map[ch] = Stroke(code: CGKeyCode(code), flags: flags)
                 }
             }

@@ -180,6 +180,8 @@ public final class Hotkey: @unchecked Sendable {
             // Any real key between two modifier taps breaks the gesture —
             // otherwise typing a fast capital letter would fire it.
             for i in trackers.indices { trackers[i].reset() }
+            // Holding the chord auto-repeats keyDown: one press, one toggle.
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return }
             let flags = NSEvent.ModifierFlags(rawValue: UInt(clamping: event.flags.rawValue))
             for p in patterns where ChordMatcher.matches(
                 keyCode: keyCode, flags: flags, pattern: p) {
@@ -188,13 +190,14 @@ public final class Hotkey: @unchecked Sendable {
             }
         case .flagsChanged:
             // Map the moved keycode to ITS flag — works for trackers on any
-            // modifier, not just Shift (56/60 shift, 55/61 cmd, 58/62 opt,
-            // 59/63 ctrl per HID key codes).
+            // modifier, not just Shift (left/right: 56/60 shift, 55/54 cmd,
+            // 58/61 opt, 59/62 ctrl, 63 fn — kVK_* in HIToolbox/Events.h).
             let flagMask: CGEventFlags = switch keyCode {
             case 56, 60: .maskShift
-            case 55, 61: .maskCommand
-            case 58, 62: .maskAlternate
-            case 59, 63: .maskControl
+            case 55, 54: .maskCommand
+            case 58, 61: .maskAlternate
+            case 59, 62: .maskControl
+            case 63: .maskSecondaryFn
             default: []
             }
             let modHeld = event.flags.contains(flagMask)

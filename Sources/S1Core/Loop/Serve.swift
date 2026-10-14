@@ -79,6 +79,10 @@ public final class Serve: @unchecked Sendable {
         public var voiceInterrupt: Bool
         /// Types one dictated chunk into the focused field.
         public var dictate: @Sendable (String) async throws -> Void
+        /// True while something else in this process records the mic (the
+        /// app's own listen or dictation): waking would open a second audio
+        /// engine on the same input.
+        public var micBusy: @Sendable () -> Bool
 
         public init(makePolicy: @escaping @Sendable () -> any Policy = { AXPolicy() },
                     s2: (any Reasoner)? = nil,
@@ -101,7 +105,9 @@ public final class Serve: @unchecked Sendable {
                         _ = try await CGEventActuator().perform(
                             .typeText(text),
                             frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
-                    }) {
+                    },
+                    micBusy: @escaping @Sendable () -> Bool = { false }) {
+            self.micBusy = micBusy
             self.makePolicy = makePolicy
             self.s2 = s2
             self.speak = speak
@@ -130,6 +136,14 @@ public final class Serve: @unchecked Sendable {
         return _state
     }
     private func setState(_ s: State) { stateLock.lock(); _state = s; stateLock.unlock() }
+    /// Move `from` → `to` only if still in `from` — a sleep landing between
+    /// a check and a set can't be undone by a stale transition.
+    private func transition(from: State, to: State) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard _state == from else { return false }
+        _state = to
+        return true
+    }
 
     private let config: Config
     private let speaker = Speaker()
@@ -217,6 +231,7 @@ public final class Serve: @unchecked Sendable {
 
     public func wake() {
         guard state == .idle else { return }
+        guard !config.micBusy() else { emit(.error, "the microphone is in use — finish that first"); return }
         // One listener per machine — re-verify on every wake, not just at
         // startup: a deleted or stolen pid file would otherwise let this
         // wake run alongside a competitor's listener.
@@ -250,23 +265,26 @@ public final class Serve: @unchecked Sendable {
     public func sleep() { sleep("") }
 
     private func sleep(_ reason: String) {
-        listenTask?.cancel()
+        // Idle first, atomically: a run that hasn't started yet sees it and
+        // never starts; one already running is told by the stop file.
+        let was: State = stateLock.withLock { defer { _state = .idle }; return _state }
+        // Land the kill switch — only when this listener's own run is in
+        // flight (the stop file may be shared with other runs), and before
+        // the cancel, so the run reads "stopped", not "failed: cancelled".
+        if was == .running {
+            try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
+        }
         // Keep the (cancelled) task reference: the next wake() chains behind
         // its unwind so the mic tap is down before a new turn starts. Setting
         // it nil here would let two audio engines race on rapid toggles.
-        // Land the kill switch too — an in-flight run aborts at its next step
-        // instead of finishing a task the user already cancelled.
-        try? "stop".write(toFile: config.killSwitch, atomically: true, encoding: .utf8)
+        listenTask?.cancel()
         // The mic goes free the moment we stop listening — a foreground
         // `s1 transcribe` must not stay locked out by a sleeping daemon.
         S1Runner.releaseMic()
         // And cut any speech in flight — "sleep" should mean silent.
         speaker.stop()
         if dictating.withLock({ d in defer { d = false }; return d }) { emit(.dictating, "") }
-        if state != .idle {
-            setState(.idle)
-            emit(.sleeping, reason)
-        }
+        if was != .idle { emit(.sleeping, reason) }
     }
 
     /// One full listen→run→listen cycle. Silence and STT errors count toward
@@ -373,7 +391,8 @@ public final class Serve: @unchecked Sendable {
     /// Returns false when the run itself errored — the caller counts those
     /// toward auto-sleep, same as STT failures.
     private func run(goal: String) async -> Bool {
-        setState(.running)
+        // Put to sleep while the words were being heard: no run.
+        guard transition(from: .listening, to: .running) else { return true }
         emit(.runStart, goal)
         // Barge-in: the mic is otherwise closed for the whole run + reply,
         // so "wait—"/"stop" said out loud would never be heard. The monitor
@@ -445,8 +464,12 @@ public final class Serve: @unchecked Sendable {
         }
         // Talked over within the first seconds: still the same request.
         if bargedEarly.get { pendingPrefix = (goal, Date()) }
-        if state == .running {
-            setState(.listening)
+        if !barged.get, state == .running, FileManager.default.fileExists(atPath: config.killSwitch) {
+            // Stopped from outside (`s1 stop`, the app's Stop): stop means
+            // the listener sleeps too — reopening the mic would only throw
+            // the next utterance away on the leftover stop file.
+            sleep("stopped")
+        } else if transition(from: .running, to: .listening) {
             // Publish the transition — the app's badge tracks events, so a
             // run that finishes must announce "listening again" or the badge
             // keeps showing "running" until the next utterance lands.

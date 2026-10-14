@@ -135,6 +135,8 @@ public struct AgentLoop {
             if let sub {
                 if case .done? = rec.action, rec.escalation == nil {
                     // Subgoal finished — not the run. Next subgoal, or back to S2.
+                    // The step still happened: S2 and the report see it.
+                    history.append(rec)
                     queue.removeFirst(); subHistory = []
                     completed.append(sub)
                     if queue.isEmpty, !plan.isEmpty, delegations == 0, escalations == 0 {
@@ -212,7 +214,9 @@ public struct AgentLoop {
                 try await policy.decide(observation: decisionObs, goal: s1Goal, history: s1History)
             }
         } catch {
-            if let k = config.killSwitchPath, FileManager.default.fileExists(atPath: k) {
+            // A stop (kill file or cancelled task — the owner may cancel
+            // before its file lands) ends the run, never an abstention.
+            if Task.isCancelled || config.killSwitchPath.map({ FileManager.default.fileExists(atPath: $0) }) == true {
                 // Record the interrupted step, then propagate — the run ends
                 // aborted, not as an abstention that walks into S2.
                 let r = record(i, obs: obs, by: "s1:\(policy.name)", conf: nil,
@@ -252,8 +256,8 @@ public struct AgentLoop {
                                             history: history, reason: reason)
                     }
                 } catch {
-                    if let k = config.killSwitchPath,
-                       FileManager.default.fileExists(atPath: k) {
+                    if Task.isCancelled
+                        || config.killSwitchPath.map({ FileManager.default.fileExists(atPath: $0) }) == true {
                         let r = record(i, obs: obs, by: "s2:\(s2.name)", conf: nil,
                                        rat: "kill switch mid-decision", action: nil,
                                        gate: "-", out: "interrupted", ver: nil,
@@ -348,6 +352,10 @@ public struct AgentLoop {
         if case .keyCombo = action, obs.secureTextFocused {
             verdict = .needsHuman(reason: "focused field is a secure text field")
         }
+        // Edit › Paste (or AutoFill) from the menu reaches it the same way.
+        if case .menuItem = action, obs.secureTextFocused {
+            verdict = .needsHuman(reason: "focused field is a secure text field")
+        }
         // Any targeted write/perform on a secure field escalates too — not
         // just the text-carrying axSetValue.
         switch action {
@@ -361,7 +369,7 @@ public struct AgentLoop {
         // Keystrokes into a terminal become commands on Return — text
         // headed there is scanned with the command-level list, so a plain
         // "rm file" can't ride in under the flag-bearing patterns.
-        if SafetyGate.terminalApps.contains(obs.frontmostApp ?? "") {
+        if SafetyGate.isTerminal(obs.frontmostApp) {
             let payload: String? = switch action {
             case .typeText(let t): t
             case .axSetValue(_, let v): v
@@ -414,6 +422,11 @@ public struct AgentLoop {
             } else {
                 do {
                     outcome = try await actuator.perform(action, frontmostPID: obs.frontmostPID)
+                    // Presses and shortcuts can flip which menu items are
+                    // enabled ("play" turns on "Next"): look again next step.
+                    if Self.changesMenus(action), !(actuator is DryRunActuator), let pid = obs.frontmostPID {
+                        MenuReader.forget(pid: pid)
+                    }
                     if Self.checksEffect(action, decidedBy: decidedBy), !(actuator is DryRunActuator) {
                         outcome += await effect(of: action, before: obs)
                     }
@@ -462,15 +475,27 @@ public struct AgentLoop {
     /// (models emit 0,0 as a placeholder) or a screen action at near-zero
     /// confidence. Answers and checks are always fine.
     static func unusable(_ a: Action, confidence: Double) -> Bool {
+        // Off every display (or not a number at all): a point no screen has.
+        func offScreen(_ vs: Double...) -> Bool { vs.contains { !$0.isFinite || abs($0) > 100_000 } }
         switch a {
         case .done, .verify, .wait, .captureScreenshot, .webSearch: return false
         case .click(let x, let y), .doubleClick(let x, let y), .rightClick(let x, let y), .moveMouse(let x, let y):
-            if x <= 1 && y <= 1 { return true }
-        case .drag(let fx, let fy, _, _):
-            if fx <= 1 && fy <= 1 { return true }
+            if x <= 1 && y <= 1 || offScreen(x, y) { return true }
+        case .drag(let fx, let fy, let tx, let ty):
+            if fx <= 1 && fy <= 1 || offScreen(fx, fy, tx, ty) { return true }
+        case .scroll(let dx, let dy):
+            if offScreen(dx, dy) { return true }
         default: break
         }
         return confidence < 0.25
+    }
+
+    /// Steps after which the app's menu commands may differ.
+    static func changesMenus(_ a: Action) -> Bool {
+        switch a {
+        case .axPress, .axAction, .axSetAttribute, .click, .doubleClick, .keyCombo, .openApp, .quitApp: return true
+        default: return false
+        }
     }
 
     static func isPress(_ a: Action) -> Bool {
@@ -488,15 +513,22 @@ public struct AgentLoop {
     /// element's center: SwiftUI and web controls often accept AXPress and
     /// ignore it.
     private func effect(of action: Action, before: Snapshot) async -> String {
-        if let change = await observedChange(since: before) { return " → " + change }
+        let (change, latest) = await observedChange(since: before)
+        if let change { return " → " + change }
+        // The element where it is NOW (re-found by identity in the latest
+        // look), not where it was before the press: a late-moving layout
+        // would otherwise take the click somewhere else.
         if case .axPress(let ref) = action,
            let n = before.axTree?.flattened.first(where: { $0.ref == ref }),
-           let f = n.frame, f.w > 0, f.h > 0, !Self.toggles.contains(n.role) {
+           !Self.toggles.contains(n.role),
+           let liveRef = StepRecord.Target.of(ref, in: before.axTree)?.resolve(in: latest?.axTree ?? before.axTree),
+           let f = (latest?.axTree ?? before.axTree)?.flattened.first(where: { $0.ref == liveRef })?.frame,
+           f.w > 0, f.h > 0 {
             let click = Action.click(x: f.x + f.w / 2, y: f.y + f.h / 2)
             guard (try? await actuator.perform(click, frontmostPID: before.frontmostPID)) != nil else {
                 return " → no visible change"
             }
-            if let change = await observedChange(since: before) {
+            if let change = await observedChange(since: before).change {
                 return " (the press did nothing, so s1 clicked it) → " + change
             }
             return " → no visible change, even after a real click"
@@ -504,13 +536,16 @@ public struct AgentLoop {
         return " → no visible change"
     }
 
-    private func observedChange(since before: Snapshot) async -> String? {
+    /// What changed since `before`, and the last look taken.
+    private func observedChange(since before: Snapshot) async -> (change: String?, latest: Snapshot?) {
+        var latest: Snapshot?
         for delay: UInt64 in [250_000_000, 500_000_000] {
             try? await Task.sleep(nanoseconds: delay)
-            guard let now = try? await perceiver.observe(wantScreenshot: false) else { return nil }
-            if let change = ScreenDiff.summary(before, now) { return change }
+            guard let now = try? await perceiver.observe(wantScreenshot: false) else { return (nil, latest) }
+            latest = now
+            if let change = ScreenDiff.summary(before, now) { return (change, now) }
         }
-        return nil
+        return (nil, latest)
     }
 
     /// Post-action check: re-observe and see if the expectation is visible in
@@ -572,7 +607,8 @@ public struct AgentLoop {
                    decidedBy: by, confidence: conf, rationale: rat,
                    modelReply: reply,
                    action: action, gate: gate, outcome: out,
-                   verified: ver, escalation: esc)
+                   verified: ver, escalation: esc,
+                   target: action?.axRef.flatMap { StepRecord.Target.of($0, in: obs?.axTree) })
     }
 
     private func gateVerdict(_ label: String) -> GateVerdict {

@@ -102,9 +102,9 @@ public enum ModelPull {
                 progress(line)
             }
         }
-        try proc.run()
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            proc.terminationHandler = { _ in c.resume() }
+        do { try await proc.runUntilExit() } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            throw error
         }
         pipe.fileHandleForReading.readabilityHandler = nil
         guard proc.terminationStatus == 0 else {

@@ -18,8 +18,8 @@ public final class Locked<Value: Sendable>: Sendable {
     }
 }
 
-/// A one-way flag set from any thread: `set()` and `get`, or `claim()` when
-/// exactly one of several racing callbacks may act (resume-once).
+/// A flag set from any thread: `set()` and `get`, or `claim()` when exactly
+/// one of several racing callers may act (resume-once); `clear()` re-arms it.
 public final class AtomicFlag: Sendable {
     private let v = Atomic<Bool>(false)
     public init() {}
@@ -29,4 +29,6 @@ public final class AtomicFlag: Sendable {
     public func claim() -> Bool {
         v.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged
     }
+    /// Back to unset, so the next `claim()` can win again.
+    public func clear() { v.store(false, ordering: .releasing) }
 }
