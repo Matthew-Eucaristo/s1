@@ -14,7 +14,7 @@ struct OnboardingView: View {
     /// Asked once — after that, Continue works with or without the grant.
     @State private var askedForAccess = false
 
-    enum Step: Int, CaseIterable { case welcome, permissions, models, executor, ready }
+    enum Step: Int, CaseIterable { case welcome, permissions, models, ready }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,7 +51,6 @@ struct OnboardingView: View {
                     .buttonStyle(.glassProminent)
                     .controlSize(.large)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(step == .executor && model.cuaInstalling)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 18)
@@ -69,7 +68,6 @@ struct OnboardingView: View {
         case .welcome: welcome
         case .permissions: permissions
         case .models: models
-        case .executor: executor
         case .ready: ready
         }
     }
@@ -174,38 +172,6 @@ struct OnboardingView: View {
     }
     @State private var pickingOther = false
 
-    private var executor: some View {
-        VStack(spacing: 22) {
-            Spacer()
-            header("cursorarrow.rays", model.accent, "Work in the background",
-                   "Cua Driver lets s1 type and press keys without taking over your cursor or focus. Installed with CUA's official installer.")
-            Group {
-                if CuaInstaller.installed {
-                    Label("Installed", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.headline)
-                } else if model.cuaInstalling || !model.cuaInstallLog.isEmpty {
-                    ScrollView {
-                        Text(model.cuaInstallLog.isEmpty ? String(localized: "Installing…") : model.cuaInstallLog)
-                            .font(.caption.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                    .defaultScrollAnchor(.bottom)
-                    .frame(height: 120)
-                    .padding(10)
-                    .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12))
-                } else {
-                    Text("You can skip this — s1 falls back to its own input path.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: 480)
-            Spacer()
-        }
-        .padding(.horizontal, 40)
-    }
-
     private var ready: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -235,8 +201,6 @@ struct OnboardingView: View {
         case .welcome: "Get Started"
         case .permissions: model.permissions.accessibility || askedForAccess ? "Continue" : "Grant Access"
         case .models: model.models.providers.isEmpty ? "Skip for Now" : "Continue"
-        case .executor:
-            CuaInstaller.installed || !model.cuaInstallLog.isEmpty || model.cuaInstalling ? "Continue" : "Install"
         case .ready: "Start Using s1"
         }
     }
@@ -246,8 +210,6 @@ struct OnboardingView: View {
         case .permissions where !model.permissions.accessibility && !askedForAccess:
             askedForAccess = true
             model.requestPermissions()
-        case .executor where !CuaInstaller.installed && model.cuaInstallLog.isEmpty && !model.cuaInstalling:
-            Task { await model.installCuaDriver() }
         case .ready:
             finish()
         default:

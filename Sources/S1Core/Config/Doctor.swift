@@ -1,7 +1,7 @@
 import Foundation
 
 /// `s1 doctor` — checks every standardized file under ~/.s1 plus the
-/// external pieces s1 relies on (keychain keys, cua-driver, srt). File
+/// external pieces s1 relies on (keychain keys, srt). File
 /// structure and referential integrity only: it never hits the network —
 /// `s1 config` already probes endpoints live.
 public enum Doctor {
@@ -19,7 +19,7 @@ public enum Doctor {
     /// a typo the decoder silently ignores.
     static let knownConfigKeys: Set<String> = [
         "providers", "models", "cloudVoice", "vision", "locale", "speak", "vocabulary", "recent",
-        "notchHUD", "voice", "executor", "memory", "sandbox", "onboarded",
+        "notchHUD", "voice", "memory", "sandbox", "onboarded",
         "voiceInterrupt", "vad", "vadSensitivity", "webSearch",
         "structuredOutput", "agentFiles", "mcpServers", "telemetry",
     ]
@@ -55,22 +55,6 @@ public enum Doctor {
         checkSkills(home: home, out: &out)
         checkMemory(home: home, out: &out)
         checkTasks(home: home, out: &out)
-
-        // cua-driver: the executor prefers it when present — but only a
-        // binary whose signature + notarization verify as CUA's.
-        if let bin = CuaDriver.binary() {
-            if let v = try? CuaInstaller.verify() {
-                out.append(Item(.ok, "cua-driver", "\(bin) — \(v.detail)"))
-            } else {
-                out.append(Item(.fail, "cua-driver",
-                    "\(bin) failed signature/notarization checks — reinstall via "
-                    + "`s1 setup --install-cua`; s1 falls back to CGEvent meanwhile"))
-            }
-        } else {
-            out.append(Item(.warn, "cua-driver",
-                "not installed — s1 falls back to CGEvent; `s1 setup --install-cua` "
-                + "or the in-app onboarding installs the official driver"))
-        }
 
         // sandbox-runtime: only meaningful when enabled.
         let cfg = S1Config.load(from: home + "/config.json")

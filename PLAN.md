@@ -90,7 +90,7 @@ Confidence hibrida (model tidak kalibrated): skor match AX + confidence verbal m
 ### 1.7 Dependensi OSS (diputuskan dari lisensi + integrasi)
 | Pakai? | Proyek | Lisensi | Peran |
 |---|---|---|---|
-| **Ya (opsional adapter)** | `cua-driver` (trycua) | MIT | Backend Act alternatif via subprocess/MCP; direkomendasikan nyala saat stabil — background input tanpa curi fokus. Tidak di-embed (Rust daemon), dipanggil sebagai proses. |
+| **Dihapus** | `cua-driver` (trycua) | MIT | Backend Act alternatif via subprocess/MCP; direkomendasikan nyala saat stabil — background input tanpa curi fokus. Tidak di-embed (Rust daemon), dipanggil sebagai proses. |
 | **Ya (referensi + opsional lib)** | Peekaboo / AXorcist | MIT | Acuan desain `see/click/type` + `postToPid`; `PeekabooAutomationKit` bisa jadi adapter Act opsional. |
 | **Ya (opsional)** | FluidAudio | Apache-2.0 | VAD + Parakeet STT + TTS alternatif. |
 | **Ya (opsional)** | WhisperKit | MIT | STT multilingual alternatif (Indonesia OK). |

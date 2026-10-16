@@ -13,12 +13,11 @@ Assets:
 | [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | MIT | Provider marks and wordmarks in Settings and on the website (names and logos belong to their owners) |
 | TypeSafe mark from [typesafe.ai](https://typesafe.ai) | trademark of its owner | TypeSafe provider badge |
 
-Optional runtime tools — installed by the user (or the s1 onboarding
-wizard) with each project's own installer, never bundled into s1:
+Optional runtime tools — installed by the user with each project's own
+installer, never bundled into s1:
 
 | Project | License | Used for |
 |---|---|---|
-| [trycua/cua](https://github.com/trycua/cua) (`cua-driver`, [docs](https://cua.ai/docs/libraries/cua-driver)) | MIT | Recommended executor — types, hotkeys and app launches run in the background without stealing focus |
 | [anthropics/sandbox-runtime](https://github.com/anthropics/sandbox-runtime) (`srt`) | Apache-2.0 | Optional sandbox for shell steps — Seatbelt filesystem rules + network policy (`~/.s1/srt-settings.json`, off by default) |
 
 Evaluated for the voice/act layers and **not vendored** (s1 uses Apple's

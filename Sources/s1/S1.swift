@@ -1151,11 +1151,11 @@ struct UsageCmd: AsyncParsableCommand {
 }
 
 /// `s1 doctor` — every standardized file under ~/.s1 checked at once, plus
-/// the moving parts outside it (keychain keys, cua-driver, srt). Exit 1
+/// the moving parts outside it (keychain keys, srt). Exit 1
 /// when anything fails so scripts can gate on it.
 struct DoctorCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "doctor",
-        abstract: "Check every ~/.s1 file (config, providers + roles, snippets, convert, skills, memory, tasks), cua-driver, sandbox.")
+        abstract: "Check every ~/.s1 file (config, providers + roles, snippets, convert, skills, memory, tasks), sandbox.")
     @Flag(help: "Also fix what's fixable: write missing default files, rebuild the memory index.")
     var fix = false
 
@@ -1190,22 +1190,13 @@ struct DoctorCmd: AsyncParsableCommand {
 }
 
 /// `s1 setup` — the first-run flow in one command: permissions, a config
-/// file with the recommended hosted defaults, cua-driver via CUA's own
-/// installer, API keys into the Keychain, then a doctor pass. Mirrors the
+/// file with the recommended hosted defaults, API keys into the Keychain, then a doctor pass. Mirrors the
 /// app's onboarding wizard so a brew/CLI user gets the same start.
 struct SetupCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "setup",
-        abstract: "First-run setup: permissions, defaults, Cua Driver, API keys — the same flow the app's onboarding runs.")
-    @Flag(help: "Install Cua Driver without asking (CUA's official installer). Interactive runs offer it anyway.")
-    var installCua = false
-    @Flag(help: "Skip the Cua Driver step entirely.")
-    var noCua = false
+        abstract: "First-run setup: permissions, defaults, API keys — the same flow the app's onboarding runs.")
     @Flag(help: "Answer no prompts — write defaults and stop (for scripts).")
     var nonInteractive = false
-
-    func validate() throws {
-        if installCua && noCua { throw ValidationError("--install-cua and --no-cua contradict each other") }
-    }
 
     func run() async throws {
         let interactive = !nonInteractive && isatty(STDIN_FILENO) != 0
@@ -1225,35 +1216,7 @@ struct SetupCmd: AsyncParsableCommand {
         try S1Config.update { $0.onboarded = true }
         print(fresh ? "✓ wrote \(S1Config.path)" : "✓ config.json already yours — marked onboarded, nothing overwritten")
 
-        // 3 · Cua Driver — recommended, via CUA's own installer.
-        if CuaInstaller.installed {
-            print("✓ cua-driver already installed")
-            if interactive {
-                // The driver carries its own TCC identity — without its own
-                // AX/Screen Recording grants every call falls back to CGEvent.
-                do { try await CuaInstaller.grantPermissions { print("  " + $0) } }
-                catch { print("- cua permissions grant skipped: \(error.localizedDescription)") }
-            }
-        } else if noCua {
-            print("- cua-driver skipped (--no-cua); CGEvent executor stays active")
-        } else if installCua || (interactive && askYes("Install Cua Driver? (recommended — CUA's official installer) [Y/n] ")) {
-            do {
-                print("  running: \(CuaInstaller.officialCommand)")
-                try await CuaInstaller.install { print("  " + $0) }
-                print("✓ cua-driver installed — s1's executor will use it")
-                // Same again: the driver needs its own TCC grants (its own
-                // identity), so run CUA's grant flow right after install.
-                try await CuaInstaller.grantPermissions { print("  " + $0) }
-            } catch {
-                FileHandle.standardError.write(
-                    "✗ \(error.localizedDescription)\n  s1 still works — CGEvent is the fallback.\n".data(using: .utf8)!)
-            }
-        } else {
-            print("- cua-driver not installed (run `s1 setup --install-cua` anytime);")
-            print("  recommended for the most faithful typing/keys — CGEvent is the fallback")
-        }
-
-        // 4 · Models — optional; the grammar works without any. The
+        // 3 · Models — optional; the grammar works without any. The
         // recommended pair: TypeSafe Jev judges steps, OpenCode Go reasons.
         if interactive {
             for id in ["typesafe", "opencode"] {
@@ -1276,7 +1239,7 @@ struct SetupCmd: AsyncParsableCommand {
             print("- model prompts skipped (non-interactive) — `s1 connect typesafe` / `s1 connect opencode`")
         }
 
-        // 5 · Doctor — prove the whole layout is sane before saying done.
+        // 4 · Doctor — prove the whole layout is sane before saying done.
         print("\n── doctor ───────────────────────────")
         var fails = 0
         for item in Doctor.run() {

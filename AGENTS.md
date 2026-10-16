@@ -82,6 +82,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
   Settings → Appearance, UserDefaults `accent`). Use it, never hard-coded colors; `onAccent` for text on it.
 - Every user-facing string is localizable; keep `Sources/S1App/id.lproj/Localizable.strings` in sync.
 - Paths: always `S1Home.path` (never `NSHomeDirectory() + "/.s1"`); tests get a temp home automatically.
+- One executor: `CGEventActuator` (AX + CGEvent). No bundled/installed third-party input drivers;
+  outside tools come in through MCP or a custom `Actuator`.
 - Typing: `postKeystrokes` sends real layout key codes (`KeyLayout`), unicode only for the rest.
   Text Input Sources (TIS/TSM) calls must run on the main queue (macOS 27 traps otherwise).
 - Shared mutable state: `Locked<Value>` / `AtomicFlag` (`S1Core/Util/Sync.swift`, built on

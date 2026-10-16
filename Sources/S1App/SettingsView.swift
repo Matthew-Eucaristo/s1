@@ -334,38 +334,6 @@ private struct AdvancedSettings: View {
 
     var body: some View {
         Form {
-            // Read so the Cua rows below redraw after the toggle writes config.
-            let _ = model.configRevision
-            Section {
-                Toggle("Act in the background with Cua Driver", isOn: Binding(
-                    get: { CuaDriver.enabled() },
-                    set: { on in model.updateConfig { $0.executor = on ? nil : "cgevent" } }))
-                    .disabled(CuaDriver.binary() == nil)
-                if CuaDriver.binary() != nil, CuaDriver.enabled() {
-                    LabeledContent("Cua Driver's own permissions") {
-                        Button("Grant…") {
-                            CuaActuator.resetAvailability()
-                            Task.detached { try? await CuaInstaller.grantPermissions() }
-                        }
-                    }
-                }
-                if CuaDriver.binary() == nil {
-                    LabeledContent("Cua Driver isn't installed") {
-                        Button(model.cuaInstalling ? "Installing…" : "Install") {
-                            Task { await model.installCuaDriver() }
-                        }
-                        .disabled(model.cuaInstalling)
-                    }
-                    if let last = model.cuaInstallLog.split(separator: "\n").last {
-                        Text(last).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                Text("Executor")
-            } footer: {
-                FootNote("Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. Cua Driver is a separate app and needs its own Accessibility and Screen Recording; until it has them, s1 acts directly. The safety gate runs first either way.")
-            }
-
             Section {
                 Toggle("Sandbox shell commands", isOn: $model.sandboxSrt)
                     .disabled(Sandbox.srtBinary() == nil)
@@ -525,7 +493,6 @@ private struct SnippetSettings: View {
 
 enum AboutPanel {
     private static let credits: [(String, String, String)] = [
-        ("Cua Driver", "MIT", "Background executor, used when installed"),
         ("swift-argument-parser", "Apache-2.0", "The s1 command line"),
         ("sandbox-runtime (Anthropic)", "Apache-2.0", "Optional shell sandbox"),
         ("Agent Memory Repo (Cognition)", "MIT", "The memory file layout"),

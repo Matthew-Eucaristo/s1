@@ -80,7 +80,6 @@
 "Transcription failed: %@" = "Transkripsi gagal: %@";
 "Busy — stop the current command before dictating." = "Sibuk — hentikan perintah yang berjalan sebelum mendikte.";
 "Dictation copied — press ⌘V. Grant Accessibility to paste automatically." = "Dikte disalin — tekan ⌘V. Beri izin Aksesibilitas agar tertempel otomatis.";
-"Installed — s1 will use it." = "Terinstal — s1 akan memakainya.";
 
 // ---- Steps ----
 "No action" = "Tanpa aksi";
@@ -288,11 +287,6 @@
 "not granted" = "belum diizinkan";
 
 // ---- Settings: Advanced ----
-"Act in the background with Cua Driver" = "Bekerja di latar belakang dengan Cua Driver";
-"Cua Driver isn't installed" = "Cua Driver belum terinstal";
-"Install" = "Instal";
-"Executor" = "Eksekutor";
-"Recommended. Typing, shortcuts and app launches run without stealing focus; anything else uses s1's own input path. Cua Driver is a separate app and needs its own Accessibility and Screen Recording; until it has them, s1 acts directly. The safety gate runs first either way." = "Disarankan. Mengetik, pintasan, dan membuka app berjalan tanpa mengambil fokus; selain itu memakai jalur input s1 sendiri. Cua Driver adalah app terpisah dan butuh izin Aksesibilitas dan Rekaman Layar sendiri; sampai izin itu ada, s1 bertindak langsung. Gerbang keamanan tetap berjalan lebih dulu.";
 "Sandbox shell commands" = "Sandbox perintah shell";
 "Shell Sandbox" = "Sandbox Shell";
 "Runs shell steps inside Anthropic's sandbox-runtime. Install it with `npm install -g @anthropic-ai/sandbox-runtime`." = "Menjalankan langkah shell di dalam sandbox-runtime Anthropic. Instal dengan `npm install -g @anthropic-ai/sandbox-runtime`.";
@@ -331,11 +325,6 @@
 "Voice commands." = "Perintah suara.";
 "Checking work with screenshots." = "Memeriksa hasil dengan tangkapan layar.";
 "Use a different provider…" = "Pakai penyedia lain…";
-"Work in the background" = "Bekerja di latar belakang";
-"Cua Driver lets s1 type and press keys without taking over your cursor or focus. Installed with CUA's official installer." = "Cua Driver membuat s1 bisa mengetik dan menekan tombol tanpa mengambil alih kursor atau fokusmu. Diinstal dengan installer resmi CUA.";
-"Installed" = "Terinstal";
-"Installing…" = "Menginstal…";
-"You can skip this — s1 falls back to its own input path." = "Boleh dilewati — s1 akan memakai jalur inputnya sendiri.";
 "You're all set" = "Semua siap";
 "Try it now: double-tap ⇧ and say “open Notes”. Or type in the s1 window." = "Coba sekarang: ketuk ⇧ dua kali dan ucapkan “buka Notes”. Atau ketik di jendela s1.";
 "Get Started" = "Mulai";
@@ -357,8 +346,6 @@
 // ---- Launcher ----
 "Search apps, files, snippets, 100 usd to idr — or ask s1…" = "Cari app, file, snippet, 100 usd ke idr — atau tanya s1…";
 
-"Cua Driver's own permissions" = "Izin Cua Driver sendiri";
-"Grant…" = "Beri izin…";
 "That didn't work: %@." = "Itu tidak berhasil: %@.";
 "Delete “%@”" = "Hapus “%@”";
 "Replace “%@” with “%@”" = "Ganti “%@” dengan “%@”";

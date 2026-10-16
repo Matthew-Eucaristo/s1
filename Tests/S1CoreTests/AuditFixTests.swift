@@ -102,14 +102,6 @@ private func node(_ ref: String, _ role: String, _ title: String? = nil,
 
 // MARK: - untrusted numbers never trap
 
-@Test func cuaScrollSurvivesHugeAndNonFiniteDeltas() {
-    #expect(CuaDriver.scrollCall(dx: 0, dy: .nan, pid: 1) == nil)
-    #expect(CuaDriver.scrollCall(dx: .infinity, dy: 0, pid: 1) == nil)
-    #expect(CuaDriver.scrollCall(dx: 0, dy: 1e300, pid: 1)?.args.contains(#""amount":10"#) == true)
-    #expect(CuaDriver.json(["x": Double.nan]) == nil)
-    #expect(CuaDriver.json(["x": 1.0]) == #"{"x":1}"#)
-}
-
 @Test func dragWithHugeCoordinatesDoesNotTrap() async throws {
     // Dry-run never posts; the outcome string must still format.
     let a = Action.drag(fromX: 1e300, fromY: 0, toX: 0, toY: 0)

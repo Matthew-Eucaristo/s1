@@ -54,8 +54,6 @@ public struct S1Config: Codable, Sendable {
     public var notchHUD: Bool?
     /// Apple TTS voice identifier ("" / nil = best installed voice per language).
     public var voice: String?
-    /// Action executor: nil/"cua" = Cua Driver when installed (default), "cgevent" = never Cua.
-    public var executor: String?
     /// Persistent memory (~/.s1/memory.md + ~/.s1/memory/ topics); nil = on.
     public var memory: Bool?
     /// Voice interrupt (barge-in): while a run or the TTS reply is in

@@ -3,6 +3,15 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
+## [Unreleased]
+
+### Removed
+- **Cua Driver.** s1 acts through its own AX + CGEvent path only — no extra app,
+  no second set of Accessibility/Screen Recording grants, no `curl | bash`
+  installer. Gone: the onboarding "Work in the background" step, Settings →
+  Advanced → Executor, `s1 setup --install-cua/--no-cua`, the doctor check and
+  the `executor` config key. Tools from other agents plug in through MCP.
+
 ## [0.3.40] - 2026-10-15
 
 ### Added

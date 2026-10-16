@@ -102,8 +102,6 @@ final class AppModel {
     private(set) var permissions = PermissionReport()
     var sandboxSrt = false { didSet { scheduleSave() } }
     var needsOnboarding = false
-    private(set) var cuaInstalling = false
-    private(set) var cuaInstallLog = ""
 
     /// UI language: "system" follows macOS; anything else writes an
     /// AppleLanguages override that resolves at the next launch.
@@ -972,28 +970,6 @@ final class AppModel {
     func markOnboarded() {
         needsOnboarding = false
         updateConfig { $0.onboarded = true }
-    }
-
-    /// Install Cua Driver via CUA's own installer, streaming its log.
-    func installCuaDriver() async {
-        guard !cuaInstalling, !CuaInstaller.installed else { return }
-        cuaInstalling = true
-        cuaInstallLog = ""
-        defer { cuaInstalling = false }
-        do {
-            try await CuaInstaller.install { [weak self] line in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if self.cuaInstallLog.count > 8000 { self.cuaInstallLog = String(self.cuaInstallLog.suffix(4000)) }
-                    self.cuaInstallLog += line + "\n"
-                }
-            }
-            cuaInstallLog += String(localized: "Installed — s1 will use it.") + "\n"
-            // The driver has its own TCC identity; run CUA's grant flow detached.
-            Task.detached { try? await CuaInstaller.grantPermissions { _ in } }
-        } catch {
-            cuaInstallLog += "✗ \(error.localizedDescription)\n"
-        }
     }
 
     func revealRunDir(_ dir: String?) {
