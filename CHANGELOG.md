@@ -3,7 +3,7 @@
 All notable changes to s1. Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 this project is pre-1.0 — breaking changes land in minor versions.
 
-## [Unreleased]
+## [0.3.41] - 2026-10-17
 
 ### Removed
 - **Cua Driver.** s1 acts through its own AX + CGEvent path only — no extra app,
