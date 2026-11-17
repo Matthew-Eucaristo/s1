@@ -1,23 +1,11 @@
 # s1 — agent notes
 
-Voice-first macOS agent. Swift 6 / SwiftPM, macOS 26+ (Liquid Glass), no sandbox.
 Pre-1.0 with a single main user: **breaking changes are fine, no config migrations**.
 
 ## Layout
-- `Sources/S1Core` — everything testable: loop, policies, safety gate, voice, config.
-- `Sources/s1` — CLI (ArgumentParser). `ModelCommands.swift` = providers/roles commands.
-- `Sources/S1App` — SwiftUI app: `AppModel` (agent state, turns), `ModelStore` (providers/roles UI state),
-  `ContentView` (sidebar history + conversation), `ModelsSettings`, `SettingsView`, `OnboardingView`, `NotchHUD`.
 - Website lives in a separate repo: `../s1-landingpage` (Vite + React, Cloudflare Pages `s1-mac`).
 
 ## Model selection (the core design)
-- **Provider** = one account/server, one Keychain key (account = provider id). Catalog in
-  `S1Core/Config/Providers.swift` (`ProviderCatalog`); connected instances in `config.json → providers`.
-- **Role** = `judge | reasoner | transcribe | speak` (one model per job), assigned as `provider/model`
-  in `config.json → models`. Unassigned = off (speech roles = on-device Apple).
-- **Vision is a capability, not a role:** `Models.seesScreen` sends screenshots to the judge if it reads
-  images, else to the reasoner on escalation, else nobody (AX tree only). Catalog `ModelOption.vision`,
-  name heuristic `Models.looksVisual`, global switch `config.vision` / `S1_VISION`.
 - **S2 plans, S1 executes.** The Reasoner turns new tasks into plain `delegate` steps; the grammar runs
   them. The Judge (`JudgedPolicy`) answers typed questions only: `choice` among `Decision.options` when
   several controls match, a score when the grammar is unsure (< 0.9), and a done-check after UI steps.
@@ -42,12 +30,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 - Mac knowledge lives in `S1Core/Policy/MacSkills.swift` (settings pane IDs from
   /System/Library/ExtensionKit, folders, system shortcuts, quick answers); the grammar checks it first
   and the Reasoner prompt includes `MacSkills.guide`. `openURL` only opens settings panes and folders.
-- Web search: `WebSearch.kind(endpoint)` picks native model search → OpenAI Responses `web_search` →
-  `openrouter:web_search` → none (Reasoner prompt says "no web access, may be out of date"). It runs as
-  a visible `.webSearch` step executed by the loop through the Reasoner. Switch: `webSearch` / `S1_WEB`.
 - `Models.resolve/endpoint` is the only resolution path; `Brain.policy()/reasoner()` the only place roles
   become a brain — app, `s1 run`, `s1 serve` all use it. Never add per-role endpoint config again.
-- Connecting a provider auto-fills only *empty* `judge`/`reasoner`; speech is always opt-in.
 - Env: `S1_<ROLE>=provider/model|off`, `S1_<PROVIDER>_KEY`, `S1_VISION=off`, `S1_NUM_CTX`.
 - Provider logos: `Sources/S1App/ProviderLogo.swift` (generated, embedded SVG/PNG templates); the site
   uses the same marks in `s1-landingpage/public/logos`.
@@ -129,9 +113,8 @@ Pre-1.0 with a single main user: **breaking changes are fine, no config migratio
 ## Verify
 - SwiftPM targets macOS 26 (`platforms: [.macOS(.v26)]`). The SDK stamped into the binary decides
   whether macOS applies the Liquid Glass design; check with `vtool -show-build` (must say sdk 26+).
-- `swift build && swift test`.
 - App UI: build a bundle with a separate bundle id (don't clobber the installed S1), back up
-  `~/.s1/config.json` first; the app writes it. `scripts/make-app.sh` builds `dist/S1.app`.
+  `~/.s1/config.json` first; the app writes it.
 - Marketing screenshots: launch with `S1_DEMO=1` (sample turns + history, no hotkeys, 1180x880 window,
   placed on a Retina screen if one exists). Assets must be 2x: on a 1x-only Mac, add a temporary
   HiDPI virtual display (CGVirtualDisplay, DeskPad technique) and capture the window there.
